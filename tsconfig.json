@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    /* NodeNext, not "bundler": the server is plain Node. Relative imports carry a .js extension so what tsc emits is
+       directly runnable. */
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    /* The client imports its stylesheets as side effects; Vite, not tsc, resolves them. */
+    "noUncheckedSideEffectImports": false,
+    "allowJs": true,
+    /* Off here on purpose: the client's plain .js is checked through JSDoc by config/tsconfig.client.json
+       (test/check-client-types.mjs). The e2e specs run under Playwright's own transform and are not part of this project. */
+    "checkJs": false,
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "incremental": true,
+    "tsBuildInfoFile": "node_modules/.cache/tsc/main.tsbuildinfo",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true
+  },
+  "include": ["src", "test", "vite.config.ts", "vitest.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

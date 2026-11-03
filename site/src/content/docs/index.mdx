@@ -1,0 +1,55 @@
+---
+title: tablewalk
+head:
+  - tag: title
+    content: tablewalk — follow the data
+description: A read-only-by-default database browser for SQLite and PostgreSQL. Follow foreign keys both ways, ask in one line, and give a coding agent the same view over MCP.
+template: splash
+prev: false
+next: false
+# Drawn by src/components/Hero.astro: the words, then a real screen under them.
+hero:
+  title: Follow the data.
+  tagline: A database browser for SQLite and PostgreSQL. Every foreign key is a place you can go, in both directions. It reads by default and writes only where you allow it.
+  actions:
+    - text: Get started
+      link: /docs/getting-started/
+      icon: right-arrow
+    - text: Give it to an agent
+      link: /docs/mcp/
+      variant: secondary
+---
+
+<ul class="tw-pillars">
+  <li>
+    <strong>One row, and everything about it</strong>
+    A record shows its fields, the rows it points at, and every table that points back at it, with counts. Click any of them to keep walking.
+  </li>
+  <li>
+    <strong>Ask in one line</strong>
+    <code>invoice total &gt; 500 and customer_id.country_code.name = Australia</code>. The SQL it compiles to is one click away.
+  </li>
+  <li>
+    <strong>Read-only until you say so</strong>
+    Browsing runs in a read-only transaction. Editing is opt-in per connection, and the server enforces it, not the page.
+  </li>
+  <li>
+    <strong>The same view for your agent</strong>
+    <code>tablewalk mydata.sqlite --mcp</code> gives a coding agent twenty-three tools over MCP, and every answer links back to a page you can open.
+  </li>
+</ul>
+
+## Try it in one command
+
+```sh
+npx tablewalk --demo
+```
+
+This builds a sample database in your temp directory and opens it. Nothing of yours is touched. To open your own:
+
+```sh
+npx tablewalk ./data/app.db
+npx tablewalk postgres://user@localhost:5432/appdb
+```
+
+Then go to `http://localhost:4111`, or add `--open` to have it open a browser for you. The server listens on loopback only. [Getting started](/docs/getting-started/) goes from there.

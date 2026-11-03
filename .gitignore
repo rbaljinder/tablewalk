@@ -1,0 +1,25 @@
+node_modules
+dist
+e2e/.tmp
+e2e/.results
+playwright-report
+test-results
+*.tsbuildinfo
+*.log
+.DS_Store
+
+# Local, never committed
+.notes/
+.claude/
+.idea/
+.demo/
+.visual/
+.env
+.env.*
+
+# Desktop build output
+desktop/build
+desktop/release
+
+# The documentation site's generated types (site/, built by npm run build:site)
+site/.astro/

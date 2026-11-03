@@ -1,0 +1,291 @@
+/* Host look: Console. "The database as computer output: the terminal by night, the printout by day."
+
+   Two faces of one idea. By night a phosphor terminal: green on black, a prompt before the query, the current table
+   and the open tab in inverse video, nothing rounded and nothing that eases. By day the same session as it came off a
+   line printer: white fanfold paper banded in pale green every three lines (the green-bar that let a clerk read a
+   row across a wide sheet without losing it), carbon-black ink. Everything is in the code face, set in capitals for
+   the labels; the only weight is semibold.
+
+   By day the sheet says so at a glance: tractor-feed strips punched down both edges of the pane at a desk, a
+   perforation torn under the bar, and the green-bar carried through everything that lists — the tables, a record's
+   fields, its related tables, the palette, a query's result. By night the strips go dark and only the bands remain.
+
+   Bends: the green-bar bands and the feed strips are ground patterns (the refusal list leaves grounds plain; the bands
+   earn it by doing the reading-across a hover cannot on a phone, the strips by being the one mark of the idea). Motion
+   is the theme pace `still`: every chrome duration is zero, which the motion doctrine allows a theme to ask for. */
+@layer theme {
+  :root[data-host-look='console'] {
+    --ground: #fcfcf8;
+    --surface: #fefefb;
+    --raised: #eef3ea;
+    --line: #d3ddd0;
+    --line-strong: #8fa38c;
+    --line-control: #6f856c;
+    --ink: #161b17;
+    --ink-muted: #46524a;
+    --ink-subtle: #4f5b52;
+    --accent: #1f5c33;
+    --accent-ink: #1f5c33;
+    --on-accent: #fefefb;
+    --accent-soft: #1f5c3314;
+    --link: #1f5c33;
+    --focus: #2f8a4c;
+    --status-info: #574090;
+    --greenbar: #d8ebd0;
+    --perforation: #9fb39b;
+    --holes: #e3e8df;
+    --sans: var(--code);
+    --mono: var(--code);
+    --data-face: var(--code);
+    --radius: 0px;
+    --shadow-pop: 0 0 0 1px var(--ink);
+    --shadow-panel: 0 0 0 1px var(--ink);
+    --shadow-modal: 0 0 0 1px var(--ink);
+    --t-hover: 0ms;
+    --t-press: 0ms;
+    --t-popover: 0ms;
+    --t-panel: 0ms;
+    --grid-head-char: 7.9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root[data-host-look='console']:not([data-theme='light']) {
+      --ground: #040805;
+      --surface: #060b07;
+      --raised: #0d1a10;
+      --line: #173321;
+      --line-strong: #2b6a3d;
+      --line-control: #3f9157;
+      --ink: #9cf5b2;
+      --ink-muted: #6cc988;
+      --ink-subtle: #64bd7f;
+      --accent: #9cf5b2;
+      --accent-ink: #c4ffd2;
+      --on-accent: #040805;
+      --accent-soft: #9cf5b21c;
+      --link: #c4ffd2;
+      --focus: #c4ffd2;
+      --status-info: #c8b6ff;
+      --status-good: #9cf5b2;
+      --status-warning: #ffc66b;
+      --status-critical: #ff8a7a;
+      --greenbar: #0b170e;
+      --perforation: #1d3d27;
+      --holes: #040805;
+    }
+  }
+  :root[data-host-look='console'][data-theme='dark'] {
+    --ground: #040805;
+    --surface: #060b07;
+    --raised: #0d1a10;
+    --line: #173321;
+    --line-strong: #2b6a3d;
+    --line-control: #3f9157;
+    --ink: #9cf5b2;
+    --ink-muted: #6cc988;
+    --ink-subtle: #64bd7f;
+    --accent: #9cf5b2;
+    --accent-ink: #c4ffd2;
+    --on-accent: #040805;
+    --accent-soft: #9cf5b21c;
+    --link: #c4ffd2;
+    --focus: #c4ffd2;
+    --status-info: #c8b6ff;
+    --status-good: #9cf5b2;
+    --status-warning: #ffc66b;
+    --status-critical: #ff8a7a;
+    --greenbar: #0b170e;
+    --perforation: #1d3d27;
+    --holes: #040805;
+  }
+
+  :root[data-host-look='console'] {
+    & body {
+      --radius-item: 0px;
+      --radius-pop: 0px;
+      --radius-panel: 0px;
+      --radius-dialog: 0px;
+      font-family: var(--code);
+    }
+    & button,
+    & input,
+    & textarea,
+    & select { font-family: var(--code); }
+
+    /* ---------- the sheet ---------- */
+
+    /* A perforation torn under the bar: where this page left the one before it. */
+    & .topbar { border-bottom: 2px dashed var(--ink); }
+    & .sidebar { border-right: 1px dashed var(--line-strong); }
+
+    /* Tractor feed: a strip of sprocket holes down each edge of the pane and a perforated fold inside it. Desk only;
+       a phone has no width to give the strips. */
+    @media (min-width: 900px) {
+      & .content,
+      & .conn-manager {
+        padding-inline: 30px; /* off-scale: the look's drawn geometry (a wire, a node, a gutter), not spacing */
+        background-color: var(--ground);
+        background-image:
+          radial-gradient(circle at 12px 9px, var(--holes) 4px, var(--perforation) 4.5px 5.5px, transparent 6px),
+          radial-gradient(circle at calc(100% - 12px) 9px, var(--holes) 4px, var(--perforation) 4.5px 5.5px, transparent 6px),
+          linear-gradient(var(--perforation) 50%, transparent 50%),
+          linear-gradient(var(--perforation) 50%, transparent 50%);
+        background-size: 100% 18px, 100% 18px, 1px 6px, 1px 6px;
+        background-position: 0 0, 0 0, 24px 0, calc(100% - 24px) 0;
+        background-repeat: repeat-y, repeat-y, repeat-y, repeat-y;
+        background-attachment: local;
+      }
+    }
+
+    /* ---------- the prompt ---------- */
+
+    & .querybar { position: relative; }
+    & .querybar::before {
+      content: '>';
+      position: absolute; left: var(--space-3h); top: 50%; transform: translateY(-50%);
+      font: 600 var(--text-md) var(--code); color: var(--accent-ink); pointer-events: none;
+    }
+    & #query { padding-left: 28px; background: var(--surface); border-color: var(--ink); caret-color: var(--accent-ink); caret-shape: block; } /* off-scale: the look's drawn geometry (a wire, a node, a gutter), not spacing */
+    & .brand-mark { display: none; }
+    & .brand-name { text-transform: lowercase; font-weight: 600; letter-spacing: 0; }
+    & .brand-name::before { content: '$ '; color: var(--ink-muted); }
+    & .querybar button[type='submit'] { background: var(--ink); color: var(--ground); text-transform: uppercase; letter-spacing: var(--track-caps); }
+    & button.ghost { border-color: var(--ink); color: var(--ink); }
+
+    /* ---------- inverse video for what is current ---------- */
+
+    & #table-list li:nth-child(6n + 1),
+    & #table-list li:nth-child(6n + 2),
+    & #table-list li:nth-child(6n + 3) { background: var(--greenbar); }
+    & #table-list button[aria-current='true'] { background: var(--ink); color: var(--ground); }
+    & #table-list button[aria-current='true'] .rows { color: var(--ground); }
+    & #table-filter { border-color: var(--ink); background: var(--surface); }
+    & .tabs { gap: var(--space-2); border-bottom: 1px dashed var(--ink); }
+    & .tab { text-transform: uppercase; letter-spacing: var(--track-caps); font-size: var(--text-sm); border-bottom: none; padding-inline: var(--space-3); }
+    & .tab[aria-selected='true'] { background: var(--ink); color: var(--ground); }
+    & .tab::before { content: '['; }
+    & .tab::after { content: ']'; }
+    & .tab[aria-selected='true']::before,
+    & .tab[aria-selected='true']::after { content: ' '; white-space: pre; }
+    /* A phone's tab strip keeps the opening bracket for its own use, so it shows neither; and a result's name takes
+       its own line, as a listing's heading does, rather than squeezing its particulars into narrow columns. */
+    @media (max-width: 640px) {
+      & .tab::before,
+      & .tab::after,
+      & .tab[aria-selected='true']::after { content: none; }
+      & .result-head { flex-wrap: wrap; }
+      & .result-head .result-title { flex-basis: 100%; }
+    }
+
+    /* ---------- headings as a listing prints them ---------- */
+
+    & .result-head { border-bottom: 1px dashed var(--ink); }
+    & .result-head .result-title,
+    & .panel > .record-heading,
+    & .diagram-title,
+    & .sql-title,
+    & .conn-head h2 { text-transform: uppercase; letter-spacing: var(--track-caps); }
+    & .result-head .result-title::before,
+    & .panel > .record-heading::before,
+    & .conn-head h2::before { content: '# '; color: var(--ink-muted); }
+    & .panel > .record-heading { border-bottom: 1px dashed var(--ink); background: var(--surface); }
+    & .applist-field-label,
+    & .related-head > .related-title,
+    & .record-child-head .record-child-title { font-family: var(--code); letter-spacing: var(--track-caps); text-transform: uppercase; }
+    & .record-child-head { border-bottom: 1px dashed var(--line-strong); }
+
+    /* ---------- the listing: capitals over a dashed rule, then rows on green-bar, banded in threes ---------- */
+
+    & thead th { background: var(--surface); color: var(--ink); border-bottom: 1px dashed var(--ink); }
+    & th.sorted { color: var(--accent-ink); border-bottom: 1px dashed var(--accent-ink); }
+    & td { border-bottom: none; }
+    & tbody tr:nth-child(6n + 1),
+    & tbody tr:nth-child(6n + 2),
+    & tbody tr:nth-child(6n + 3) { background: var(--greenbar); }
+    & tbody tr:last-child td { border-bottom: 1px dashed var(--line-strong); }
+    & tbody tr.clickable:hover { background: var(--ink); color: var(--ground); } /* motion-ok: an opt-in host look; a hover recolors, nothing moves */
+    & tbody tr.clickable:hover td { color: var(--ground); } /* motion-ok: an opt-in host look; a hover recolors, nothing moves */
+    & td.null { font-style: normal; }
+    & td.reflink { text-decoration: underline; text-underline-offset: 3px; }
+
+    /* A phone keeps a column's moves for when its head holds focus, so a narrow head is its name, not its tools. */
+    @media (hover: none) {
+      & .th-moves { display: none; }
+      & th:focus-within .th-moves { display: contents; }
+    }
+
+    /* ---------- the record: a dump, its fields banded like the listing ---------- */
+
+    & .field { border-left: none; }
+    & .field-group .field:nth-of-type(6n + 1),
+    & .field-group .field:nth-of-type(6n + 2),
+    & .field-group .field:nth-of-type(6n + 3) { background: var(--greenbar); }
+    & .field:hover { background: var(--ink); } /* motion-ok: an opt-in host look; a hover recolors, nothing moves */
+    & .field:hover :is(dt, dd, dd *) { color: var(--ground); } /* motion-ok: an opt-in host look; a hover recolors, nothing moves */
+    & .field dt { text-transform: uppercase; letter-spacing: var(--track-caps); font-size: var(--text-xs); }
+    & .field dt :is(.type, .pk) { text-transform: none; letter-spacing: 0; }
+    & .ref-jump { border-radius: 0; border: 1px dashed var(--ink); background: none; }
+    & .ref-jump-table { text-transform: uppercase; letter-spacing: var(--track-caps); }
+    & .ref-jump-table::before { content: '-> '; }
+    & .related-head { border-bottom: 1px dashed var(--ink); }
+    & .related-item { border-left: none; }
+    & .related-item:nth-child(6n + 1),
+    & .related-item:nth-child(6n + 2),
+    & .related-item:nth-child(6n + 3) { background: var(--greenbar); }
+    & .related-item[aria-selected='true'] { background: var(--ink); }
+    & .related-item[aria-selected='true'] :is(.related-count, .related-table, .related-via) { color: var(--ground); }
+    & .related-count { font-weight: 600; }
+    & .related-count::after { content: '×'; color: var(--ink-muted); margin-left: 2px; font-weight: 400; } /* off-scale: the look's drawn geometry (a wire, a node, a gutter), not spacing */
+    & .related-item[aria-selected='true'] .related-count::after { color: var(--ground); }
+
+    /* ---------- popups: a box drawn in the ink, the cursor line in inverse ---------- */
+
+    & .palette,
+    & .th-menu { border: 1px solid var(--ink); box-shadow: 4px 4px 0 var(--ink); }
+    & .palette-input { border-bottom: 1px dashed var(--ink); }
+    & .palette-item:nth-child(6n + 1),
+    & .palette-item:nth-child(6n + 2),
+    & .palette-item:nth-child(6n + 3) { background: var(--greenbar); }
+    & .palette-item.active { background: var(--ink); }
+    & .palette-item.active :is(.palette-label, .palette-detail, .palette-kind) { color: var(--ground); }
+    & .palette-kind { text-transform: uppercase; letter-spacing: var(--track-caps); }
+    & .th-menu-item:hover, /* motion-ok: an opt-in host look; a hover recolors, nothing moves */
+    & .th-menu-item[data-highlighted] { background: var(--ink); color: var(--ground); }
+    & .th-menu-item:hover *, /* motion-ok: an opt-in host look; a hover recolors, nothing moves */
+    & .th-menu-item[data-highlighted] * { color: var(--ground); }
+    & .th-menu-sep { background: none; border-top: 1px dashed var(--line-strong); }
+    & .th-menu-label { text-transform: uppercase; letter-spacing: var(--track-caps); }
+
+    /* ---------- the SQL pane: a session ---------- */
+
+    & .sql-head { border-bottom: 1px dashed var(--ink); }
+    & .sql-input { background: var(--surface); border: 1px solid var(--ink); caret-color: var(--accent-ink); caret-shape: block; }
+    & .sql-stats::before { content: '-- '; }
+
+    /* ---------- the connections, the landing, the schema ---------- */
+
+    & .conn-list { border: 1px solid var(--ink); }
+    & .conn-row:nth-child(6n + 1),
+    & .conn-row:nth-child(6n + 2),
+    & .conn-row:nth-child(6n + 3) { background: var(--greenbar); }
+    & .conn-row:is(.active, .cursor) { background: var(--ink); color: var(--ground); }
+    & .conn-row:is(.active, .cursor) * { color: var(--ground); }
+    & .shape { border: 1px dashed var(--ink); background: var(--surface); }
+    & .shape-label { text-transform: uppercase; letter-spacing: var(--track-caps); }
+    & .diagram-viewport { border: 1px dashed var(--ink); }
+    & .node > rect { rx: 0; ry: 0; stroke: var(--ink); }
+    & .node-head text { text-transform: uppercase; }
+    & .edge { stroke-dasharray: 4 3; stroke: var(--ink-muted); }
+    & .zoom-controls { border: 1px solid var(--ink); box-shadow: none; }
+
+    /* ---------- states: what a job prints when it stops ---------- */
+
+    & .errors { background: var(--surface); border-block: 1px dashed var(--status-critical); }
+    & .errors p::before { content: '?ERR  '; font-weight: 700; }
+    & .empty h1::before { content: '** '; color: var(--ink-muted); }
+    & .empty h1::after { content: ' **'; color: var(--ink-muted); }
+    & :is(.grid-inset, .table-wrap) > .note { text-transform: uppercase; letter-spacing: var(--track-caps); color: var(--ink); }
+    & :is(.grid-inset, .table-wrap) > .note::before { content: '** '; color: var(--ink-muted); }
+    & :is(.grid-inset, .table-wrap) > .note::after { content: ' **'; color: var(--ink-muted); }
+    & .empty h1 { text-transform: uppercase; letter-spacing: var(--track-caps); font-size: var(--text-lg); }
+  }
+}

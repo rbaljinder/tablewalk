@@ -1,0 +1,179 @@
+# The suite, on every push and pull request.
+#
+# One Node version. tablewalk pins Node 24 because `node:sqlite` is built in there — testing a matrix of versions it does
+# not support would be a matrix of the same failure.
+#
+# The framework (@mistriwork/engine, kit, ui) is installed from npm at the exact versions package.json pins; the lockfile
+# says which tarballs. A Renovate pin bump runs this whole workflow, which is what proves the new version.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch: {} # run the suite on a branch with no pull request to open
+
+# One run per branch, so the newest push is not queued behind superseded ones. A tag's run is never cancelled: the release
+# waits on it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  # Types, lint, the client's own checks, the import boundary, formatting.
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+      # `npm ci`, not `npm install`: exactly what the lockfile says.
+      - run: npm ci
+      - run: npm run check
+
+  # The Node suite against a real Postgres, then the component tests.
+  node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: tablewalk
+          POSTGRES_DB: tablewalk
+        ports: ['5432:5432']
+        # Without a health check the suite starts before the server accepts connections, and the failure looks like a bug
+        # rather than a race.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TABLEWALK_TEST_PG: postgres://postgres:tablewalk@127.0.0.1:5432/tablewalk
+      # A skip is a decision here, not a default. Without this a misspelled variable or a service that failed to start
+      # would leave the live tests silently unrun and the job green.
+      TABLEWALK_REQUIRE_LIVE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # The live blocks read whatever table they find rather than hardcoding one; a fresh service container has nothing to
+      # read, so it gets one small table first.
+      - run: npm run seed:live
+      - run: npm test
+      - run: npm run test:components
+
+  # The browser suite, in Chromium, against the built client.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      # Two cores and 7 GB are not a developer's machine.
+      TABLEWALK_E2E_WORKERS: '2'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - run: npm run smoke
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: e2e-results
+          path: e2e/.results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # What a user is sent, not what a contributor serves: the compiled server and the bundled page, compressed,
+  # content-named and cached, under their first-paint budgets (scripts/bundle-budget.mjs, run by the build).
+  built:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build && npm run test:built:browser
+
+  # What a user installs: the production dependency tree in the lockfile, audited against the npm advisory database. A high
+  # or critical advisory fails the run. `npm audit` reads the lockfile, so nothing is installed.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - run: npm run audit:prod
+
+  # Built on every push, not only on release, because a Dockerfile that has stopped building is worth knowing about before
+  # the day you want to ship it.
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: docker build -t tablewalk:ci .
+      - name: Create the image smoke fixture
+        run: |
+          mkdir -p "$RUNNER_TEMP/tablewalk-image-probe"
+          python3 - <<'PY'
+          import json, os, sqlite3
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'tablewalk-image-probe'
+          with sqlite3.connect(root / 'probe.db') as db:
+              db.execute('CREATE TABLE item (id INTEGER PRIMARY KEY, name TEXT NOT NULL)')
+              db.execute("INSERT INTO item VALUES (1, 'image smoke')")
+          (root / 'tablewalk.json').write_text(json.dumps({
+              'connections': [{'name': 'probe', 'url': '/config/probe.db'}]
+          }))
+          PY
+      - name: It starts, and answers
+        run: |
+          docker run -d --name probe -p 127.0.0.1:4111:4111 \
+            -v "$RUNNER_TEMP/tablewalk-image-probe:/config:ro" tablewalk:ci
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:4111/api/connections >/dev/null && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4111/api/connections | head -c 200
+          curl -fsS http://127.0.0.1:4111/api/schema | python3 -c 'import json,sys; assert any(t["name"] == "item" for t in json.load(sys.stdin)["tables"])'
+      - name: Stop the image smoke server
+        if: always()
+        run: docker rm -f probe
+
+  # The desktop app packs, unsigned, on macOS: electron-builder's `--dir` target assembles the app without the signing or
+  # the notarization (those are desktop-release.yml's). The macOS runner bills at 10x, so this runs for a release tag or a
+  # manual dispatch, never on a push.
+  desktop:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm ci
+        working-directory: desktop
+      - run: npm run dist:dir
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'

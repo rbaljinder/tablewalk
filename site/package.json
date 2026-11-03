@@ -1,0 +1,17 @@
+{
+  "name": "tablewalk-site",
+  "private": true,
+  "description": "tablewalk.dev: the database browser's documentation, an Astro Starlight site built into dist/.",
+  "type": "module",
+  "scripts": {
+    "build": "astro build",
+    "dev": "astro dev --host 127.0.0.1 --port 4716",
+    "preview": "astro preview --host 127.0.0.1 --port 4716"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.42.0",
+    "astro": "7.4.2",
+    "sharp": "0.35.5",
+    "starlight-links-validator": "^0.26.0"
+  }
+}

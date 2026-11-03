@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 140,
+  "singleQuote": true,
+  "semi": true,
+  "trailingComma": "all",
+  "tabWidth": 2,
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/.astro/**",
+    ".notes/**",
+    ".demo/**",
+    ".idea/**",
+    ".claude/**",
+    ".visual/**",
+    "e2e/.tmp/**"
+  ]
+}

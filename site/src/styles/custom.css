@@ -1,0 +1,326 @@
+/* Starlight owns layout and interaction. tablewalk dresses it in the browser's own look: warm paper, warm greys,
+   one green for links, focus and the primary action, and data set in mono. Bold comes from type and contrast, not
+   from color. Unlayered, so these win over Starlight's @layer rules. */
+
+/* Inter's variable Latin subset (SIL Open Font License beside it in public/fonts), and a fallback cut to its
+   measure so the swap moves almost nothing. */
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Inter Fallback';
+  font-weight: 100 500;
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans'), local('LiberationSans'), local('Helvetica');
+  size-adjust: 106.1%;
+  ascent-override: 91.3%;
+  descent-override: 22.73%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'Inter Fallback';
+  font-weight: 600 900;
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold'), local('LiberationSans-Bold'), local('Helvetica Bold');
+  size-adjust: 101.6%;
+  ascent-override: 95.35%;
+  descent-override: 23.74%;
+  line-gap-override: 0%;
+}
+
+/* By night (Starlight's default scheme): the browser's dark ground and its light green. */
+:root {
+  --sl-font: Inter, 'Inter Fallback', system-ui, sans-serif;
+  --sl-font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+
+  --sl-color-white: #f1efea;
+  --sl-color-gray-1: #e0ddd6;
+  --sl-color-gray-2: #c2bdb4;
+  --sl-color-gray-3: #99938a;
+  --sl-color-gray-4: #6a655e;
+  --sl-color-gray-5: #2e2d2a;
+  --sl-color-gray-6: #1d1f21;
+  --sl-color-gray-7: #191b1d;
+  --sl-color-black: #16181a;
+
+  --sl-color-accent-low: #12332c;
+  --sl-color-accent: #5fc9ad;
+  --sl-color-accent-high: #a9e6d5;
+
+  --sl-color-bg-nav: var(--sl-color-black);
+  --sl-color-bg-sidebar: var(--sl-color-black);
+  --sl-color-bg-inline-code: var(--sl-color-gray-6);
+  --sl-color-hairline: #2a2c2e;
+  --sl-color-hairline-light: #2f3133;
+  --sl-color-hairline-shade: #0e0f10;
+
+  --tw-surface: #1c1e20;
+  --tw-line: #2f3133;
+  --tw-ink-strong: #5fc9ad;
+  --tw-on-strong: #0f1a17;
+  --tw-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 24px 48px -24px rgb(0 0 0 / 0.7);
+  --tw-code-bg: #191b1d;
+  --tw-code-bar: #1d1f21;
+
+  --sl-text-h1: 2rem;
+  --sl-text-h2: 1.5rem;
+  --sl-text-h3: 1.25rem;
+  --sl-text-h4: 1.0625rem;
+  --sl-line-height: 1.7;
+  --sl-line-height-headings: 1.2;
+  --sl-sidebar-pad-x: 1.25rem;
+}
+/* By day: the browser's warm paper, its ink and its green. */
+:root[data-theme='light'] {
+  --sl-color-white: #24211c;
+  --sl-color-gray-1: #2f2b25;
+  --sl-color-gray-2: #48433c;
+  --sl-color-gray-3: #5c574f;
+  --sl-color-gray-4: #8f8981;
+  --sl-color-gray-5: #d9d5cd;
+  --sl-color-gray-6: #f2f0eb;
+  --sl-color-gray-7: #f7f6f2;
+  --sl-color-black: #fbfaf8;
+
+  --sl-color-accent-low: #e3f1ec;
+  --sl-color-accent: #1d6a5a;
+  --sl-color-accent-high: #124438;
+
+  --sl-color-bg-nav: var(--sl-color-black);
+  --sl-color-bg-sidebar: var(--sl-color-black);
+  --sl-color-bg-inline-code: var(--sl-color-gray-6);
+  --sl-color-hairline: #e7e3dc;
+  --sl-color-hairline-light: #ebe8e1;
+  --sl-color-hairline-shade: #e2ded6;
+
+  --tw-surface: #ffffff;
+  --tw-line: #e2ded6;
+  --tw-ink-strong: #1d6a5a;
+  --tw-on-strong: #ffffff;
+  --tw-shadow: 0 1px 2px rgb(36 33 28 / 0.05), 0 24px 48px -24px rgb(36 33 28 / 0.22);
+  --tw-code-bg: #f7f6f2;
+  --tw-code-bar: #f2f0eb;
+}
+@media (min-width: 50em) {
+  :root {
+    --sl-text-h1: 2.5rem;
+    --sl-text-h2: 1.625rem;
+    --sl-text-h3: 1.3125rem;
+    --sl-text-h4: 1.125rem;
+  }
+}
+
+body {
+  font-feature-settings: 'cv11', 'ss01';
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ---------- Type ---------- */
+h1#_top { font-weight: 650; letter-spacing: -0.03em; line-height: 1.1; }
+.sl-markdown-content :is(h2, h3, h4, h5) { font-weight: 620; letter-spacing: -0.018em; color: var(--sl-color-white); }
+.sl-markdown-content h2 { margin-top: 2.75rem; }
+.sl-markdown-content :is(h3, h4) { margin-top: 2rem; }
+.sl-markdown-content a:not(.sl-link-button):not(:where(.not-content *)) {
+  color: var(--sl-color-text-accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+}
+.sl-markdown-content a:not(.sl-link-button):not(:where(.not-content *)):hover { text-decoration-color: currentColor; }
+.sl-markdown-content :not(pre) > code:not(:where(.not-content *)) {
+  padding: 0.1em 0.35em;
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 4px;
+  font-size: 0.875em;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Tables: ruled, quiet, a shade behind the head. A wide one scrolls inside its own box, never the page. */
+.sl-markdown-content table { font-size: var(--sl-text-sm); border-collapse: collapse; }
+.sl-markdown-content :is(th, td) { border: 0; border-bottom: 1px solid var(--sl-color-hairline); padding: 0.55rem 0.9rem; }
+.sl-markdown-content th {
+  background: var(--sl-color-gray-7);
+  color: var(--sl-color-white);
+  font-weight: 600;
+  border-bottom-color: var(--sl-color-gray-5);
+}
+.sl-markdown-content tr:nth-child(2n) { background: transparent; }
+/* A command or a flag in the first column stays on one line where the column has room. */
+.sl-markdown-content td:first-child code { white-space: nowrap; }
+@media (max-width: 40rem) {
+  .sl-markdown-content td:first-child code { white-space: normal; }
+  .sl-markdown-content :is(th, td) { padding: 0.5rem 0.6rem; }
+}
+
+/* ---------- The header: page-colored, a hairline under it ---------- */
+.header { border-bottom: 1px solid var(--sl-color-hairline); }
+.site-title { font-weight: 680; letter-spacing: -0.035em; font-size: 1.125rem; color: var(--sl-color-white); gap: 0.5rem; }
+.site-title img { height: 1.1rem; width: auto; }
+site-search button[data-open-modal] { border-radius: 8px; border-color: var(--sl-color-hairline-light); }
+
+/* ---------- The sidebar: small group heads, a soft pill for here ---------- */
+.sidebar-content .top-level > li > details > summary .large {
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+}
+.sidebar-content .top-level > li + li { margin-top: 1rem; }
+.right-sidebar-panel h2 {
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+}
+.sidebar-content a { border-radius: 6px; }
+.sidebar-content [aria-current='page'],
+.sidebar-content [aria-current='page']:hover,
+.sidebar-content [aria-current='page']:focus {
+  color: var(--sl-color-text-accent);
+  background-color: var(--sl-color-accent-low);
+}
+
+/* ---------- Buttons: square-ish, green for the one that matters ---------- */
+.sl-link-button { border-radius: 8px; font-weight: 600; }
+.sl-link-button.primary { background: var(--tw-ink-strong); border-color: var(--tw-ink-strong); color: var(--tw-on-strong); }
+.sl-link-button.primary:hover { color: var(--tw-on-strong); opacity: 0.9; }
+.sl-link-button.secondary { border-color: var(--sl-color-gray-5); color: var(--sl-color-white); background: var(--tw-surface); }
+.sl-link-button.secondary:hover { border-color: var(--sl-color-gray-4); }
+@media (min-width: 50rem) { .sl-link-button { padding: 0.75rem 1.25rem; } }
+
+/* ---------- The home ---------- */
+:root[data-has-hero] { --sl-content-width: 68rem; }
+[data-has-hero] .content-panel { padding-bottom: 4rem; }
+
+.tw-hero { display: grid; gap: 2.25rem; padding-block: 2rem 1rem; }
+.tw-hero-copy { display: grid; justify-items: center; gap: 1rem; text-align: center; }
+.tw-hero h1 {
+  max-width: 22ch;
+  margin: 0;
+  font-size: clamp(1.75rem, 0.8rem + 4vw, 3.25rem);
+  text-wrap: balance;
+  line-height: 1.05;
+  color: var(--sl-color-white);
+}
+.tw-hero-tagline { max-width: 60ch; margin: 0; font-size: clamp(1.0625rem, 0.95rem + 0.5vw, 1.25rem); line-height: 1.55; color: var(--sl-color-gray-2); }
+/* The whole deployment, as one line to copy. */
+.tw-hero-command {
+  max-width: 100%;
+  margin: 0;
+  padding: 0.6rem 1rem;
+  overflow-x: auto;
+  border: 1px solid var(--tw-line);
+  border-radius: 8px;
+  background: var(--tw-code-bg);
+  font: 500 0.9375rem/1.4 var(--__sl-font-mono);
+  color: var(--sl-color-white);
+  white-space: nowrap;
+}
+.tw-hero-command span { color: var(--sl-color-gray-3); user-select: none; }
+.tw-hero-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.75rem; margin-top: 0.25rem; }
+.tw-hero-version { margin: 0; font-family: var(--__sl-font-mono); font-size: 0.75rem; letter-spacing: 0.04em; color: var(--sl-color-gray-3); }
+.tw-notfound { display: grid; gap: 0.75rem; justify-items: center; padding-block: 4rem; text-align: center; color: var(--sl-color-gray-2); }
+.tw-notfound h1, .tw-notfound p { margin: 0; }
+@media (min-width: 50rem) { .tw-hero { padding-block: 2.75rem 1.5rem; gap: 2.75rem; } }
+
+/* A screen framed as the window it runs in: a hairline, a quiet bar, a long soft shadow. */
+.tw-window {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--tw-line);
+  border-radius: 12px;
+  background: var(--tw-surface);
+  box-shadow: var(--tw-shadow);
+}
+.tw-window-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 2.25rem;
+  padding-inline: 0.875rem;
+  border-bottom: 1px solid var(--tw-line);
+  background: var(--sl-color-gray-7);
+}
+.tw-window-bar span { width: 10px; height: 10px; border-radius: 50%; background: var(--sl-color-gray-5); }
+.tw-window-bar b {
+  position: absolute;
+  inset-inline: 0;
+  margin: auto;
+  width: max-content;
+  max-width: 60%;
+  overflow: hidden;
+  font: 400 0.75rem/1 var(--__sl-font-mono);
+  color: var(--sl-color-gray-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.tw-window img,
+.sl-markdown-content .tw-window img { display: block; width: 100%; max-width: 100%; height: auto; border: 0; border-radius: 0; }
+@media (max-width: 40rem) { .tw-window-bar b { display: none; } }
+
+/* The pillars: short lines, two or four across, no boxes. */
+.tw-pillars { display: grid; gap: 1.25rem 2rem; margin: 2.5rem 0 0 !important; padding: 0; list-style: none; font-size: var(--sl-text-sm); line-height: 1.55; color: var(--sl-color-gray-2); }
+.tw-pillars li { margin: 0; padding: 0; }
+.tw-pillars strong { display: block; margin-bottom: 0.2rem; font-size: var(--sl-text-base); font-weight: 620; letter-spacing: -0.01em; color: var(--sl-color-white); }
+.tw-pillars a { color: var(--sl-color-text-accent); text-decoration: none; white-space: nowrap; }
+.tw-pillars a:hover { text-decoration: underline; }
+.tw-pillars code { font-size: 0.9em; }
+@media (min-width: 40rem) { .tw-pillars { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 64rem) { .tw-pillars { grid-template-columns: 1fr 1fr 1fr 1fr; } }
+
+/* The home's sections: a larger head, room above it. */
+[data-has-hero] .sl-markdown-content h2 {
+  margin-top: 4.5rem;
+  font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.125rem);
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+[data-has-hero] .sl-markdown-content h2 + * { margin-top: 1rem; }
+[data-has-hero] .sl-markdown-content > p { max-width: 68ch; }
+
+/* Screenshots: full column width, a quiet frame. */
+.sl-markdown-content img { max-width: 100%; height: auto; border: 1px solid var(--sl-color-hairline); border-radius: 6px; }
+
+/* Search sits with the GitHub and theme controls at the right. */
+@media (min-width: 50rem) {
+  .header > div:nth-child(2) { justify-content: flex-end; }
+}
+
+/* The lightbox (src/lightbox.ts): each content image is a button that opens it whole. */
+.sl-markdown-content .tw-zoom {
+  display: block; max-width: 100%; margin: 0; padding: 0; border: 0; background: none;
+  color: inherit; font: inherit; cursor: zoom-in; border-radius: 6px;
+}
+.sl-markdown-content .tw-zoom:focus-visible { outline: 2px solid var(--sl-color-accent); outline-offset: 3px; }
+.sl-markdown-content .tw-zoom img { display: block; }
+.tw-lightbox {
+  box-sizing: border-box; width: 100vw; max-width: none; height: 100dvh; max-height: none;
+  margin: 0; padding: 3rem 1rem 1rem; border: 0; background: transparent;
+  display: none; align-items: center; justify-content: center; overflow: auto; cursor: zoom-out;
+}
+.tw-lightbox[open] { display: flex; }
+.tw-lightbox::backdrop { background: rgb(0 0 0 / 0.82); }
+.tw-lightbox img {
+  display: block; width: auto; height: auto; max-height: calc(100dvh - 4rem); margin: auto;
+  border-radius: 6px; background: var(--sl-color-bg); cursor: default;
+}
+.tw-lightbox-close {
+  position: fixed; top: 0.75rem; right: 0.75rem; display: grid; place-items: center;
+  width: 2.5rem; height: 2.5rem; padding: 0; border: 1px solid var(--sl-color-gray-5);
+  border-radius: 999px; background: var(--sl-color-black); color: var(--sl-color-white); cursor: pointer;
+}
+.tw-lightbox-close:focus-visible { outline: 2px solid var(--sl-color-accent); outline-offset: 2px; }
+.tw-lightbox-open { overflow: hidden; }
+@media (prefers-reduced-motion: no-preference) {
+  .tw-lightbox[open], .tw-lightbox[open]::backdrop { animation: tw-lightbox-in 160ms ease-out; }
+  @keyframes tw-lightbox-in { from { opacity: 0; } }
+}

@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "incremental": false,
+    "tsBuildInfoFile": null,
+    /* No declarations or source maps: nothing imports this package (its only export is package.json), and Node ignores a
+       map unless started with --enable-source-maps. A stack trace names compiled JavaScript; the build is reproducible
+       from the tag. */
+    "declaration": false,
+    "sourceMap": false,
+    /* The comments say why, and they ship: whoever reads dist/ reads the same reasons the repository does. */
+    "removeComments": false
+  },
+  /* The client is Vite's: `vite build` bundles src/client into dist/client. */
+  "include": ["src/server", "src/shared"],
+  "exclude": ["src/client", "src/**/*.test.ts", "src/**/*.test.tsx"]
+}

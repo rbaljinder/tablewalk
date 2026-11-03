@@ -1,0 +1,51 @@
+---
+/* The home's opening: what tablewalk is, the one command that runs it, the two ways in, and a real screen under them,
+   framed as the window it runs in. Starlight's own hero puts a square picture beside the words; this override
+   (astro.config.mjs) draws the same front matter with the proof underneath. Only the home has a hero. */
+import { LinkButton } from '@astrojs/starlight/components';
+import { version } from '../../../package.json';
+
+const { data } = Astro.locals.starlightRoute.entry;
+/* Starlight draws its 404 through the splash template, so it reaches this override: say the page is not found, plainly. */
+const notFound = Astro.locals.starlightRoute.id === '404';
+/* Read from the package at build time, never typed: the release the docs describe. A pre-release says so. */
+const release = /-(?:rc|beta|alpha)/.test(version) ? `${version} · release candidate` : version;
+const { title = data.title, tagline, actions = [] } = data.hero || {};
+const alt =
+  'A customer record in tablewalk: Harbour Freight, its fields, its six invoices listed under them, and a Related rail beside them counting every table that points at it.';
+---
+
+{
+  notFound && (
+    <div class="tw-notfound">
+      <h1 id="_top" data-page-title>404</h1>
+      <p>This page does not exist, or has moved.</p>
+      <p><a href="/">Home</a> · <a href="/docs/getting-started/">Getting started</a></p>
+    </div>
+  )
+}
+{!notFound && (
+<div class="tw-hero">
+  <div class="tw-hero-copy">
+    <h1 id="_top" data-page-title set:html={title} />
+    {tagline && <p class="tw-hero-tagline" set:html={tagline} />}
+    <p class="tw-hero-command"><span>$ </span>npx tablewalk mydata.sqlite</p>
+    {
+      actions.length > 0 && (
+        <div class="tw-hero-actions">
+          {actions.map(({ attrs: { class: className, ...attrs } = {}, icon, link: href, text, variant }) => (
+            <LinkButton {href} {variant} icon={icon?.name} class:list={[className]} {...attrs}>
+              {text}
+            </LinkButton>
+          ))}
+        </div>
+      )
+    }
+    <p class="tw-hero-version">{release}</p>
+  </div>
+  <figure class="tw-window not-content">
+    <div class="tw-window-bar" aria-hidden="true"><span></span><span></span><span></span><b>localhost:4111/demo/customer/~1</b></div>
+    <img src="/shots/record.webp" {alt} width="1280" height="800" loading="eager" fetchpriority="high" />
+  </figure>
+</div>
+)}

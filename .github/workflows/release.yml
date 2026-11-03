@@ -1,0 +1,180 @@
+# Publish on a version tag.
+#
+# Does nothing until a tag matching `v*` is pushed, so it is safe to sit here unused. `npm version prerelease --preid rc &&
+# git push --follow-tags` is what starts it.
+#
+# The shape of this file is the whole safety argument, so it is worth stating:
+#
+#   preflight ──► ci-green ──► npm (irreversible) ──► image
+#
+#   1. preflight is cheap and runs first, so the mistakes that are common and permanent — a tag that does not match
+#      package.json, a version already on npm, a build that drops a file from the tarball — fail in seconds.
+#   2. npm publish is the one irreversible step, so it waits for a green CI run on this very commit. The check is on the
+#      SHA, so "it passed earlier" is only accepted when earlier was this commit.
+#   3. the image is built and pushed only *after* npm has published, so a failure there can never leave an image at a
+#      version npm does not have.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+# One release at a time, and never cancelled mid-flight: interrupting a job between `npm publish` and `docker push` is
+# exactly the half-release the ordering above exists to avoid.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # Cheap, and first. Everything else waits on it.
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: The tag matches package.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v$tag does not match package.json $pkg — bump one to match the other" >&2
+            exit 1
+          fi
+          echo "releasing $tag"
+
+      - name: This version is not already on npm
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          ver="$(node -p "require('./package.json').version")"
+          code="$(curl -sS -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/$name/$ver" || true)"
+          if [ "$code" = "200" ]; then
+            echo "::error::$name@$ver is already published — a version is permanent, so bump it" >&2
+            exit 1
+          fi
+          echo "$name@$ver is unpublished (registry said $code)"
+
+      - run: npm ci
+
+      - name: The tarball has what it needs and nothing it should not
+        run: |
+          npm run build
+          npm pack --dry-run --json > /tmp/pack.json
+          node -e '
+            const [pack] = JSON.parse(require("fs").readFileSync("/tmp/pack.json", "utf8"));
+            const files = pack.files.map((file) => file.path);
+            const need = ["package.json", "README.md", "LICENSE", "dist/server/index.js", "dist/client/index.html", "dist/client/index.workbench.html"];
+            const missing = need.filter((file) => !files.includes(file));
+            const stray = files.filter((file) => !/^(dist\/|package\.json$|README\.md$|LICENSE$)/.test(file));
+            if (missing.length || stray.length) {
+              console.error(`::error::the tarball is missing ${missing.join(", ") || "nothing"} and carries ${stray.join(", ") || "nothing"} it should not`);
+              process.exit(1);
+            }
+            console.log(`${files.length} files, ${(pack.size / 1024).toFixed(0)} KB packed`);
+          '
+
+  # The release does not re-run the suites: it requires that CI already passed on this exact commit. A tag points at one
+  # commit; the CI run for that commit (a push to main, the pull request's head, or the tag's own run) is the record that
+  # it was green. No run, a running one, or a failed one stops the release: re-run CI on the commit, or tag the commit CI
+  # ran on.
+  ci-green:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      actions: read
+    steps:
+      - name: CI succeeded on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The tag's own CI run may still be going: wait for it, up to the job's limit.
+          for attempt in $(seq 1 110); do
+            runs="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&per_page=100" \
+              --jq '[.workflow_runs[] | {id, event, status, conclusion}]')"
+            ok="$(echo "$runs" | jq '[.[] | select(.status == "completed" and .conclusion == "success")] | length')"
+            if [ "$ok" -ge 1 ]; then
+              echo "CI passed on ${GITHUB_SHA} ($ok run)"
+              exit 0
+            fi
+            pending="$(echo "$runs" | jq '[.[] | select(.status != "completed")] | length')"
+            if [ "$pending" -eq 0 ] && [ "$attempt" -gt 2 ]; then
+              break
+            fi
+            echo "waiting for CI on ${GITHUB_SHA} ($pending running)"
+            sleep 30
+          done
+          echo "$runs"
+          echo "::error::no successful CI run for ${GITHUB_SHA} — let CI pass on this commit (or re-run it), then re-push the tag" >&2
+          exit 1
+
+  # The irreversible step, gated on CI having passed this commit.
+  npm:
+    needs: [ci-green]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required for npm trusted publishing over OIDC and for the provenance attestation: this is what lets `npm publish`
+      # authenticate without a stored token. The prerequisite is on npm's side — a trusted publisher configured for
+      # `tablewalk` naming this repository and this workflow file (release.yml).
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm run build
+      # A prerelease (1.0.0-rc.13) goes out under `next`, never `latest`: npm refuses one without a --tag.
+      - run: |
+          tag="$(node -p "require('./package.json').version.includes('-') ? 'next' : 'latest'")"
+          npm publish --access public --provenance --tag "$tag"
+
+  # Built and pushed only after npm has published, so the image can never name a version the registry does not have.
+  image:
+    needs: [npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # What lets the workflow push to ghcr.io with the token GitHub already provides. No secret to create, store or rotate.
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # arm64 too (Graviton and Apple silicon hosts). QEMU runs only the runtime stage's few commands; the build stage
+      # runs natively (Dockerfile).
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Both tags, deliberately: the version is what someone pins in a compose file and must never move, and `latest` is
+      # what someone types by hand — so `latest` only moves for a full release. A pre-release tag (-rc, -beta, anything
+      # with a hyphen) ships its version and leaves `latest` where it was.
+      - name: Build and push
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          image="ghcr.io/${{ github.repository_owner }}/tablewalk"
+          tags=(-t "$image:$version")
+          if [[ "$version" != *-* ]]; then
+            tags+=(-t "$image:latest")
+          else
+            echo "Pre-release $version: latest left where it was."
+          fi
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --label "org.opencontainers.image.version=$version" \
+            --label "org.opencontainers.image.licenses=MIT" \
+            "${tags[@]}" --push .
+          echo "Pushed $image:$version"
+          echo "A new package on ghcr.io starts private — make it public from the package page, or a pull fails with 'not found'."

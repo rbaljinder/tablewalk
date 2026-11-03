@@ -1,0 +1,413 @@
+/* Host look: Blueprint. "Every foreign key is a drawn connection."
+
+   The browser's one idea is the walk — a foreign key is a place you can go — and this look draws it. The page is a
+   drawing sheet: drafting paper ruled in minor and major squares, framed in the ink, every label lettered in condensed
+   technical capitals. The trail is a wire between nodes; a reference ends in a node; a record's references are
+   balloons on a dashed run to the table they land on; its related tables hang from a trunk; a child list is joined to
+   its record by an elbow; a result and a record are named in a title block. The schema itself is drawn as a real
+   blueprint, white lines on prussian blue, in both modes. Whiteprint by day, cyanotype by night. Square, flat, still.
+
+   Bends, each on purpose:
+   - A drafting grid on the ground (the refusal list leaves grounds plain; Ledger's graph paper is the precedent).
+   - The diagram is a dark sheet on a light page: a blueprint is read as white on blue, as the lightbox's photograph is
+     judged on dark and a QR code is printed dark on white in every look.
+   - Lines that join rows and tables to their record: they say a relationship, never that something is current, so
+     they are not side-tab borders.
+   - A title block's outer edge is the ink at 1.5px, the drawing's frame; "rules, not boxes" holds inside it. */
+@import '@mistriwork/kit/client/fonts/faces.css';
+
+@layer theme {
+  :root[data-host-look='blueprint'] {
+    --ground: #dde8f5;
+    --surface: #f6f9fe;
+    --raised: #cfdeef;
+    --line: #b3c8e2;
+    --line-strong: #6a8dbb;
+    --line-control: #4f76a9;
+    --ink: #0a2550;
+    --ink-muted: #2c4c7a;
+    --ink-subtle: #3a5884;
+    --accent: #123f94;
+    --accent-ink: #123f94;
+    --on-accent: #ffffff;
+    --accent-soft: #123f941a;
+    --link: #123f94;
+    --focus: #2f66cc;
+    --status-info: #4f2fa3;
+    --status-good: #165c39;
+    --status-warning: #7d3f06;
+    --status-critical: #9b1c22;
+    --frame: #0a2550;
+    --wire: #33619f;
+    --draft-minor: #123f941c;
+    --draft-major: #123f9438;
+    /* The sheet the schema is drawn on: the same in both modes, as a blueprint is. */
+    --sheet: #0e3266;
+    --sheet-node: #0b2a57;
+    --sheet-ink: #eef5ff;
+    --sheet-muted: #b9d0ef;
+    --sheet-line: #ffffff26;
+    --sheet-wire: #9cc4f2;
+    --sheet-accent: #ffe08a;
+    --tech: 'Barlow Semi Condensed', 'DIN Alternate', 'Avenir Next Condensed', Bahnschrift, 'Roboto Condensed', 'Arial Narrow', var(--sans);
+    --shadow-pop: 0 0 0 1.5px var(--frame);
+    --shadow-panel: 0 0 0 1.5px var(--frame);
+    --shadow-modal: 0 0 0 1.5px var(--frame), 0 16px 40px #0a255033;
+    --scrim: #0a255040;
+    --radius: 0px;
+    --grid-head-char: 7.4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root[data-host-look='blueprint']:not([data-theme='light']) {
+      --ground: #0a2140;
+      --surface: #0d274a;
+      --raised: #12325c;
+      --line: #234873;
+      --line-strong: #4a76a8;
+      --line-control: #6a94c4;
+      --ink: #eaf3fd;
+      --ink-muted: #a9c3e2;
+      --ink-subtle: #9cb8da;
+      --accent: #8cc8ff;
+      --accent-ink: #8cc8ff;
+      --on-accent: #0a2140;
+      --accent-soft: #8cc8ff1f;
+      --link: #9fd2ff;
+      --focus: #8cc8ff;
+      --status-info: #c4b0ff;
+      --status-good: #7fd6a4;
+      --status-warning: #f2b670;
+      --status-critical: #ff9b94;
+      --frame: #8fb4e0;
+      --wire: #6a94c4;
+      --draft-minor: #ffffff0d;
+      --draft-major: #ffffff1c;
+      --sheet: #0f3a72;
+      --sheet-node: #0b2d5a;
+      --shadow-modal: 0 0 0 1.5px var(--frame), 0 16px 40px #00000080;
+      --scrim: #00000080;
+    }
+  }
+  :root[data-host-look='blueprint'][data-theme='dark'] {
+    --ground: #0a2140;
+    --surface: #0d274a;
+    --raised: #12325c;
+    --line: #234873;
+    --line-strong: #4a76a8;
+    --line-control: #6a94c4;
+    --ink: #eaf3fd;
+    --ink-muted: #a9c3e2;
+    --ink-subtle: #9cb8da;
+    --accent: #8cc8ff;
+    --accent-ink: #8cc8ff;
+    --on-accent: #0a2140;
+    --accent-soft: #8cc8ff1f;
+    --link: #9fd2ff;
+    --focus: #8cc8ff;
+    --status-info: #c4b0ff;
+    --status-good: #7fd6a4;
+    --status-warning: #f2b670;
+    --status-critical: #ff9b94;
+    --frame: #8fb4e0;
+    --wire: #6a94c4;
+    --draft-minor: #ffffff0d;
+    --draft-major: #ffffff1c;
+    --sheet: #0f3a72;
+    --sheet-node: #0b2d5a;
+    --shadow-modal: 0 0 0 1.5px var(--frame), 0 16px 40px #00000080;
+    --scrim: #00000080;
+  }
+
+  :root[data-host-look='blueprint'] {
+    & body {
+      --radius-item: 0px;
+      --radius-pop: 0px;
+      --radius-panel: 0px;
+      --radius-dialog: 0px;
+    }
+
+    /* ---------- the sheet: paper, frame and lettering ---------- */
+
+    /* Drafting paper: minor squares every 12px, major every 60px, under everything that is not a working surface. */
+    & .content,
+    & .sidebar,
+    & .conn-manager {
+      background-color: var(--ground);
+      background-image:
+        linear-gradient(var(--draft-major) 1px, transparent 1px),
+        linear-gradient(90deg, var(--draft-major) 1px, transparent 1px),
+        linear-gradient(var(--draft-minor) 1px, transparent 1px),
+        linear-gradient(90deg, var(--draft-minor) 1px, transparent 1px);
+      background-size: 60px 60px, 60px 60px, 12px 12px, 12px 12px;
+    }
+    /* The sheet's frame: the bar and the index are ruled off in the ink. */
+    & .topbar { border-bottom: 2px solid var(--frame); }
+    & .sidebar { border-right: 1.5px solid var(--frame); }
+
+    /* Technical lettering for every label of the drawing; the data stays in the code face. */
+    & .brand-name,
+    & th,
+    & .applist-field-label,
+    & .panel > .record-heading,
+    & .related-head > .related-title,
+    & .record-child-title,
+    & .tab,
+    & .result-head .result-title,
+    & .diagram-title,
+    & .shape-label,
+    & .landing-starts-head,
+    & .conn-head h2,
+    & .sql-title,
+    & .sql-eyebrow,
+    & .palette-kind,
+    & .th-menu-label {
+      font-family: var(--tech);
+      letter-spacing: var(--track-caps);
+    }
+    & .brand-name { text-transform: uppercase; font-weight: 700; }
+    & .brand-mark,
+    & .brand-mark::after { border-color: var(--frame); background-color: var(--frame); }
+    & .brand-mark { background: none; }
+    & #query { background: var(--surface); border-color: var(--frame); }
+    & button.ghost { color: var(--ink); border-color: var(--line-control); background: var(--surface); }
+
+    & .tab { text-transform: uppercase; font-size: var(--text-sm); color: var(--ink-muted); }
+    & .tab[aria-selected='true'] { color: var(--ink); border-bottom-color: var(--frame); font-weight: 700; }
+    & .tabs { border-bottom: 1.5px solid var(--frame); }
+
+    /* The sheet index: each table an entry on the paper, the open one boxed. */
+    & #table-list button { border: 1px solid transparent; }
+    & #table-list button[aria-current='true'] {
+      background: var(--surface); color: var(--ink); font-weight: 700; border-color: var(--frame);
+    }
+    & #table-filter { background: var(--surface); border-color: var(--line-control); }
+
+    /* ---------- the walk: wires, nodes, balloons, trunks ---------- */
+
+    /* The trail is the walk drawn: nodes joined by a wire, not a run of chevrons. */
+    & .crumbs .sep {
+      font-size: 0; display: inline-block; width: 22px; height: 1.5px; flex: none;
+      background: var(--wire); position: relative; margin-inline: var(--space-2);
+    }
+    & .crumbs .sep::after {
+      content: ''; position: absolute; right: -4px; top: -3px;
+      width: 7px; height: 7px; box-sizing: border-box;
+      border: 1.5px solid var(--wire); border-radius: 50%; background: var(--surface);
+    }
+    & .crumbs-host { border-bottom: 1px solid var(--line-strong); background: var(--surface); }
+
+    /* A reference in a grid ends in a node: the value it holds, a stub of wire, a ring in the cell's gutter. */
+    & td.reflink { position: relative; color: var(--link); font-weight: 600; padding-right: 22px; } /* off-scale: the look's drawn geometry (a wire, a node, a gutter), not spacing */
+    & td.reflink::after {
+      content: '';
+      position: absolute; right: 4px; top: 50%;
+      width: 14px; height: 7px; margin-top: -3.5px; /* off-scale: the look's drawn geometry (a wire, a node, a gutter), not spacing */
+      background:
+        radial-gradient(circle at calc(100% - 3.5px) 50%, var(--surface) 2px, var(--wire) 2.1px 3.4px, transparent 3.5px),
+        linear-gradient(var(--wire), var(--wire)) left center / 8px 1.5px no-repeat;
+    }
+    & .grid-inset > .table-wrap td.reflink:last-child { padding-right: 22px; } /* off-scale: the look's drawn geometry (a wire, a node, a gutter), not spacing */
+
+    /* A record's reference in its fields: the value ringed as a balloon, a dashed run, the table it lands on boxed. */
+    & .ref-jump { border: none; background: none; padding: 0; gap: 0; align-items: center; }
+    & .ref-jump-value {
+      min-width: 26px; padding: 1px var(--space-2h); text-align: center;
+      border: 1.5px solid var(--wire); border-radius: 999px; background: var(--surface); color: var(--link); font-weight: 700;
+    }
+    & .ref-jump-table {
+      border: 1px solid var(--frame); border-radius: 0; background: var(--surface); color: var(--ink);
+      padding: 0 var(--space-2h); font-family: var(--tech); text-transform: uppercase; letter-spacing: var(--track-caps);
+      position: relative; margin-left: 22px; /* off-scale: the look's drawn geometry (a wire, a node, a gutter), not spacing */
+    }
+    & .ref-jump-table::before {
+      content: ''; position: absolute; right: 100%; top: 50%; width: 22px; border-top: 1.5px dashed var(--wire);
+    }
+    & .ref-jump:hover { background: none; } /* motion-ok: an opt-in host look; a hover recolors, nothing moves */
+    & .ref-jump:hover .ref-jump-table { background: var(--accent-soft); } /* motion-ok: an opt-in host look; a hover recolors, nothing moves */
+
+    /* Related tables: a trunk down the rail and a branch to each, landing on its count in a balloon. */
+    & .related-panel { background: transparent; }
+    & .related-head { background: var(--surface); border-bottom: 1.5px solid var(--frame); }
+    & .related-list { position: relative; padding-left: 0; }
+    & .related-list::before {
+      content: ''; position: absolute; left: var(--space-4h); top: 0; bottom: 24px;
+      border-left: 1.5px solid var(--wire);
+    }
+    & .related-item {
+      position: relative; padding-left: calc(var(--space-4h) + 16px); border-left: none;
+      grid-template-columns: auto 1fr; gap: var(--space-3h);
+    }
+    & .related-item::before {
+      content: ''; position: absolute; left: var(--space-4h); top: 50%; width: 16px;
+      border-top: 1.5px solid var(--wire);
+    }
+    & .related-item.empty::before { border-top-style: dashed; }
+    & .related-item[aria-selected='true'] { background: var(--surface); outline: 1px solid var(--frame); outline-offset: -1px; }
+    & .related-count {
+      font: 700 var(--text-md) var(--tech); text-align: center; color: var(--ink);
+      min-width: 32px; height: 32px; padding-inline: var(--space-2h); line-height: 29px;
+      border: 1.5px solid var(--wire); border-radius: 999px; background: var(--surface); letter-spacing: 0;
+    }
+    & .related-item.empty .related-count { border-style: dashed; }
+
+    /* A child list hangs from its record by an elbow, and is framed as a detail of the drawing. */
+    & .record-child-head { position: relative; padding-left: calc(var(--space-4h) + 20px); }
+    & .record-child-head::before {
+      content: ''; position: absolute; left: var(--space-4h); top: 0; width: 14px; height: 60%;
+      border-left: 1.5px solid var(--wire); border-bottom: 1.5px solid var(--wire);
+    }
+    & .record-child-title { text-transform: uppercase; color: var(--ink); font-weight: 700; }
+    & .record-children .table-wrap { margin-inline: var(--space-4h); border: 1.5px solid var(--frame); padding-bottom: 0; background: var(--surface); }
+
+    /* ---------- title blocks ---------- */
+
+    /* A result's name and particulars, boxed and divided, in the corner of the sheet. */
+    & .result-head {
+      border: 1.5px solid var(--frame); background: var(--surface);
+      padding: 0; gap: 0; align-items: stretch; margin-bottom: var(--space-3);
+    }
+    & .result-head > * { padding: var(--space-2h) var(--space-3h); border-right: 1px solid var(--line-strong); display: flex; align-items: center; }
+    & .result-head > :last-child { border-right: none; margin-left: auto; }
+    & .result-head .result-title {
+      text-transform: uppercase; font-size: var(--text-lg); font-weight: 700; color: var(--ink);
+      background: var(--raised); border-right: 1.5px solid var(--frame);
+    }
+    & .result-head .export-summary { border: none; background: none; }
+    & .result-head .stat { white-space: nowrap; }
+    @media (max-width: 600px) {
+      & .result-head { flex-wrap: wrap; }
+      & .result-head .result-title { flex-basis: 100%; border-right: none; border-bottom: 1.5px solid var(--frame); }
+    }
+
+    /* A record's head is the same block: the drawing's name lettered large, its tools in the cells beside it. */
+    & .record,
+    & .record .panel { background: transparent; }
+    & .panel > .record-heading {
+      background: var(--surface); color: var(--ink); text-transform: uppercase;
+      font-size: var(--text-lg); font-weight: 700;
+      border: 1.5px solid var(--frame); margin: var(--space-4) var(--space-4h) 0; position: static;
+    }
+    & .field-groups { margin-inline: var(--space-4h); background: var(--surface); border: 1px solid var(--line-strong); border-top: none; padding-top: var(--space-3); }
+
+    /* Fields read as a schedule: the name, a dotted leader, the value. */
+    & .field { border-left: none; }
+    /* A desk only: on a phone the name has the width of its column alone, and a leader would wrap it by the letter. */
+    @media (min-width: 700px) {
+      & .field dt { display: flex; align-items: baseline; gap: var(--space-2h); }
+      & .field dt::after { content: ''; flex: 1; min-width: var(--space-4); border-bottom: 1px dotted var(--line-strong); }
+    }
+    & .field:hover { background: var(--accent-soft); } /* motion-ok: an opt-in host look; a hover recolors, nothing moves */
+
+    /* ---------- the grid ---------- */
+
+    & .grid-inset > .table-wrap { border: 1.5px solid var(--frame); padding-bottom: 0; margin-bottom: var(--space-4h); background: var(--surface); }
+    & .table-wrap table { background: var(--surface); }
+    & thead th { border-bottom: 1.5px solid var(--frame); background: var(--surface); color: var(--ink); font-size: var(--text-sm); font-weight: 700; }
+    & th.sorted { color: var(--accent-ink); border-bottom-color: var(--frame); }
+    & td,
+    & th { border-right: 1px solid var(--line); }
+    & td:last-child,
+    & th:last-child { border-right: none; }
+    & tbody tr.clickable:hover { background: var(--accent-soft); } /* motion-ok: an opt-in host look; a hover recolors, nothing moves */
+    & td.expander-cell { border-right: 1px solid var(--line-strong); }
+
+    /* A phone keeps a column's moves for when its head holds focus, so a narrow head is its name, not its tools. */
+    @media (hover: none) {
+      & .th-moves { display: none; }
+      & th:focus-within .th-moves { display: contents; }
+    }
+
+    /* ---------- the schema: a blueprint sheet ---------- */
+
+    & .diagram-viewport {
+      --surface: var(--sheet-node);
+      --ink: var(--sheet-ink);
+      --ink-muted: var(--sheet-muted);
+      --ink-subtle: var(--sheet-muted);
+      --line: var(--sheet-line);
+      --line-strong: var(--sheet-wire);
+      --accent: var(--sheet-accent);
+      --accent-ink: var(--sheet-accent);
+      --accent-soft: #ffe08a1f;
+      --link: var(--sheet-accent);
+      background-color: var(--sheet);
+      background-image:
+        linear-gradient(#ffffff1f 1px, transparent 1px),
+        linear-gradient(90deg, #ffffff1f 1px, transparent 1px),
+        linear-gradient(#ffffff0d 1px, transparent 1px),
+        linear-gradient(90deg, #ffffff0d 1px, transparent 1px);
+      background-size: 60px 60px, 60px 60px, 12px 12px, 12px 12px;
+      border: 1.5px solid var(--frame);
+      /* The sheet's own border, drawn inside its edge as a blueprint's is. */
+      box-shadow: inset 0 0 0 10px var(--sheet), inset 0 0 0 11.5px var(--sheet-wire);
+      color: var(--sheet-ink);
+    }
+    /* The title block in the sheet's corner. */
+    & .diagram-viewport::after {
+      content: 'TABLEWALK\A SCHEMA DRAWING · SHEET 1 OF 1';
+      white-space: pre; position: absolute; left: 11px; bottom: 11px; pointer-events: none;
+      padding: var(--space-2h) var(--space-3h); border: 1.5px solid var(--sheet-wire); border-left: none; border-bottom: none;
+      font: 700 var(--text-xs)/1.5 var(--tech); letter-spacing: var(--track-caps); color: var(--sheet-ink); background: var(--sheet);
+    }
+    & .node > rect { stroke: var(--sheet-wire); stroke-width: 1.5; rx: 0; ry: 0; }
+    & .node-focus > rect { fill: #ffe08a14; stroke: var(--sheet-accent); stroke-width: 2; }
+    & .node-focus .node-head text { fill: var(--sheet-accent); }
+    & .node-head text { font-family: var(--tech); letter-spacing: var(--track-caps); text-transform: uppercase; }
+    & .node-rule { stroke: var(--sheet-wire); stroke-opacity: 0.5; }
+    & .edge { stroke: var(--sheet-wire); stroke-width: 1.5; }
+    & .edge-head { fill: var(--sheet-wire); }
+    & .edge-label { fill: var(--sheet-muted); font-family: var(--tech); letter-spacing: var(--track-caps); }
+    & .zoom-controls { background: var(--sheet-node); border: 1.5px solid var(--sheet-wire); box-shadow: none; }
+    & .zoom-controls button { color: var(--sheet-ink); }
+    & .diagram-title { text-transform: uppercase; color: var(--ink); }
+
+    /* ---------- the landing: general notes ---------- */
+
+    & .shape { background: var(--surface); border: 1.5px solid var(--frame); }
+    & .shape-label { text-transform: uppercase; color: var(--ink); font-weight: 700; }
+    & .shape-arrow {
+      font-size: 0; display: inline-block; width: 18px; height: 1.5px; vertical-align: middle;
+      background: var(--wire); position: relative; margin-inline: var(--space-2h);
+    }
+    & .shape-arrow::after {
+      content: ''; position: absolute; right: -4px; top: -3px; width: 7px; height: 7px; box-sizing: border-box;
+      border: 1.5px solid var(--wire); border-radius: 50%; background: var(--surface);
+    }
+
+    /* ---------- the SQL pane, popups, the connections sheet and the states ---------- */
+
+    & .sql-panel { border-top: 2px solid var(--frame); }
+    & .sql-head { border-bottom: 1.5px solid var(--frame); background: var(--surface); }
+    & .sql-title { text-transform: uppercase; color: var(--ink); }
+    & .sql-input { background: var(--surface); border: 1.5px solid var(--frame); }
+    & .sql-results .table-wrap { border-top: 1.5px solid var(--frame); }
+
+    & .palette { border: 1.5px solid var(--frame); }
+    & .palette-input { border-bottom: 1.5px solid var(--frame); }
+    & .palette-kind { text-transform: uppercase; }
+    & .palette-item.active { background: var(--raised); outline: 1px solid var(--frame); outline-offset: -1px; }
+    & .palette-item.active .palette-label { color: var(--ink); font-weight: 700; }
+    & .th-menu { border: 1.5px solid var(--frame); box-shadow: none; }
+    & .th-menu-item:hover, /* motion-ok: an opt-in host look; a hover recolors, nothing moves */
+    & .th-menu-item[data-highlighted] { background: var(--raised); }
+    & .th-menu-sep { background: var(--line-strong); }
+
+    & .conn-head h2 { text-transform: uppercase; }
+    & .conn-list { background: var(--surface); border: 1.5px solid var(--frame); }
+    & .conn-filter { background: var(--surface); }
+
+    /* A note on the sheet where the rows would be: boxed, numbered, lettered. */
+    & :is(.grid-inset, .table-wrap) > .note {
+      display: inline-block; margin: var(--space-3) var(--space-4h); padding: var(--space-2h) var(--space-3h);
+      border: 1.5px dashed var(--wire); background: var(--surface); color: var(--ink);
+      font-family: var(--tech); text-transform: uppercase; letter-spacing: var(--track-caps);
+    }
+    & :is(.grid-inset, .table-wrap) > .note::before { content: 'NOTE 1 — '; font-weight: 700; }
+
+    /* An error is a revision note on the drawing: boxed in its tone, lettered. */
+    & .errors {
+      background: var(--surface); color: var(--status-critical); border: 1.5px solid var(--status-critical);
+      margin: var(--space-2) var(--space-4h); font-family: var(--tech); letter-spacing: var(--track-caps);
+    }
+  }
+}
