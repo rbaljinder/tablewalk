@@ -1,0 +1,500 @@
+/* Host look: Instrument. "A precision instrument: a hairline measuring grid, every figure on a monospace column, one
+   cobalt accent."
+
+   The grid is ruled both ways in hairlines, as a measuring instrument is: a column is a column all the way down, so a
+   wide result reads across and down without losing its place. Words are set in Inter; everything that is counted,
+   compared or keyed (ids, numbers, dates, codes, references, row counts) in IBM Plex Mono, so figures line up to the
+   digit and a key reads character by character. The head is a quiet band above a firmer hairline. The ground is cool
+   graphite; the one colour is cobalt, kept for what you can follow (a reference, the current table, focus) and for
+   Run. Absence is NULL in small capitals, which a stored string "null" can never be mistaken for. Dark is the same
+   instrument by night: blue-black glass, the grid in a faint line, cobalt lifted to read.
+
+   Palettes: the same instrument in five colourings, colour only, the structure untouched. Graphite and cobalt (the
+   look's own), Stone and teal, Slate and amber, Ink and violet, Fog and moss; each is a host look of its own
+   (`instrument-<palette>`, hostLooks.js) worn over this one sheet, so the sheet is still fetched only when worn.
+
+   Bends, each on purpose:
+   - The column heads stand on a tinted band (the refusal list grants that to Tray alone): with hairlines between
+     columns, a band is what tells the head from the first row at a glance without a heavier rule.
+   - The schema diagram sits on a dot graticule (the list leaves grounds plain): the one place the instrument shows its
+     scale, and it carries no meaning a reader needs.
+   - A second face, IBM Plex Mono, for figures: self-hosted by the kit (faces.css), fetched only when this look is
+     worn, never in the first paint. */
+@import './refined-base.css';
+
+@layer theme {
+  /* What every palette shares: the figures' face and, per mode, the shadows (a palette is colour only). */
+  :root:is([data-host-look='instrument'], [data-host-look^='instrument-']) {
+    --figures: 'IBM Plex Mono', var(--code);
+    --shadow-pop: 0 1px 2px rgb(16 20 28 / 0.06), 0 8px 24px rgb(16 20 28 / 0.1);
+    --shadow-panel: 0 1px 2px rgb(16 20 28 / 0.06), 0 12px 32px rgb(16 20 28 / 0.12);
+    --shadow-modal: 0 2px 6px rgb(16 20 28 / 0.08), 0 24px 64px rgb(16 20 28 / 0.18);
+    --scrim: rgb(16 20 28 / 0.32);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:is([data-host-look='instrument'], [data-host-look^='instrument-']):not([data-theme='light']) {
+      --shadow-pop: 0 0 0 1px rgb(0 0 0 / 0.3), 0 10px 28px rgb(0 0 0 / 0.5);
+      --shadow-panel: 0 0 0 1px rgb(0 0 0 / 0.3), 0 14px 36px rgb(0 0 0 / 0.55);
+      --shadow-modal: 0 0 0 1px rgb(0 0 0 / 0.35), 0 28px 72px rgb(0 0 0 / 0.65);
+      --scrim: rgb(0 0 0 / 0.55);
+    }
+  }
+  :root:is([data-host-look='instrument'], [data-host-look^='instrument-'])[data-theme='dark'] {
+    --shadow-pop: 0 0 0 1px rgb(0 0 0 / 0.3), 0 10px 28px rgb(0 0 0 / 0.5);
+    --shadow-panel: 0 0 0 1px rgb(0 0 0 / 0.3), 0 14px 36px rgb(0 0 0 / 0.55);
+    --shadow-modal: 0 0 0 1px rgb(0 0 0 / 0.35), 0 28px 72px rgb(0 0 0 / 0.65);
+    --scrim: rgb(0 0 0 / 0.55);
+  }
+
+  /* The palettes. Colour only, light and dark each, every pair checked: text, NULL and type ink, key and reference
+     ink on every ground they sit on (the surface, the frame, a hovered row, the head band, a current item's tint) at
+     4.5:1; a field's edge and the focus ring at 3:1; the ink on a selection; the four tones on their own bands. */
+  /* Graphite and cobalt: the baseline: cool graphite, one cobalt accent. */
+  :root[data-host-look='instrument'] {
+    --ground: #f6f7f9;
+    --surface: #ffffff;
+    --raised: #eef0f3;
+    --line: #e4e7eb;
+    --line-strong: #cfd4db;
+    --line-control: #818996;
+    --ink: #15171c;
+    --ink-muted: #565d6a;
+    --ink-subtle: #656d7c;
+    --accent: #3d5bd9;
+    --accent-ink: #3450c9;
+    --on-accent: #ffffff;
+    --accent-soft: #3d5bd914;
+    --link: #3450c9;
+    --focus: #5b77f0;
+    --status-good: #18774a;
+    --status-warning: #a3560b;
+    --status-critical: #c0362c;
+    --status-info: #6a4fc4;
+    --row-hover: #f4f6f9;
+    --pop-line: #d9dde3;
+    --head-band: #f6f7f9;
+    --graticule: #15171c1f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root[data-host-look='instrument']:not([data-theme='light']) {
+      --ground: #0f1114;
+      --surface: #14161a;
+      --raised: #1c1f24;
+      --line: #23272d;
+      --line-strong: #343941;
+      --line-control: #626a76;
+      --ink: #e7e9ec;
+      --ink-muted: #a2a9b4;
+      --ink-subtle: #8e96a2;
+      --accent: #7b92ff;
+      --accent-ink: #9aabff;
+      --on-accent: #0f1114;
+      --accent-soft: #7b92ff1f;
+      --link: #9aabff;
+      --focus: #7b92ff;
+      --status-good: #5cc58f;
+      --status-warning: #e5a45a;
+      --status-critical: #f0857a;
+      --status-info: #b9a4ff;
+      --row-hover: #191c21;
+      --pop-line: #2e3239;
+      --head-band: #171a1e;
+      --graticule: #ffffff1a;
+    }
+  }
+  :root[data-host-look='instrument'][data-theme='dark'] {
+    --ground: #0f1114;
+    --surface: #14161a;
+    --raised: #1c1f24;
+    --line: #23272d;
+    --line-strong: #343941;
+    --line-control: #626a76;
+    --ink: #e7e9ec;
+    --ink-muted: #a2a9b4;
+    --ink-subtle: #8e96a2;
+    --accent: #7b92ff;
+    --accent-ink: #9aabff;
+    --on-accent: #0f1114;
+    --accent-soft: #7b92ff1f;
+    --link: #9aabff;
+    --focus: #7b92ff;
+    --status-good: #5cc58f;
+    --status-warning: #e5a45a;
+    --status-critical: #f0857a;
+    --status-info: #b9a4ff;
+    --row-hover: #191c21;
+    --pop-line: #2e3239;
+    --head-band: #171a1e;
+    --graticule: #ffffff1a;
+  }
+  /* Stone and teal: warm stone, tablewalk's green matured to a deep teal. */
+  :root[data-host-look='instrument-stone'] {
+    --ground: #f5f4f1;
+    --surface: #fdfcfb;
+    --raised: #edebe6;
+    --line: #e4e1db;
+    --line-strong: #cdc8bf;
+    --line-control: #8a8378;
+    --ink: #1d1b18;
+    --ink-muted: #5c5750;
+    --ink-subtle: #6b665e;
+    --accent: #136a5e;
+    --accent-ink: #0f5f54;
+    --on-accent: #ffffff;
+    --accent-soft: #136a5e14;
+    --link: #0f5f54;
+    --focus: #1f8a7a;
+    --status-good: #2d7a3e;
+    --status-warning: #9a5509;
+    --status-critical: #b3362a;
+    --status-info: #5e4fa6;
+    --row-hover: #f6f4f0;
+    --pop-line: #dcd8d0;
+    --head-band: #f5f4f1;
+    --graticule: #1d1b181f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root[data-host-look='instrument-stone']:not([data-theme='light']) {
+      --ground: #141312;
+      --surface: #1a1917;
+      --raised: #23211f;
+      --line: #2c2a27;
+      --line-strong: #3f3c38;
+      --line-control: #736d65;
+      --ink: #ebe8e3;
+      --ink-muted: #aba59b;
+      --ink-subtle: #9a948a;
+      --accent: #4fc1ad;
+      --accent-ink: #6dd0be;
+      --on-accent: #141312;
+      --accent-soft: #4fc1ad1f;
+      --link: #6dd0be;
+      --focus: #4fc1ad;
+      --status-good: #79c98a;
+      --status-warning: #e3a75d;
+      --status-critical: #ef8a7c;
+      --status-info: #b6a6ef;
+      --row-hover: #1f1e1c;
+      --pop-line: #34322e;
+      --head-band: #191816;
+      --graticule: #ffffff17;
+    }
+  }
+  :root[data-host-look='instrument-stone'][data-theme='dark'] {
+    --ground: #141312;
+    --surface: #1a1917;
+    --raised: #23211f;
+    --line: #2c2a27;
+    --line-strong: #3f3c38;
+    --line-control: #736d65;
+    --ink: #ebe8e3;
+    --ink-muted: #aba59b;
+    --ink-subtle: #9a948a;
+    --accent: #4fc1ad;
+    --accent-ink: #6dd0be;
+    --on-accent: #141312;
+    --accent-soft: #4fc1ad1f;
+    --link: #6dd0be;
+    --focus: #4fc1ad;
+    --status-good: #79c98a;
+    --status-warning: #e3a75d;
+    --status-critical: #ef8a7c;
+    --status-info: #b6a6ef;
+    --row-hover: #1f1e1c;
+    --pop-line: #34322e;
+    --head-band: #191816;
+    --graticule: #ffffff17;
+  }
+  /* Slate and amber: a cool slate frame with one warm signal: amber fills Run and marks focus, its ink carries text. */
+  :root[data-host-look='instrument-slate'] {
+    --ground: #f3f5f7;
+    --surface: #ffffff;
+    --raised: #eaedf1;
+    --line: #e1e5ea;
+    --line-strong: #c9d0d8;
+    --line-control: #7f8894;
+    --ink: #141a21;
+    --ink-muted: #515c69;
+    --ink-subtle: #5f6b78;
+    --accent: #e9a23b;
+    --accent-ink: #8a5200;
+    --on-accent: #1b1305;
+    --accent-soft: #e9a23b26;
+    --link: #8a5200;
+    --focus: #b8740c;
+    --status-good: #1b7a4c;
+    --status-warning: #b4480f;
+    --status-critical: #bf3330;
+    --status-info: #5b52b8;
+    --row-hover: #f2f4f7;
+    --pop-line: #d6dce3;
+    --head-band: #f3f5f7;
+    --graticule: #141a211f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root[data-host-look='instrument-slate']:not([data-theme='light']) {
+      --ground: #0e1216;
+      --surface: #13181d;
+      --raised: #1a2027;
+      --line: #222a32;
+      --line-strong: #323c47;
+      --line-control: #5f6b78;
+      --ink: #e3e8ee;
+      --ink-muted: #9eaab7;
+      --ink-subtle: #8d99a6;
+      --accent: #f0b14f;
+      --accent-ink: #f4bd66;
+      --on-accent: #161004;
+      --accent-soft: #f0b14f1f;
+      --link: #f4bd66;
+      --focus: #f0b14f;
+      --status-good: #5cc590;
+      --status-warning: #f08c4a;
+      --status-critical: #f2837a;
+      --status-info: #b3a8ff;
+      --row-hover: #182027;
+      --pop-line: #2b343e;
+      --head-band: #161c22;
+      --graticule: #ffffff17;
+    }
+  }
+  :root[data-host-look='instrument-slate'][data-theme='dark'] {
+    --ground: #0e1216;
+    --surface: #13181d;
+    --raised: #1a2027;
+    --line: #222a32;
+    --line-strong: #323c47;
+    --line-control: #5f6b78;
+    --ink: #e3e8ee;
+    --ink-muted: #9eaab7;
+    --ink-subtle: #8d99a6;
+    --accent: #f0b14f;
+    --accent-ink: #f4bd66;
+    --on-accent: #161004;
+    --accent-soft: #f0b14f1f;
+    --link: #f4bd66;
+    --focus: #f0b14f;
+    --status-good: #5cc590;
+    --status-warning: #f08c4a;
+    --status-critical: #f2837a;
+    --status-info: #b3a8ff;
+    --row-hover: #182027;
+    --pop-line: #2b343e;
+    --head-band: #161c22;
+    --graticule: #ffffff17;
+  }
+  /* Ink and violet: ink black and the mistri mark's violet. */
+  :root[data-host-look='instrument-ink'] {
+    --ground: #f6f6f7;
+    --surface: #ffffff;
+    --raised: #eeeef0;
+    --line: #e5e5e8;
+    --line-strong: #cfcfd5;
+    --line-control: #85858f;
+    --ink: #0c0c0f;
+    --ink-muted: #56565f;
+    --ink-subtle: #66666f;
+    --accent: #6b3fd4;
+    --accent-ink: #5b31c2;
+    --on-accent: #ffffff;
+    --accent-soft: #6b3fd414;
+    --link: #5b31c2;
+    --focus: #7c55e0;
+    --status-good: #1a7a4a;
+    --status-warning: #a1530a;
+    --status-critical: #c0322f;
+    --status-info: #2f62c2;
+    --row-hover: #f4f4f6;
+    --pop-line: #dadade;
+    --head-band: #f6f6f7;
+    --graticule: #0c0c0f1f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root[data-host-look='instrument-ink']:not([data-theme='light']) {
+      --ground: #09090b;
+      --surface: #0e0e11;
+      --raised: #17171b;
+      --line: #1f1f24;
+      --line-strong: #2f2f36;
+      --line-control: #63636d;
+      --ink: #ececf0;
+      --ink-muted: #a3a3ad;
+      --ink-subtle: #8f8f99;
+      --accent: #9b7bff;
+      --accent-ink: #b39bff;
+      --on-accent: #0c0a14;
+      --accent-soft: #9b7bff1f;
+      --link: #b39bff;
+      --focus: #9b7bff;
+      --status-good: #5cc590;
+      --status-warning: #e8a65a;
+      --status-critical: #f2847a;
+      --status-info: #7fb0ff;
+      --row-hover: #141418;
+      --pop-line: #27272d;
+      --head-band: #121215;
+      --graticule: #ffffff17;
+    }
+  }
+  :root[data-host-look='instrument-ink'][data-theme='dark'] {
+    --ground: #09090b;
+    --surface: #0e0e11;
+    --raised: #17171b;
+    --line: #1f1f24;
+    --line-strong: #2f2f36;
+    --line-control: #63636d;
+    --ink: #ececf0;
+    --ink-muted: #a3a3ad;
+    --ink-subtle: #8f8f99;
+    --accent: #9b7bff;
+    --accent-ink: #b39bff;
+    --on-accent: #0c0a14;
+    --accent-soft: #9b7bff1f;
+    --link: #b39bff;
+    --focus: #9b7bff;
+    --status-good: #5cc590;
+    --status-warning: #e8a65a;
+    --status-critical: #f2847a;
+    --status-info: #7fb0ff;
+    --row-hover: #141418;
+    --pop-line: #27272d;
+    --head-band: #121215;
+    --graticule: #ffffff17;
+  }
+  /* Fog and moss: near-monochrome neutral grey, one low-chroma moss for what you can follow. */
+  :root[data-host-look='instrument-fog'] {
+    --ground: #f5f5f5;
+    --surface: #fefefe;
+    --raised: #ededed;
+    --line: #e3e3e3;
+    --line-strong: #cccccc;
+    --line-control: #858585;
+    --ink: #171717;
+    --ink-muted: #575757;
+    --ink-subtle: #686868;
+    --accent: #4d6b2b;
+    --accent-ink: #42601f;
+    --on-accent: #ffffff;
+    --accent-soft: #4d6b2b14;
+    --link: #42601f;
+    --focus: #5f8336;
+    --status-good: #1f7a5a;
+    --status-warning: #9c5a06;
+    --status-critical: #b8352c;
+    --status-info: #5b54a8;
+    --row-hover: #f3f3f3;
+    --pop-line: #d9d9d9;
+    --head-band: #f5f5f5;
+    --graticule: #1717171f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root[data-host-look='instrument-fog']:not([data-theme='light']) {
+      --ground: #101010;
+      --surface: #151515;
+      --raised: #1d1d1d;
+      --line: #262626;
+      --line-strong: #363636;
+      --line-control: #6b6b6b;
+      --ink: #e8e8e8;
+      --ink-muted: #a6a6a6;
+      --ink-subtle: #939393;
+      --accent: #9cc26a;
+      --accent-ink: #b0d283;
+      --on-accent: #121410;
+      --accent-soft: #9cc26a1f;
+      --link: #b0d283;
+      --focus: #9cc26a;
+      --status-good: #5cc6a0;
+      --status-warning: #e6a85c;
+      --status-critical: #f0857a;
+      --status-info: #b2aaf5;
+      --row-hover: #1a1a1a;
+      --pop-line: #2c2c2c;
+      --head-band: #181818;
+      --graticule: #ffffff17;
+    }
+  }
+  :root[data-host-look='instrument-fog'][data-theme='dark'] {
+    --ground: #101010;
+    --surface: #151515;
+    --raised: #1d1d1d;
+    --line: #262626;
+    --line-strong: #363636;
+    --line-control: #6b6b6b;
+    --ink: #e8e8e8;
+    --ink-muted: #a6a6a6;
+    --ink-subtle: #939393;
+    --accent: #9cc26a;
+    --accent-ink: #b0d283;
+    --on-accent: #121410;
+    --accent-soft: #9cc26a1f;
+    --link: #b0d283;
+    --focus: #9cc26a;
+    --status-good: #5cc6a0;
+    --status-warning: #e6a85c;
+    --status-critical: #f0857a;
+    --status-info: #b2aaf5;
+    --row-hover: #1a1a1a;
+    --pop-line: #2c2c2c;
+    --head-band: #181818;
+    --graticule: #ffffff17;
+  }
+
+  :root:is([data-host-look='instrument'], [data-host-look^='instrument-']) {
+    /* ---------- the frame: graphite chrome round a white working surface ---------- */
+
+    & .sidebar { background: var(--ground); }
+    & .crumbs-host { background: var(--surface); }
+    & #query { background: var(--ground); }
+    & #query:focus { background: var(--surface); }
+    & .tab[aria-selected='true'] { border-bottom-color: var(--accent); }
+
+    /* ---------- the measuring grid ---------- */
+
+    & .grid-inset > .table-wrap { border: 1px solid var(--line); border-radius: var(--radius); padding-bottom: 0; margin-bottom: var(--space-4); }
+    & .grid-inset > .table-wrap th:first-child,
+    & .grid-inset > .table-wrap td:first-child { padding-left: var(--space-3h); }
+    & .grid-inset > .table-wrap th:last-child,
+    & .grid-inset > .table-wrap td:last-child { padding-right: var(--space-3h); }
+    & th { background: var(--head-band); border-bottom: 1px solid var(--line-strong); }
+    & th.sorted { border-bottom-color: var(--accent); }
+    & :is(th, td) { border-right: 1px solid var(--line); }
+    & :is(th, td):last-child { border-right: 0; }
+    & tbody tr:last-child td { border-bottom: 0; }
+    /* Figures, keys and codes on the instrument's face: they line up to the digit. */
+    & :is(td.num, td.mono, td.reflink, .num-value, .date-value) { font-family: var(--figures); font-size: var(--text-sm); }
+    & td.reflink { color: var(--link); }
+    & td.null, & .field dd.null {
+      font-family: var(--face-ui); font-style: normal; font-variant-caps: all-small-caps; letter-spacing: 0.04em;
+      font-size: var(--text-base);
+    }
+    & td.expander-cell, & th.expander-cell { border-right-color: var(--line); }
+    & th .pk { color: var(--accent-ink); }
+
+    /* ---------- a record: an inspector's readout ---------- */
+
+    & .field { border-bottom: 1px solid var(--line); }
+    & .fields > .field:last-child { border-bottom: 0; }
+    & .field dd :is(.num-value, .date-value) { color: var(--ink); }
+    & .ref-jump-value { font-family: var(--figures); font-size: var(--text-sm); }
+    & .record-children .table-wrap { margin-inline: var(--space-4h); border: 1px solid var(--line); border-radius: var(--radius); padding-bottom: 0; }
+    & .record-children .table-wrap th:first-child,
+    & .record-children .table-wrap td:first-child { padding-left: var(--space-3h); }
+
+    /* ---------- the schema on its graticule ---------- */
+
+    & .diagram-viewport {
+      background-image: radial-gradient(circle at 1px 1px, var(--graticule) 1px, transparent 1.2px);
+      background-size: 16px 16px;
+    }
+    & .node > rect { stroke: var(--line-strong); }
+    & .node-focus > rect { stroke: var(--accent); }
+    & .node-field.is-key, & .node-field.is-ref { font-family: var(--figures); }
+    & .edge { stroke: var(--line-strong); }
+
+    /* ---------- figures elsewhere ---------- */
+
+    & :is(.stat, .pager-range, .conn-meta, .start-rows, .landing-chip-table, .detail-count) { font-family: var(--figures); font-size: var(--text-xs); }
+    & .result-head .stat-order { font-family: var(--face-ui); font-size: var(--text-sm); }
+  }
+}
