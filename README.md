@@ -253,7 +253,8 @@ Undo reports `applied`, `not_applied`, or `unknown`. An unknown result may have
 committed: inspect the stored records and do not retry it. Pending or uncertain
 Undo blocks falling through to older writes. Keep the exact `expectedId` after
 a lost response; never replace it with an older entry to retry. This journal is
-bounded and in-memory, not a durable recovery receipt.
+bounded, and not a durable recovery receipt: it is kept across a restart only
+where `tablewalk journal` made its store, and is in memory otherwise.
 
 A fixture is a graph, so `insert_graph` takes one: several related rows in one
 transaction, where either all of them land or none does. A row that cannot
@@ -523,6 +524,7 @@ tablewalk                     no target: serve, and ask for one in the browser
 tablewalk <target>            a SQLite file path, sqlite:<path>, or postgres:// URL
 tablewalk migrate <command>   change the schema with versioned SQL files (below)
 tablewalk seed [<db>]         believable rows in a writable database (below)
+tablewalk journal [<db>]      keep a writable connection's Undo across restarts (below)
 mistri --app <dir>            an App, served: the App framework's, npx @mistriwork/mistri
   -d, --db <target>           the same thing, explicitly (or set DATABASE_URL,
                               used when no config names connections)
@@ -648,6 +650,17 @@ tablewalk seed [<db> | --db <target> | --config <path>]
       --rows <n>              with seed: rows per main table (default 40)
       --seed <n>              with seed: the same rows again, on the same day
       --append                with seed: add to tables that already hold rows
+
+tablewalk journal [<db> | --db <target> | --config <path>]
+                [--connection <name>]
+                              make the store a writable connection's Undo
+                              history is kept in: two reserved tables in its
+                              database. With them a restart keeps the last 50
+                              writes per connection, for 7 days; without them
+                              the history lasts as long as the process. Made
+                              only by this command, never by opening a
+                              connection; run again it changes nothing. Exit 1
+                              could not run, 2 refused (read-only)
 ```
 
 A path typed on the command line (`--config`, `--migrations`) is relative to the

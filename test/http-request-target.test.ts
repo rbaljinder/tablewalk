@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createConnection } from 'node:net';
 import { test } from 'node:test';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Registry } from '@mistriwork/engine/host';
 import { createApp } from './support/createApp.js';
 
 function raw(port: number, target: string, host: string): Promise<string> {

@@ -7,7 +7,7 @@
  */
 import { changeImpact } from '../../changeimpact.js';
 import { extractFixture } from '../../fixture.js';
-import { tableNamed } from '@mistriwork/engine/shared/schema.js';
+import { tableNamed } from '@mistriwork/engine/host';
 import { lintCounts, lintSchema } from '../../../shared/lint.js';
 import { diffSchemas } from '../../../shared/diff.js';
 import { insertOrder } from '../../../shared/order.js';

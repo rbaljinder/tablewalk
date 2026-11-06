@@ -20,9 +20,10 @@
  * The guarantees did not move, they widened. The journal re-reads every row
  * before it writes anything and refuses the whole revert if one has changed
  * since, because putting an old value back over a newer one is not an undo,
- * it is a silent overwrite. It is in-session for the same reason this was: a
- * stack that outlives the process invites undoing something from an hour ago,
- * by which time the row has moved on.
+ * it is a silent overwrite. That check, not the history's age, is what makes
+ * an old entry safe: the journal lasts the process, or a restart too where
+ * `tablewalk journal` made its store (fifty writes, a week), and a row that has
+ * moved on since is refused.
  *
  * The database browser's alone. An App has no Undo: its writes run side by
  * side on a writer pool, so "the last write" is no longer one thing, and a

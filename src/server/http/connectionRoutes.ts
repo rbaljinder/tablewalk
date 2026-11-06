@@ -4,13 +4,9 @@
  * An App server answers the first two in its own words and refuses the rest
  * (appConnections.ts).
  */
-import { redact, saveConfig } from '@mistriwork/engine/server/connections.js';
+import { redact, saveConfig, scrubSecrets, storeSecret, connect, resolveConnection, UNTRUSTED_NETWORK } from '@mistriwork/engine/host';
 import { configLocations } from '@mistriwork/engine/server/config/locations.js';
-import { scrubSecrets, storeSecret } from '@mistriwork/engine/server/connections.js';
-import { connect } from '@mistriwork/engine/adapters/connect.js';
-import { resolveConnection } from '@mistriwork/engine/server/auth/credentials.js';
 import { untrustedTargetRefusal } from '@mistriwork/engine/server/http/trust.js';
-import { UNTRUSTED_NETWORK } from '@mistriwork/engine/adapters/net/untrustedDatabase.js';
 import { readJson, send } from '@mistriwork/engine/server/http/reply.js';
 import type { RequestContext } from '@mistriwork/engine/server/http/context.js';
 import { agentTools } from '../mcp.js';

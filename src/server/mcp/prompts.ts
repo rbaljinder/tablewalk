@@ -3,9 +3,7 @@
  * Each returns instructions plus the briefs they lean on, embedded, so the
  * plan arrives with its reading rather than as calls the plan asks for.
  */
-import type { Registry } from '@mistriwork/engine/server/connections.js';
-import { tableNamed } from '@mistriwork/engine/shared/schema.js';
-import { toMarkdown } from '@mistriwork/engine/shared/schematext.js';
+import { tableNamed, toMarkdown, type Registry } from '@mistriwork/engine/host';
 import { openFor } from './toolkit.js';
 import { tableBrief } from './shelf.js';
 import type { Answer } from './protocol.js';

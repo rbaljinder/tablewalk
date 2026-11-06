@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { PostgresAdapter } from '@mistriwork/engine/adapters/postgres.js';
-import type { DatabaseSchema } from '@mistriwork/engine/shared/schema.js';
+import type { DatabaseSchema } from '@mistriwork/engine/host';
 import { liveSkip } from './live.js';
 import { buildFixture, dropFixture } from './support/postgresFixture.js';
 import { findValue } from '../src/server/mcp.js';

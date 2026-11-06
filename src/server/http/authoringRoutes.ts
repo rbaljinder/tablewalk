@@ -10,7 +10,7 @@
 import { pagesPath, writeLayout, type StoredLayout } from '@mistriwork/engine/server/layouts.js';
 import { normaliseView, styleFor } from '@mistriwork/engine/server/resourceReadHttp.js';
 import { runTool } from '../mcp.js';
-import { attributeWrites } from '@mistriwork/engine/adapters/writeAttribution.js';
+import { attributeWrites } from '@mistriwork/engine/host';
 import { PathError, compileView, explainView } from '@mistriwork/engine/shared/view.js';
 import { suggestPage } from '@mistriwork/engine/shared/page.js';
 import type { PageHooks } from '@mistriwork/engine/server/http/pageRoutes.js';

@@ -5,21 +5,21 @@
  * one that reads rows, and it is here because it answers the same question
  * as the name search.
  */
-import type { Registry } from '@mistriwork/engine/server/connections.js';
-import type { Adapter } from '@mistriwork/engine/adapters/adapter.js';
-import { readRecords } from '@mistriwork/engine/server/resourceReadOperations.js';
 import {
+  readRecords,
   primaryKey,
   referencesFrom,
   referencesTo,
   renderDDL,
   tableNamed,
+  describeSchema,
+  type Registry,
+  type Adapter,
   type DatabaseSchema,
   type TableMeta,
-} from '@mistriwork/engine/shared/schema.js';
+} from '@mistriwork/engine/host';
 // Plain JS and pure on purpose — the same analysis the landing page says out
 // loud, importable here because it takes a schema and touches nothing else.
-import { describeSchema } from '@mistriwork/engine/shared/shape.js';
 import { linkTo, READS, sessionEgress, STATS, type Handler } from '../toolkit.js';
 
 export const definitions = [

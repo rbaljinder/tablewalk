@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Writable } from 'node:stream';
 import { test } from 'node:test';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Registry } from '@mistriwork/engine/host';
 import {
   diagnosticsFromEnvironment,
   RequestDiagnostics,

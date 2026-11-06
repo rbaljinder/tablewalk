@@ -38,8 +38,7 @@
  * misunderstanding worth reporting rather than silently correcting, and a
  * fixture whose order is stable is one whose failures are reproducible.
  */
-import type { Adapter, InsertResult, WriteTransaction } from '@mistriwork/engine/adapters/adapter.js';
-import { tableNamed, type DatabaseSchema } from '@mistriwork/engine/shared/schema.js';
+import { tableNamed, type Adapter, type InsertResult, type WriteTransaction, type DatabaseSchema } from '@mistriwork/engine/host';
 
 /** A value that names another row in the same request. */
 interface RowRef {

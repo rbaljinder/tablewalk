@@ -5,9 +5,8 @@ import { DEFAULT_POLICY } from '@mistriwork/engine/adapters/http/egress.js';
 import { HttpAdapter } from '@mistriwork/engine/adapters/http/httpAdapter.js';
 import { describedSchema, draftDescription, readDescription } from '@mistriwork/engine/adapters/http/httpDescription.js';
 import { readOpenApi } from '@mistriwork/engine/adapters/http/openapi.js';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Registry, Refusal } from '@mistriwork/engine/host';
 import { createApp } from './support/createApp.js';
-import { Refusal } from '@mistriwork/engine/shared/refusal.js';
 import { startFakeRest } from './support/fakeRest.js';
 
 /* References between an API's resources: guessed from a column's name by the

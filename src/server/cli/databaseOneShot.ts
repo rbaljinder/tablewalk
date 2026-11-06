@@ -6,7 +6,7 @@
  * loads and vets them first, then hands the mode back here (mistriMain.ts backToBrowser).
  */
 import { startupReport } from '@mistriwork/engine/shared/refusal.js';
-import type { Registry } from '@mistriwork/engine/server/connections.js';
+import type { Registry } from '@mistriwork/engine/host';
 
 /** `--export md | markdown | mermaid | json` (the formats startFor gives this main). */
 export async function exportSchemaText(given: string, registry: Registry): Promise<void> {

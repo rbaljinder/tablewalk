@@ -4,9 +4,7 @@
  * connection, the deep link an answer carries, and the count of rows that
  * have left the machine. A family imports this and none of its siblings.
  */
-import type { Registry } from '@mistriwork/engine/server/connections.js';
-import type { Adapter } from '@mistriwork/engine/adapters/adapter.js';
-import { findTable, primaryKey, type DatabaseSchema } from '@mistriwork/engine/shared/schema.js';
+import { findTable, primaryKey, type Registry, type Adapter, type DatabaseSchema } from '@mistriwork/engine/host';
 
 /**
  * The hints a client acts on without reading prose: reading is all the read

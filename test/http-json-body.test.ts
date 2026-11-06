@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { Readable } from 'node:stream';
 import type { IncomingMessage } from 'node:http';
 import { readJson } from '@mistriwork/engine/server/http/reply.js';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Registry } from '@mistriwork/engine/host';
 import { createApp } from './support/createApp.js';
 
 const request = (body: string) => Readable.from(body ? [Buffer.from(body)] : []) as IncomingMessage;

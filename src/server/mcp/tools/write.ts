@@ -8,13 +8,23 @@
  * transaction (graph.ts) with no journal entry, so `revert` cannot take them
  * back and their results carry no `undoId`. The tool descriptions say so.
  */
-import { history, lastRevertible, revert } from '@mistriwork/engine/server/journal.js';
-import { changingReferences, recordedDelete, recordedInsert, recordedUpdate } from '@mistriwork/engine/server/recordWriteOperations.js';
-import { deleteImpact } from '@mistriwork/engine/server/impact.js';
-import { explainWriteFailure, writeFailureOutcome } from '@mistriwork/engine/server/constraints.js';
+import {
+  history,
+  lastRevertible,
+  revert,
+  changingReferences,
+  recordedDelete,
+  recordedInsert,
+  recordedUpdate,
+  deleteImpact,
+  explainWriteFailure,
+  writeFailureOutcome,
+  Refusal,
+  TransactionOutcomeUnknown,
+  tableNamed,
+  type UpdateRequest,
+} from '@mistriwork/engine/host';
 import { deleteGraph, flattenTables, insertGraph, type GraphRow } from '../../graph.js';
-import { Refusal, TransactionOutcomeUnknown, type UpdateRequest } from '@mistriwork/engine/adapters/adapter.js';
-import { tableNamed } from '@mistriwork/engine/shared/schema.js';
 import { linkTo, STATS, wholeKeyOrThrow, type Handler, type ToolCall } from '../toolkit.js';
 
 /**

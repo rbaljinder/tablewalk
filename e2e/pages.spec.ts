@@ -130,7 +130,7 @@ test('page contract: every section survives editing, export, save and reload', a
         width: 'half',
         offsetLeft: 'half',
         when: 'id > 0',
-        streams: [{ from: 'invoice', path: 'customer_id', at: 'invoice_date', show: 'id', detail: 'status', filter: 'total > 0' }],
+        streams: [{ from: 'invoice', path: 'customer_id', at: 'invoice_date', text: 'id', badge: 'status', filter: 'total > 0' }],
       },
     ],
   };

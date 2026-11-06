@@ -8,7 +8,7 @@
  * the App framework serves, is handed to the other main before it gets here.
  */
 import type { Server } from 'node:http';
-import type { Registry } from '@mistriwork/engine/server/connections.js';
+import type { Registry } from '@mistriwork/engine/host';
 import { configLocations } from '@mistriwork/engine/server/config/locations.js';
 import { createBrowserApp } from '../http/browserServer.js';
 import { collectCapacity, diagnosticsFromEnvironment } from '@mistriwork/engine/server/operations/diagnostics.js';

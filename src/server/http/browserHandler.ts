@@ -13,12 +13,11 @@
  * for Undo, the schema's suggested page — and nothing else.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { attributeWrites } from '@mistriwork/engine/adapters/writeAttribution.js';
+import { attributeWrites, type Registry } from '@mistriwork/engine/host';
 import { readsAs } from '@mistriwork/engine/adapters/replicas.js';
 import { currentSpan } from '@mistriwork/engine/adapters/telemetry/trace.js';
 import { serveClient } from '@mistriwork/engine/server/clientHttp.js';
 import { CLIENT_FILES } from '../clientFiles.js';
-import type { Registry } from '@mistriwork/engine/server/connections.js';
 import type { RequestDiagnostics } from '@mistriwork/engine/server/operations/diagnostics.js';
 import { FIRST_PAINT_ELEMENT } from '@mistriwork/engine/shared/firstPaint.js';
 import { mountJson, NO_MOUNT, type AddressMount } from '@mistriwork/engine/shared/mount.js';

@@ -15,15 +15,9 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Registry, STATEMENT_TIMEOUT_MS, StatementStopped, stoppedReason } from '@mistriwork/engine/host';
 import { runTool } from '../src/server/mcp.js';
-import {
-  onCancel,
-  STATEMENT_TIMEOUT_MS,
-  statementCap,
-  StatementStopped,
-  stoppedReason,
-} from '@mistriwork/engine/adapters/statementControl.js';
+import { onCancel, statementCap } from '@mistriwork/engine/adapters/statementControl.js';
 import { liveSkip } from './live.js';
 
 type Reply = Awaited<ReturnType<typeof runTool>>;

@@ -19,6 +19,7 @@ tablewalk — browse a relational database as a graph you walk.
   tablewalk <db> --export md      the schema in words; mermaid or json too
   tablewalk migrate <command>     change the schema with versioned SQL files (see below)
   tablewalk seed [<db>]           believable rows in a writable database (see below)
+  tablewalk journal [<db>]        keep a writable connection's Undo across restarts (see below)
 
 An App (pages, commands and policies over a database) is mistri's: npx @mistriwork/mistri
 dev, npx @mistriwork/mistri check, npx @mistriwork/mistri --app <dir>. tablewalk refuses an App's start
@@ -220,6 +221,17 @@ Rows to look at — a draft judged on believable data, with no seed script:
   An App's seed, each status the way its machine moves it, is mistri's:
   npx @mistriwork/mistri seed --app <dir>.
 
+Undo across restarts — a writable connection's history, kept in its database:
+
+  tablewalk journal [<db> | --db <target> | --config <path>] [--connection <name>]
+
+  Makes the store: two reserved tables in the database, made by this command
+  and never by opening a connection. With them, Undo and the MCP revert reach
+  the writes made before a restart (the last 50 per connection, for 7 days);
+  without them, the history lasts as long as the process. Run again, it changes
+  nothing. Only a connection whose config says "writable": true has one.
+  Exit codes: 1 could not run, 2 refused (read-only, or an HTTP API).
+
 Connections can also come from a tablewalk.json:
 
   { "connections": [ { "name": "app", "url": "postgres://localhost/app" } ] }
@@ -257,6 +269,7 @@ tablewalk — browse a relational database as a graph you walk.
   tablewalk --demo                a throwaway sample database, opened
   tablewalk migrate <command>     change the schema with versioned SQL files
   tablewalk seed [<db>]           believable rows in a writable database
+  tablewalk journal [<db>]        keep a writable connection's Undo across restarts
 
 Common options:
   -d, --db <target>   SQLite file path or postgres:// URL (or set DATABASE_URL)

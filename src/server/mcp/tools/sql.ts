@@ -6,10 +6,7 @@
  * for — and their errors are taught here, because the engine's own "no such
  * table" has nothing in it to retry with.
  */
-import { clampLimit } from '@mistriwork/engine/adapters/adapter.js';
-import { STATEMENT_TIMEOUT_MS } from '@mistriwork/engine/adapters/statementControl.js';
-import type { DatabaseSchema } from '@mistriwork/engine/shared/schema.js';
-import { distance } from '@mistriwork/engine/shared/suggest.js';
+import { clampLimit, STATEMENT_TIMEOUT_MS, distance, type DatabaseSchema } from '@mistriwork/engine/host';
 import { READS, STATS, type Handler } from '../toolkit.js';
 
 export const definitions = [

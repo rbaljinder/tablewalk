@@ -7,22 +7,22 @@ import { test, type TestContext } from 'node:test';
 import {
   Refusal,
   TransactionOutcomeUnknown,
-  WriteConflict,
-  type Adapter,
-  type QueryRequest,
-  type WriteTransaction,
-} from '@mistriwork/engine/adapters/adapter.js';
-import { SqliteAdapter } from '@mistriwork/engine/adapters/sqlite.js';
-import { Registry } from '@mistriwork/engine/server/connections.js';
-import { runTool } from '../src/server/mcp.js';
-import { clearJournal, history, lastRevertible, recordWrite } from '@mistriwork/engine/server/journal.js';
-import {
+  Registry,
+  history,
+  lastRevertible,
+  recordWrite,
   changingReferences,
-  deletionDependents,
   recordedUpdate,
   recordedInsert,
   recordedDelete,
-} from '@mistriwork/engine/server/recordWriteOperations.js';
+  type Adapter,
+  type WriteTransaction,
+} from '@mistriwork/engine/host';
+import { WriteConflict, type QueryRequest } from '@mistriwork/engine/adapters/adapter.js';
+import { SqliteAdapter } from '@mistriwork/engine/adapters/sqlite.js';
+import { runTool } from '../src/server/mcp.js';
+import { clearJournal } from '@mistriwork/engine/server/journal.js';
+import { deletionDependents } from '@mistriwork/engine/server/recordWriteOperations.js';
 
 const sql = { text: '', params: [] };
 const request = { table: 'item', key: { id: 1 }, values: { name: 'new' } };

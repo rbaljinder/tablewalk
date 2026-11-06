@@ -54,9 +54,9 @@
     "audit:prod": "npm audit --omit=dev --audit-level=high"
   },
   "dependencies": {
-    "@mistriwork/engine": "1.0.0-rc.14",
-    "@mistriwork/kit": "1.0.0-rc.14",
-    "@mistriwork/ui": "1.0.0-rc.14"
+    "@mistriwork/engine": "1.0.0-rc.17",
+    "@mistriwork/kit": "1.0.0-rc.17",
+    "@mistriwork/ui": "1.0.0-rc.17"
   },
   "devDependencies": {
     "@base-ui/react": "^1.8.0",

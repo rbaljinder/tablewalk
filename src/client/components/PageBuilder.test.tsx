@@ -393,7 +393,7 @@ test('timeline streams survive edits and do not acquire a list column picker', a
       {
         kind: 'timeline',
         title: 'Activity',
-        streams: [{ from: 'invoice', path: 'customer_id', at: 'issued_on', show: 'id', filter: 'total > 0' }],
+        streams: [{ from: 'invoice', path: 'customer_id', at: 'issued_on', text: 'id', filter: 'total > 0' }],
         when: 'id > 0',
         width: 'half',
         offsetLeft: 'half',

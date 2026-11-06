@@ -2,10 +2,20 @@
  * `record`: one row, its human name, and every table that points at it with
  * a count — the reverse walk no SQL client surfaces — for one key or twenty.
  */
-import type { Adapter, Filter } from '@mistriwork/engine/adapters/adapter.js';
-import { readCount, readRecords, readView } from '@mistriwork/engine/server/resourceReadOperations.js';
-import { findTable, labelPath, primaryKey, referencesTo, tableNamed, type DatabaseSchema } from '@mistriwork/engine/shared/schema.js';
-import { quoteValue } from '@mistriwork/engine/shared/query.js';
+import {
+  readCount,
+  readRecords,
+  readView,
+  findTable,
+  labelPath,
+  primaryKey,
+  referencesTo,
+  tableNamed,
+  quoteValue,
+  type Adapter,
+  type Filter,
+  type DatabaseSchema,
+} from '@mistriwork/engine/host';
 import { COUNT_LIMIT, COUNT_LIMIT_WORDS as bound, linkTo, READS, STATS, type Handler } from '../toolkit.js';
 
 export const definitions = [

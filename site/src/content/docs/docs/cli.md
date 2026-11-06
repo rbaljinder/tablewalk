@@ -22,6 +22,7 @@ npx tablewalk postgres://localhost/app --schema public --port 4200 --open
 | `tablewalk <db> --export md` | Prints the schema, then exits |
 | `tablewalk migrate <command>` | Changes the schema with versioned SQL files |
 | `tablewalk seed [<db>]` | Fills a writable database with believable rows |
+| `tablewalk journal [<db>]` | Keeps a writable connection's Undo history across restarts |
 
 A path typed on the command line is relative to the current directory; a path written in `tablewalk.json` is relative to that file's folder.
 
@@ -142,6 +143,16 @@ Fills every table, parents before children, keeping `CHECK` values, keys, `NOT N
 | `--append` | Add to tables that already hold rows; otherwise a table with rows is refused. |
 
 Exit codes: 1 could not run, 2 refused (read-only, or rows already there).
+
+## journal
+
+```sh
+tablewalk journal --config tablewalk.json --connection shop
+```
+
+Makes the store that keeps a writable connection's [Undo](/docs/writing/#undo) history: two reserved tables in its database. With them, Undo and the MCP `revert` still reach the writes made before a restart, the last 50 per connection for 7 days. Opening a connection never makes them, and running the command again changes nothing. It works only on a connection marked `"writable": true`.
+
+Exit codes: 1 could not run, 2 refused (read-only, or an HTTP API).
 
 ## Version and help
 

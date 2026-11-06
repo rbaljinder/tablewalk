@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { request } from 'node:http';
 import { test } from 'node:test';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Registry } from '@mistriwork/engine/host';
 import { commandOperations, createApp } from './support/createApp.js';
 
 test('suite drain tracks an ordinary POST while its body is still arriving', async () => {

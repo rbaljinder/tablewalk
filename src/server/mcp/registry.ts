@@ -6,16 +6,16 @@
  * assembles them, checks a call against its declaration, and adds what
  * every answer carries.
  */
-import type { Registry } from '@mistriwork/engine/server/connections.js';
 import {
   STATEMENT_TIMEOUT_MS,
   StatementStopped,
   stoppedReason,
   throwIfCancelled,
   withCancellation,
-} from '@mistriwork/engine/adapters/statementControl.js';
+  distance,
+  type Registry,
+} from '@mistriwork/engine/host';
 import { openFor, sessionEgress, type Handler } from './toolkit.js';
-import { distance } from '@mistriwork/engine/shared/suggest.js';
 import * as schemaTools from './tools/schema.js';
 import * as queryTools from './tools/query.js';
 import * as sqlTools from './tools/sql.js';

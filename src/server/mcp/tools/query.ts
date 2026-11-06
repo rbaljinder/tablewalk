@@ -4,11 +4,17 @@
  * bind every value and check every path against the catalog, which is why
  * the descriptions send an agent here before `sql`.
  */
-import { readBreakdown, readRecords, readView } from '@mistriwork/engine/server/resourceReadOperations.js';
-import { findTable } from '@mistriwork/engine/shared/schema.js';
-import { explain, parseQuery } from '@mistriwork/engine/shared/query.js';
-import { textToView } from '@mistriwork/engine/shared/viewtext.js';
-import { looksLikeBreakdown, textToBreakdown } from '@mistriwork/engine/shared/breakdowntext.js';
+import {
+  readBreakdown,
+  readRecords,
+  readView,
+  findTable,
+  explain,
+  parseQuery,
+  textToView,
+  looksLikeBreakdown,
+  textToBreakdown,
+} from '@mistriwork/engine/host';
 import { COUNT_LIMIT, COUNT_LIMIT_WORDS as bound, linkTo, READS, STATS, type Handler } from '../toolkit.js';
 
 export const definitions = [

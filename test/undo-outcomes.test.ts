@@ -6,11 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { TransactionOutcomeUnknown, type Adapter } from '@mistriwork/engine/adapters/adapter.js';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { TransactionOutcomeUnknown, Registry, history, recordWrite, type Adapter } from '@mistriwork/engine/host';
 import { createApp } from './support/createApp.js';
 import { agentTools, runTool, setAdvertiseOutputSchema, setElicitor } from '../src/server/mcp.js';
-import { clearJournal, history, recordWrite } from '@mistriwork/engine/server/journal.js';
+import { clearJournal } from '@mistriwork/engine/server/journal.js';
 
 async function fixture() {
   const directory = mkdtempSync(join(tmpdir(), 'tablewalk-undo-outcomes-'));

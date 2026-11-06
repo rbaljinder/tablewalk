@@ -10,10 +10,9 @@ import { DEFAULT_POLICY } from '@mistriwork/engine/adapters/http/egress.js';
 import { HttpAdapter } from '@mistriwork/engine/adapters/http/httpAdapter.js';
 import { draftDescription } from '@mistriwork/engine/adapters/http/httpDescription.js';
 import { readOpenApi } from '@mistriwork/engine/adapters/http/openapi.js';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Registry, Refusal } from '@mistriwork/engine/host';
 import { operationRefusal } from '@mistriwork/engine/server/http/httpOperationRoutes.js';
 import { createApp } from './support/createApp.js';
-import { Refusal } from '@mistriwork/engine/shared/refusal.js';
 import { startFakeRest } from './support/fakeRest.js';
 
 /* The explorer's API tab, server side: a resource's documented reads,

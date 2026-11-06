@@ -84,11 +84,13 @@ async function served(args: string[]): Promise<string[]> {
 }
 
 /* Ceilings, from the monorepo's measurements (36 for --help, 172 for --mcp, 250 for serving) and this package's own: the
-   counts here are 35, 36, 172 and 238. A jump past one is a module reached again that a mode should leave to the one
-   that needs it. */
+   counts here are 35, 36, 175 and 244. A jump past one is a module reached again that a mode should leave to the one
+   that needs it. `--mcp` is 175, not 172, since the server modules take the engine's names from its host entry point
+   (`@mistriwork/engine/host`): one module that re-exports them, and the few modules behind it that the deeper paths did not
+   reach in this mode. */
 const HELP_CEILING = 36;
 const VERSION_CEILING = 70;
-const MCP_CEILING = 172;
+const MCP_CEILING = 175;
 const SERVE_CEILING = 250;
 
 const oneTable = (t: { after(fn: () => void): void }): string => {

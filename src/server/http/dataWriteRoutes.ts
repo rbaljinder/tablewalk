@@ -6,10 +6,16 @@
  * below. An App has neither: it refuses raw SQL among its diagnostic tools
  * (appConnections.ts), and a save is corrected by another save.
  */
-import { clampLimit } from '@mistriwork/engine/adapters/adapter.js';
-import { withCancellation } from '@mistriwork/engine/adapters/statementControl.js';
-import { attributeAction } from '@mistriwork/engine/adapters/writeAttribution.js';
-import { history, latestRevertible, recordWrite as recordJournalWrite, revert, summarise } from '@mistriwork/engine/server/journal.js';
+import {
+  clampLimit,
+  withCancellation,
+  attributeAction,
+  history,
+  latestRevertible,
+  recordWrite as recordJournalWrite,
+  revert,
+  summarise,
+} from '@mistriwork/engine/host';
 import { writeRefusal } from '@mistriwork/engine/server/http/writeRefusal.js';
 import { send, sendResource } from '@mistriwork/engine/server/http/reply.js';
 import type { PostContext } from '@mistriwork/engine/server/http/context.js';

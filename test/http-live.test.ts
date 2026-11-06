@@ -10,7 +10,7 @@ import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Server } from 'node:http';
 import { createApp } from './support/createApp.js';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Registry } from '@mistriwork/engine/host';
 import { liveSkip } from './live.js';
 
 interface Answer {

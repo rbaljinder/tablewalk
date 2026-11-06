@@ -10,9 +10,8 @@
  * larger than the code it replaced.
  */
 import { createInterface } from 'node:readline';
-import { attributeWrites } from '@mistriwork/engine/adapters/writeAttribution.js';
+import { attributeWrites, type Registry } from '@mistriwork/engine/host';
 import { inSpan, parseTraceparent, tracing } from '@mistriwork/engine/adapters/telemetry/trace.js';
-import type { Registry } from '@mistriwork/engine/server/connections.js';
 import { agentTools, runTool } from './registry.js';
 import { setElicitor } from './tools/write.js';
 import { completeArgument, listResources, listResourceTemplates, readResource, type Shelf } from './shelf.js';

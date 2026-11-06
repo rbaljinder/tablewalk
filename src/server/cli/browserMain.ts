@@ -116,7 +116,7 @@ export const main: Main = async () => {
   if (printing) console.log = (...args: unknown[]) => console.error(...args);
 
   const [{ Registry, redact }, { readStartupConfig }, { configLocations }, { configureWriteOrder }] = await Promise.all([
-    import('@mistriwork/engine/server/connections.js'),
+    import('@mistriwork/engine/host'),
     import('@mistriwork/engine/server/cli/config.js'),
     import('@mistriwork/engine/server/config/locations.js'),
     import('@mistriwork/engine/adapters/writeLanes.js'),

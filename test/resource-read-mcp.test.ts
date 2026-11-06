@@ -5,8 +5,8 @@ import { basename, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { setImmediate as nextTurn } from 'node:timers/promises';
-import { MAX_LIMIT, Refusal, type Adapter, type QueryResult } from '@mistriwork/engine/adapters/adapter.js';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Refusal, Registry, type Adapter } from '@mistriwork/engine/host';
+import { MAX_LIMIT, type QueryResult } from '@mistriwork/engine/adapters/adapter.js';
 import { runTool } from '../src/server/mcp.js';
 
 type Reply = Awaited<ReturnType<typeof runTool>>;

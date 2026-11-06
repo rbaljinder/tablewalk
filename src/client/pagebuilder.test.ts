@@ -85,7 +85,7 @@ test('browser export uses the shared emitter and keeps timeline and layout seman
               hidden: true,
               when: 'id > 0',
               limit: 12,
-              streams: [{ from: 'invoice', whose: 'customer_id', at: 'issued_on', show: 'id', detail: 'status', query: 'total > 0' }],
+              streams: [{ from: 'invoice', whose: 'customer_id', at: 'issued_on', text: 'id', badge: 'status', query: 'total > 0' }],
             },
             { kind: 'fields', show: ['name'], offsetRight: 'half', width: 'half', names: false },
           ],

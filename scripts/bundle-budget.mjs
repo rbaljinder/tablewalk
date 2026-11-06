@@ -27,9 +27,10 @@ export const CLIENT = join(ROOT, 'dist/client');
 
 /* Bytes, per first page. Brotli is what a browser is sent (the server prefers the `.br` beside each file); raw is what it
    parses and compiles. The Workbench is the kit's shell page and the Workbench's own chunk, which the shell loads the
-   moment it shows the Workbench. */
+   moment it shows the Workbench. The style ceilings rose with rc.17 (raw 378_860 to 384_000, brotli 51_800 to 52_300): the
+   kit's stylesheet is larger than rc.14's by about 3 KB, and this package added no CSS. */
 export const BUDGET = {
-  workbench: { script: { raw: 1_287_900, br: 361_400 }, style: { raw: 378_860, br: 51_800 } },
+  workbench: { script: { raw: 1_287_900, br: 361_400 }, style: { raw: 384_000, br: 52_300 } },
 };
 
 /* The chrome's words in a language besides English (src/client/copy/<lang>.ts), one chunk each, which only a reader of
