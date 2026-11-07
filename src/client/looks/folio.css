@@ -11,8 +11,8 @@
    action, Run, is printed in the ink itself. Dark is the same page under a lamp: warm charcoal, never blue.
 
    Bends: none of the refusal list's. A null keeps the native italic (the typesetter's mark for what is not the text). */
-@import './refined-base.css';
-
+/* Its structure is refined-base.css, drawn by native.css (the first stylesheet) and keyed to include Folio; this sheet is
+   Folio's own, and is fetched only when it is worn. */
 @layer theme {
   :root[data-host-look='folio'] {
     --ground: #f8f7f4;

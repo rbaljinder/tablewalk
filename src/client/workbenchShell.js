@@ -21,6 +21,8 @@ import { setPublicPlacement } from '@mistriwork/kit/client/requestIdentity.js';
 import { setMessageScope } from '@mistriwork/kit/client/messages.js';
 import { initHelp } from '@mistriwork/kit/client/help.js';
 import { openPeek } from '@mistriwork/kit/client/peekpanel.js';
+/* The browser's own look (looks/native.css): a stylesheet of the Workbench's chunk, so it is the page's own, not a fetch of its own. */
+import './looks/native.css';
 import { wearWorkbenchLook } from './workbenchLook.js';
 import { declareHostLooks } from './hostLooks.js';
 import { workbenchShell } from './workbench.js';

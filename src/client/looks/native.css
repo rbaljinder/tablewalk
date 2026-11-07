@@ -1,0 +1,109 @@
+/* The database browser's own look: Instrument's structure in the Fog and moss palette.
+
+   "A precision instrument: a hairline measuring grid, every figure on a monospace column", in near-monochrome neutral
+   grey with one low-chroma moss for what you can follow (a reference, the current table, focus) and for Run. Words are
+   set in Inter and everything counted, compared or keyed in IBM Plex Mono, so figures line up to the digit and a key
+   reads character by character; both faces are the kit's, self-hosted (faces.css) and fetched only when the page draws
+   them. Absence is NULL in small capitals, which a stored string "null" can never be mistaken for. Dark is the same
+   instrument by night.
+
+   Why it is a sheet here and not the kit's: the kit owns the tokens every product shares, and has no default host look;
+   "default" always means those. This is the browser's own look over them, written as rules for the root with no host
+   look worn (`:root:not([data-host-look])`), so it is in the page's first stylesheet and paints with the first load,
+   with no extra request. A host look (hostLooks.js) sets `data-host-look` and so leaves this look's colour and the
+   kit's tokens as they are: Blueprint, Console and Folio sit on the kit's own tokens, untouched by it. The structure
+   below is shared on purpose with Folio (refined-base.css) and Instrument's palettes (instrument-base.css), whose rules
+   are keyed to include the native look, so a palette's sheet is colour alone.
+
+   Bends, each on purpose:
+   - The column heads stand on a tinted band: with hairlines between columns, a band is what tells the head from the
+     first row at a glance without a heavier rule.
+   - The schema diagram sits on a dot graticule: the one place the instrument shows its scale; it carries no meaning a
+     reader needs.
+   - A second face, IBM Plex Mono, for figures. */
+@import './refined-base.css';
+@import './instrument-base.css';
+
+@layer theme {
+  /* Colour, light and dark each, every pair checked: text, NULL and type ink, key and reference ink on every ground
+     they sit on at 4.5:1; a field's edge and the focus ring at 3:1. `html:root` outranks the kit's own `:root` tokens,
+     whichever sheet came first. */
+  /* Fog and moss: near-monochrome neutral grey, one low-chroma moss for what you can follow. */
+  html:root:not([data-host-look]) {
+    --ground: #f5f5f5;
+    --surface: #fefefe;
+    --raised: #ededed;
+    --line: #e3e3e3;
+    --line-strong: #cccccc;
+    --line-control: #858585;
+    --ink: #171717;
+    --ink-muted: #575757;
+    --ink-subtle: #686868;
+    --accent: #4d6b2b;
+    --accent-ink: #42601f;
+    --on-accent: #ffffff;
+    --accent-soft: #4d6b2b14;
+    --link: #42601f;
+    --focus: #5f8336;
+    --status-good: #1f7a5a;
+    --status-warning: #9c5a06;
+    --status-critical: #b8352c;
+    --status-info: #5b54a8;
+    --row-hover: #f3f3f3;
+    --pop-line: #d9d9d9;
+    --head-band: #f5f5f5;
+    --graticule: #1717171f;
+  }
+  @media (prefers-color-scheme: dark) {
+    html:root:not([data-host-look]):not([data-theme='light']) {
+      --ground: #101010;
+      --surface: #151515;
+      --raised: #1d1d1d;
+      --line: #262626;
+      --line-strong: #363636;
+      --line-control: #6b6b6b;
+      --ink: #e8e8e8;
+      --ink-muted: #a6a6a6;
+      --ink-subtle: #939393;
+      --accent: #9cc26a;
+      --accent-ink: #b0d283;
+      --on-accent: #121410;
+      --accent-soft: #9cc26a1f;
+      --link: #b0d283;
+      --focus: #9cc26a;
+      --status-good: #5cc6a0;
+      --status-warning: #e6a85c;
+      --status-critical: #f0857a;
+      --status-info: #b2aaf5;
+      --row-hover: #1a1a1a;
+      --pop-line: #2c2c2c;
+      --head-band: #181818;
+      --graticule: #ffffff17;
+    }
+  }
+  html:root:not([data-host-look])[data-theme='dark'] {
+    --ground: #101010;
+    --surface: #151515;
+    --raised: #1d1d1d;
+    --line: #262626;
+    --line-strong: #363636;
+    --line-control: #6b6b6b;
+    --ink: #e8e8e8;
+    --ink-muted: #a6a6a6;
+    --ink-subtle: #939393;
+    --accent: #9cc26a;
+    --accent-ink: #b0d283;
+    --on-accent: #121410;
+    --accent-soft: #9cc26a1f;
+    --link: #b0d283;
+    --focus: #9cc26a;
+    --status-good: #5cc6a0;
+    --status-warning: #e6a85c;
+    --status-critical: #f0857a;
+    --status-info: #b2aaf5;
+    --row-hover: #1a1a1a;
+    --pop-line: #2c2c2c;
+    --head-band: #181818;
+    --graticule: #ffffff17;
+  }
+}

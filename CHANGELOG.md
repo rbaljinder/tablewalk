@@ -4,6 +4,11 @@
 
 Built on `@mistriwork/engine`, `kit` and `ui` at exactly `1.0.0-rc.17`.
 
+- The browser's own look is Instrument in the Fog and moss palette: Inter for words, IBM Plex Mono for figures, a hairline
+  measuring grid, near-monochrome grey with one moss accent. It is a sheet of this package (`looks/native.css`, in the
+  first stylesheet, so it paints with the first load) over the kit's native tokens; the former native look is retired.
+  Instrument's other palettes (Graphite, Stone, Slate, Ink) and Folio are host looks beside Blueprint and Console.
+  `?look=instrument&palette=fog` still opens, as the default.
 - Blueprint and Console are the kit's host looks (`registerHostLooks`): they are offered in Preferences beside the
   built-in looks, persist with the reader's look, and set `data-host-look` on the page. `?look=blueprint`,
   `?look=console` and `?look=default` still pick one from the address. Console names its data face with `--data-face`;

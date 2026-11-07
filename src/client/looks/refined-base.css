@@ -1,4 +1,5 @@
-/* The refined looks' common ground (instrument.css, folio.css import it; neither is worn without it).
+/* The refined looks' common ground: the browser's own look, Instrument's palettes and Folio (native.css imports it, so
+   it is in the first stylesheet; each rule is keyed to the native look, which wears no host look, and to those looks).
 
    What the audit of the native look found, answered once for both: one code face for chrome, labels and data alike,
    so nothing in the interface outranked anything else; tracked capitals on every label, louder than the values under
@@ -7,7 +8,7 @@
    record's tools wrapping to two lines; a phone's column heads given to their move arrows instead of their names.
 
    So both looks set the interface in Inter (the kit's self-hosted face, @mistriwork/kit/client/fonts/faces.css,
-   fetched only when one of these looks is worn), in sentence case at three weights; one quiet button dialect in the
+   fetched when the page draws it), in sentence case at three weights; one quiet button dialect in the
    bar beside the one filled action, Run; the current thing a tint and its ink, never a bar; popups on one hairline,
    one radius step and one soft shadow; and on a phone a column head is its name. Each look then says what is its own:
    the face its data is set in, its grid's rules, its ground and its one colour.
@@ -17,7 +18,7 @@
 @import '@mistriwork/kit/client/fonts/faces.css';
 
 @layer theme {
-  :root:is([data-host-look='instrument'], [data-host-look^='instrument-'], [data-host-look='folio']) {
+  :root:is(:not([data-host-look]), [data-host-look='instrument'], [data-host-look^='instrument-'], [data-host-look='folio']) {
     --face-ui: Inter, 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
     --sans: var(--face-ui);
     /* The kit's seam for a host look's data face (tokens.css): every chrome string the native look set in the code
@@ -28,7 +29,7 @@
     --grid-head-char: 6.8;
   }
 
-  :root:is([data-host-look='instrument'], [data-host-look^='instrument-'], [data-host-look='folio']) {
+  :root:is(:not([data-host-look]), [data-host-look='instrument'], [data-host-look^='instrument-'], [data-host-look='folio']) {
     & body {
       --radius-item: 5px;
       --radius-pop: 8px;
