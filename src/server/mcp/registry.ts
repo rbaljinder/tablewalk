@@ -6,16 +6,16 @@
  * assembles them, checks a call against its declaration, and adds what
  * every answer carries.
  */
-import type { Registry } from '@mistriwork/engine/server/connections.js';
 import {
   STATEMENT_TIMEOUT_MS,
   StatementStopped,
   stoppedReason,
   throwIfCancelled,
   withCancellation,
-} from '@mistriwork/engine/adapters/statementControl.js';
-import { openFor, sessionEgress, type Handler } from './toolkit.js';
-import { distance } from '@mistriwork/engine/shared/suggest.js';
+  distance,
+  type Registry,
+} from '@mistriwork/engine/host';
+import { openFor, sessionEgress, type Handler, ToolError, errorCodeOf, type ErrorCode } from './toolkit.js';
 import * as schemaTools from './tools/schema.js';
 import * as queryTools from './tools/query.js';
 import * as sqlTools from './tools/sql.js';
@@ -61,7 +61,7 @@ async function callTool(registry: Registry, name: string, args: Record<string, u
   if (name === 'connections') return schemaTools.connections(registry);
   const opened = await openFor(registry, args.connection);
   const handler = HANDLERS.get(name);
-  if (!handler) throw new Error(`No tool called "${name}".`);
+  if (!handler) throw new ToolError('not_found', `No tool called "${name}".`);
   return handler({ registry, args, ...opened });
 }
 
@@ -117,7 +117,7 @@ let toolProfile: string[] | null = null;
 export function setToolProfile(name: string): void {
   if (!name) return;
   if (!(name in TOOL_PROFILES)) {
-    throw new Error(`"${name}" is not a tool profile. Choose one of: ${Object.keys(TOOL_PROFILES).join(', ')}.`);
+    throw new ToolError('invalid_argument', `"${name}" is not a tool profile. Choose one of: ${Object.keys(TOOL_PROFILES).join(', ')}.`);
   }
   toolProfile = TOOL_PROFILES[name];
 }
@@ -246,7 +246,12 @@ export async function runTool(
   name: string,
   args: Record<string, unknown>,
   options: { signal?: AbortSignal } = {},
-): Promise<{ content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown>; isError: boolean }> {
+): Promise<{
+  content: Array<{ type: 'text'; text: string }>;
+  structuredContent?: Record<string, unknown>;
+  _meta?: { 'tablewalk/code': ErrorCode };
+  isError: boolean;
+}> {
   const signal = options.signal ?? new AbortController().signal;
   try {
     /* The profile is enforced here, not only in the listing. `--tools explore`
@@ -255,7 +260,8 @@ export async function runTool(
        only ever removes, so a tool outside it is refused with the profile
        named; a client that needs it starts the server with a wider one. */
     if (toolProfile && !toolProfile.includes(name)) {
-      throw new Error(
+      throw new ToolError(
+        'forbidden',
         `"${name}" is not offered by this server's tool profile. ` +
           `Offered: ${toolProfile.join(', ')}. Start tablewalk with --tools full to widen it.`,
       );
@@ -269,7 +275,7 @@ export async function runTool(
     const declared = [...TOOLS, ...WRITE_TOOLS].find((t) => t.name === name);
     if (declared) {
       const problem = argumentProblem(declared.inputSchema as InputSchema, args);
-      if (problem) throw new Error(`${name}: ${problem}`);
+      if (problem) throw new ToolError('invalid_argument', `${name}: ${problem}`);
     }
     /* A call withdrawn before its turn never starts. */
     throwIfCancelled(signal);
@@ -341,8 +347,10 @@ export async function runTool(
     /* A tool that fails is a result, not a protocol error — the model
        reads the message and adjusts; a JSON-RPC error would read as
        the server being broken. */
+    const code = errorCodeOf(err, signal.aborted);
     return {
       content: [{ type: 'text', text: stoppedText(err, signal.aborted) ?? (err as Error).message }],
+      _meta: { 'tablewalk/code': code },
       isError: true,
     };
   }

@@ -11,7 +11,7 @@ import { request, type Server } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { describe, test } from 'node:test';
 import type { Bound } from '@mistriwork/engine/server/http/trust.js';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Registry } from '@mistriwork/engine/host';
 import { createApp } from './support/createApp.js';
 import { BROWSER_DISPATCHERS } from '../src/server/http/dispatchers.js';
 

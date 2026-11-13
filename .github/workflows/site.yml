@@ -1,4 +1,5 @@
-# tablewalk.dev: the database browser's documentation, built into site/dist/ on pushes to main.
+# tablewalk.dev: the database browser's documentation, built into site/dist/ and its links checked on pull requests and
+# pushes to main; deployed only from a push to main (or a manual run).
 #
 # The site is a package of its own (site/package.json), so this job installs only it: the root project's dependencies
 # are a database browser's, and the docs need none of them.
@@ -11,11 +12,15 @@ on:
   push:
     branches: [main]
     paths: ['site/**', 'package.json', '.github/workflows/site.yml']
+  # A broken link should fail the pull request that breaks it, not the push to main after it.
+  pull_request:
+    paths: ['site/**', 'package.json', '.github/workflows/site.yml']
   workflow_dispatch:
 permissions:
   contents: read
+# Per ref, so a pull request's run never cancels the deploy that a push to main is making.
 concurrency:
-  group: site
+  group: site-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   deploy:
@@ -50,7 +55,7 @@ jobs:
           fi
 
       - name: Deploy to Cloudflare Pages
-        if: steps.have.outputs.yes == 'true'
+        if: steps.have.outputs.yes == 'true' && github.event_name != 'pull_request'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

@@ -2,11 +2,21 @@
  * `record`: one row, its human name, and every table that points at it with
  * a count — the reverse walk no SQL client surfaces — for one key or twenty.
  */
-import type { Adapter, Filter } from '@mistriwork/engine/adapters/adapter.js';
-import { readCount, readRecords, readView } from '@mistriwork/engine/server/resourceReadOperations.js';
-import { findTable, labelPath, primaryKey, referencesTo, tableNamed, type DatabaseSchema } from '@mistriwork/engine/shared/schema.js';
-import { quoteValue } from '@mistriwork/engine/shared/query.js';
-import { COUNT_LIMIT, COUNT_LIMIT_WORDS as bound, linkTo, READS, STATS, type Handler } from '../toolkit.js';
+import {
+  readCount,
+  readRecords,
+  readView,
+  findTable,
+  labelPath,
+  primaryKey,
+  referencesTo,
+  tableNamed,
+  quoteValue,
+  type Adapter,
+  type Filter,
+  type DatabaseSchema,
+} from '@mistriwork/engine/host';
+import { COUNT_LIMIT, COUNT_LIMIT_WORDS as bound, linkTo, READS, STATS, type Handler, ToolError } from '../toolkit.js';
 
 export const definitions = [
   {
@@ -74,21 +84,27 @@ export const handlers = {
   record: async ({ args, adapter, schema, id }) => {
     const table = tableNamed(schema, String(args.table ?? ''));
     if (!table)
-      throw new Error(`Unknown table "${String(args.table)}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`);
+      throw new ToolError(
+        'not_found',
+        `Unknown table "${String(args.table)}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`,
+      );
     const keys = Array.isArray(args.keys)
       ? (args.keys as Array<Record<string, string | number>>)
       : args.key
         ? [args.key as Record<string, string | number>]
         : [];
-    if (!keys.length) throw new Error('Give `key` for one record, or `keys` for several.');
-    if (keys.length > 20) throw new Error(`${keys.length} keys is more than one call carries. Take 20 at a time.`);
+    if (!keys.length) throw new ToolError('invalid_argument', 'Give `key` for one record, or `keys` for several.');
+    if (keys.length > 20) throw new ToolError('limit', `${keys.length} keys is more than one call carries. Take 20 at a time.`);
     const expand = Math.max(0, Math.min(10, Number(args.expand ?? 0) || 0));
 
     const wanted = primaryKey(table);
     for (const key of keys) {
       const missing = wanted.filter((c) => key[c] === undefined);
       if (missing.length) {
-        throw new Error(`A key is missing ${missing.join(', ')} — a ${table.name} is identified by (${wanted.join(', ')}).`);
+        throw new ToolError(
+          'invalid_argument',
+          `A key is missing ${missing.join(', ')} — a ${table.name} is identified by (${wanted.join(', ')}).`,
+        );
       }
     }
 

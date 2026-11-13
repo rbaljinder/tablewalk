@@ -26,7 +26,7 @@ export async function workbenchReads(ctx: RequestContext, source: ResolvedSource
   }
   /**
    * Pages the config file names, for the connection in hand, checked against
-   * its schema here (appProjection.ts says why) and returned with their
+   * its schema here and returned with their
    * reason when they do not fit it. A page's way on to a room goes: there are
    * no rooms here.
    */

@@ -130,7 +130,7 @@ test('page contract: every section survives editing, export, save and reload', a
         width: 'half',
         offsetLeft: 'half',
         when: 'id > 0',
-        streams: [{ from: 'invoice', path: 'customer_id', at: 'invoice_date', show: 'id', detail: 'status', filter: 'total > 0' }],
+        streams: [{ from: 'invoice', path: 'customer_id', at: 'invoice_date', text: 'id', badge: 'status', filter: 'total > 0' }],
       },
     ],
   };
@@ -347,7 +347,8 @@ test('runtime UX: Escape closes each builder picker before the draft', async ({ 
   const fields = builder.locator('.pb-fields-btn').first();
   await fields.click();
   await expect(fields).toHaveAttribute('aria-expanded', 'true');
-  const width = builder.getByRole('button', { name: 'Width', exact: true }).first();
+  // A listbox's button is named by its label, then the value it shows.
+  const width = builder.getByRole('button', { name: /^Width / }).first();
   await width.click();
   await expect(width).toHaveAttribute('aria-expanded', 'true');
   await page.keyboard.press('Escape');

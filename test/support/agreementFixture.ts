@@ -2,7 +2,8 @@
  * The fixture test/agreement.test.ts (the kit's readings of the language) and test/agreement-completer.test.ts (the
  * database browser's completer) both read: one schema, and the DOM stub the client's modules need to load in Node.
  */
-import type { ColumnMeta, DatabaseSchema, ForeignKey, TableMeta } from '@mistriwork/engine/shared/schema.js';
+import type { DatabaseSchema, ForeignKey, TableMeta } from '@mistriwork/engine/host';
+import type { ColumnMeta } from '@mistriwork/engine/shared/schema.js';
 
 /* ---------- fixtures ----------
 

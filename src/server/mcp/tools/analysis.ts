@@ -7,11 +7,11 @@
  */
 import { changeImpact } from '../../changeimpact.js';
 import { extractFixture } from '../../fixture.js';
-import { tableNamed } from '@mistriwork/engine/shared/schema.js';
+import { tableNamed } from '@mistriwork/engine/host';
 import { lintCounts, lintSchema } from '../../../shared/lint.js';
 import { diffSchemas } from '../../../shared/diff.js';
 import { insertOrder } from '../../../shared/order.js';
-import { linkTo, openFor, READS, STATS, wholeKeyOrThrow, type Handler } from '../toolkit.js';
+import { linkTo, openFor, READS, STATS, wholeKeyOrThrow, type Handler, ToolError } from '../toolkit.js';
 
 export const definitions = [
   {
@@ -375,18 +375,22 @@ type Name = (typeof definitions)[number]['name'];
 export const handlers: Record<Name, Handler> = {
   profile: async ({ args, adapter, schema, id }) => {
     if (!adapter.profile) {
-      throw new Error(`${schema.dialect} connections cannot profile in this build.`);
+      throw new ToolError('forbidden', `${schema.dialect} connections cannot profile in this build.`);
     }
     const table = tableNamed(schema, String(args.table ?? ''));
     if (!table)
-      throw new Error(`Unknown table "${String(args.table)}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`);
+      throw new ToolError(
+        'not_found',
+        `Unknown table "${String(args.table)}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`,
+      );
     const result = await adapter.profile(table.id);
     return { connection: id, ...result, link: linkTo(id, encodeURIComponent(table.id)) };
   },
   diff: async ({ registry, args, schema, id }) => {
     const other = String(args.to ?? '').trim();
-    if (!other) throw new Error('`to` names the connection to compare against. Ask `connections` for what exists.');
-    if (other === id) throw new Error(`"${id}" compared with itself is always the same shape. Name a different connection.`);
+    if (!other) throw new ToolError('invalid_argument', '`to` names the connection to compare against. Ask `connections` for what exists.');
+    if (other === id)
+      throw new ToolError('invalid_argument', `"${id}" compared with itself is always the same shape. Name a different connection.`);
     /* Opened here rather than through the caller's resolved pair: a diff is
        the one read that is *about* two connections, and the second one may
        never have been opened this session. */
@@ -412,7 +416,10 @@ export const handlers: Record<Name, Handler> = {
         : undefined;
     for (const wanted of asked ?? []) {
       if (!tableNamed(schema, wanted)) {
-        throw new Error(`Unknown table "${wanted}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`);
+        throw new ToolError(
+          'not_found',
+          `Unknown table "${wanted}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`,
+        );
       }
     }
     const plan = insertOrder(
@@ -434,11 +441,14 @@ export const handlers: Record<Name, Handler> = {
   lint: async ({ args, schema, id }) => {
     const only = args.table === undefined ? undefined : tableNamed(schema, String(args.table));
     if (args.table !== undefined && !only) {
-      throw new Error(`Unknown table "${String(args.table)}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`);
+      throw new ToolError(
+        'not_found',
+        `Unknown table "${String(args.table)}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`,
+      );
     }
     const levels = ['high', 'medium', 'low'];
     const floor = args.severity === undefined ? levels.length - 1 : levels.indexOf(String(args.severity));
-    if (floor === -1) throw new Error('`severity` is high, medium or low.');
+    if (floor === -1) throw new ToolError('invalid_argument', '`severity` is high, medium or low.');
     const wanted = new Set(levels.slice(0, floor + 1));
     const findings = lintSchema(schema)
       .filter((f) => (only ? f.table === only.id : true))
@@ -492,7 +502,8 @@ export const handlers: Record<Name, Handler> = {
   change_impact: async ({ args, adapter, schema, id }) => {
     const table = tableNamed(schema, String(args.table ?? ''));
     if (!table) {
-      throw new Error(
+      throw new ToolError(
+        'not_found',
         `Unknown table "${String(args.table ?? '')}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`,
       );
     }
@@ -504,7 +515,10 @@ export const handlers: Record<Name, Handler> = {
   fixture: async ({ args, adapter, schema, id }) => {
     const table = tableNamed(schema, String(args.table ?? ''));
     if (!table)
-      throw new Error(`Unknown table "${String(args.table)}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`);
+      throw new ToolError(
+        'not_found',
+        `Unknown table "${String(args.table)}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`,
+      );
     const key = (args.key ?? {}) as Record<string, string | number>;
     wholeKeyOrThrow(schema, table, key);
     const taken = await extractFixture(adapter, schema, table.id, key, {

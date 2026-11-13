@@ -4,9 +4,15 @@
  * connection, the deep link an answer carries, and the count of rows that
  * have left the machine. A family imports this and none of its siblings.
  */
-import type { Registry } from '@mistriwork/engine/server/connections.js';
-import type { Adapter } from '@mistriwork/engine/adapters/adapter.js';
-import { findTable, primaryKey, type DatabaseSchema } from '@mistriwork/engine/shared/schema.js';
+import {
+  findTable,
+  primaryKey,
+  Refusal,
+  StatementStopped,
+  type Registry,
+  type Adapter,
+  type DatabaseSchema,
+} from '@mistriwork/engine/host';
 
 /**
  * The hints a client acts on without reading prose: reading is all the read
@@ -60,7 +66,7 @@ export async function openFor(registry: Registry, asked: unknown): Promise<Open>
       .list()
       .map((c) => c.id)
       .join(', ');
-    throw new Error(`No connection called "${String(wanted)}". Known: ${known}.`);
+    throw new ToolError('not_found', `No connection called "${String(wanted)}". Known: ${known}.`);
   }
   const { adapter, schema } = await registry.open(entry.id);
   return { adapter, schema, id: entry.id };
@@ -96,6 +102,50 @@ export function wholeKeyOrThrow(schema: DatabaseSchema, table: { name: string; i
   const wanted = primaryKey(findTable(schema, table.id)!);
   const missing = wanted.filter((c) => key[c] === undefined);
   if (missing.length) {
-    throw new Error(`The key is missing ${missing.join(', ')} — a ${table.name} is identified by (${wanted.join(', ')}).`);
+    throw new ToolError(
+      'invalid_argument',
+      `The key is missing ${missing.join(', ')} — a ${table.name} is identified by (${wanted.join(', ')}).`,
+    );
   }
+}
+
+export const ERROR_CODES = [
+  /** The connection is not `"writable": true`, or the dialect has no write path here. */
+  'read_only',
+  /** A table, connection or tool the call names does not exist. */
+  'not_found',
+  /** The statement ran into its cap. Ask a narrower question. */
+  'timeout',
+  /** The client withdrew the call. */
+  'cancelled',
+  /** The arguments are wrong, missing or contradict each other. */
+  'invalid_argument',
+  /** Not allowed here: a tool outside the profile, a reserved table, a capability this build lacks. */
+  'forbidden',
+  /** Past a bound the tool sets: too many keys in one call. */
+  'limit',
+  /** Anything unclassified: the server's, or the database's, fault. */
+  'internal',
+] as const;
+
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
+/** An error with its code decided where it is thrown, which is where the reason is known. */
+export class ToolError extends Error {
+  readonly code: ErrorCode;
+  constructor(code: ErrorCode, message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'ToolError';
+    this.code = code;
+  }
+}
+
+/** The code for whatever a call threw. `cancelled` is the client's own say, which beats whatever the stop looked like. */
+export function errorCodeOf(error: unknown, cancelled: boolean): ErrorCode {
+  if (cancelled) return 'cancelled';
+  if (error instanceof ToolError) return error.code;
+  if (error instanceof StatementStopped) return error.reason;
+  /* The engine declining a request as written (a key that is not the whole key, a malformed lock): the caller's to fix. */
+  if (error instanceof Refusal) return 'invalid_argument';
+  return 'internal';
 }

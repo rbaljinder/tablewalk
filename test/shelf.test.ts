@@ -3,7 +3,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Registry } from '@mistriwork/engine/host';
 import { listResources, readResource } from '../src/server/mcp/shelf.js';
 
 test('the database MCP lists no App reference and reads none', async () => {

@@ -4,9 +4,8 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import type { Adapter } from '@mistriwork/engine/adapters/adapter.js';
-import { Registry } from '@mistriwork/engine/server/connections.js';
-import { clearJournal, history } from '@mistriwork/engine/server/journal.js';
+import { Registry, history, type Adapter } from '@mistriwork/engine/host';
+import { clearJournal } from '@mistriwork/engine/server/journal.js';
 import { runTool, setToolProfile } from '../src/server/mcp.js';
 
 const table = 'physical_mcp_items';

@@ -5,9 +5,9 @@
  * typescript and Vite — a build toolchain that has no business in a shipped app and is larger than the app.
  *
  * So the runtime half is staged here first, laid out as `npm install tablewalk` leaves it: this package, packed with
- * `npm pack` (its `files` allowlist is exactly what the registry gets) and installed with `--omit=dev` together with what
- * it depends on from the registry — `@mistriwork/engine`, `kit` and `ui` at the versions package.json pins, and the
- * database driver they bring. Listing pg's dependency tree by hand in electron-builder's config was the alternative, and
+ * `npm pack` (its `files` allowlist is exactly what the registry gets) and unpacked beside what it depends on, installed with `npm ci --omit=dev` from the
+ * package's lockfile — `@mistriwork/engine`, `kit` and `ui` at the versions package.json pins, and the database driver they
+ * bring. Listing pg's dependency tree by hand in electron-builder's config was the alternative, and
  * it is wrong the first time pg gains a dependency.
  *
  * One quirk this pairs with, since package.json cannot hold a comment: `extraResources` in that file has *two* entries
@@ -17,7 +17,7 @@
  * connection — which is why it was worth finding before shipping rather than after.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -55,13 +55,22 @@ run('npm', ['pack', '--pack-destination', packed, '--silent'], ROOT);
 const tarball = readdirSync(packed).find((name) => name.endsWith('.tgz'));
 if (!tarball) throw new Error('stage: npm pack wrote no tarball.');
 
+// The package's own dependencies and its lockfile, so what ships is the versions CI tested and not whatever the registry
+// resolves to on the day of the release. `npm ci` wants the manifest and the lock in step, which is why this is the
+// package's manifest under another name and not a hand-written one; its scripts are the repository's, not the app's.
+const { scripts: _scripts, ...manifest } = root;
 writeFileSync(
   join(STAGE, 'package.json'),
-  `${JSON.stringify({ name: 'tablewalk-server', version: root.version, private: true, type: 'module' }, null, 2)}\n`,
+  `${JSON.stringify({ ...manifest, name: 'tablewalk-server', private: true, type: 'module' }, null, 2)}\n`,
 );
+copyFileSync(join(ROOT, 'package-lock.json'), join(STAGE, 'package-lock.json'));
 
-console.log('stage: installing the package and its runtime dependencies');
-run('npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--no-package-lock', join(packed, tarball)], STAGE);
+console.log('stage: installing the runtime dependencies from the lockfile');
+run('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], STAGE);
+// Unpacked, not installed: an install would resolve the package's ranges again.
+const own = join(STAGE, 'node_modules', 'tablewalk');
+mkdirSync(own, { recursive: true });
+run('tar', ['-xzf', join(packed, tarball), '-C', own, '--strip-components=1'], STAGE);
 rmSync(packed, { recursive: true, force: true });
 
 console.log('stage: done');

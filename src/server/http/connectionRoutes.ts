@@ -1,16 +1,11 @@
 /**
  * Connection management: what this server is running, who is asking, and the
  * session-only registry edits the standalone browser's connection form makes.
- * An App server answers the first two in its own words and refuses the rest
- * (appConnections.ts).
+ * An App server (the mistri package's) answers the first two in its own words and refuses the rest.
  */
-import { redact, saveConfig } from '@mistriwork/engine/server/connections.js';
+import { redact, saveConfig, scrubSecrets, storeSecret, connect, resolveConnection, UNTRUSTED_NETWORK } from '@mistriwork/engine/host';
 import { configLocations } from '@mistriwork/engine/server/config/locations.js';
-import { scrubSecrets, storeSecret } from '@mistriwork/engine/server/connections.js';
-import { connect } from '@mistriwork/engine/adapters/connect.js';
-import { resolveConnection } from '@mistriwork/engine/server/auth/credentials.js';
 import { untrustedTargetRefusal } from '@mistriwork/engine/server/http/trust.js';
-import { UNTRUSTED_NETWORK } from '@mistriwork/engine/adapters/net/untrustedDatabase.js';
 import { readJson, send } from '@mistriwork/engine/server/http/reply.js';
 import type { RequestContext } from '@mistriwork/engine/server/http/context.js';
 import { agentTools } from '../mcp.js';
@@ -22,7 +17,7 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
 
   /**
    * The MCP tools, for the agent console: the Workbench's (an App server
-   * refuses them, appConnections.ts). The same list, from the same function, that
+   * refuses them). The same list, from the same function, that
    * tools/list answers over stdio — including the rule that write tools exist
    * only where some connection's config allows any.
    */
@@ -48,6 +43,17 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
     return true;
   }
 
+  /* Whether the browser on this listener is the operator — see `clientTrusted`.
+     Decided once per request and consulted by every route below that takes a
+     database address, a file path, or a place to write from the client. */
+
+  /* Who the server thinks is asking, for a client that wants to say so. */
+  if (path === '/api/whoami') {
+    res.setHeader('cache-control', 'no-store');
+    send(res, 200, { who: identity.who ?? null, header: bound.identityHeader ?? null, signedIn: false });
+    return true;
+  }
+
   /**
    * Try a connection without keeping it.
    *
@@ -62,17 +68,6 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
    * is written, and the secret is scrubbed out of any failure the same way
    * the registry scrubs its own.
    */
-  /* Whether the browser on this listener is the operator — see `clientTrusted`.
-     Decided once per request and consulted by every route below that takes a
-     database address, a file path, or a place to write from the client. */
-
-  /* Who the server thinks is asking, for a client that wants to say so. */
-  if (path === '/api/whoami') {
-    res.setHeader('cache-control', 'no-store');
-    send(res, 200, { who: identity.who ?? null, header: bound.identityHeader ?? null, signedIn: false });
-    return true;
-  }
-
   if (path === '/api/connections/test' && req.method === 'POST') {
     const body = await readJson(req);
     const target = String(body.url ?? '').trim();
@@ -276,6 +271,17 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
       send(res, 404, { error: `No connection called "${id}".` });
       return true;
     }
+    if (!trusted) {
+      /* As update: a connection the operator wrote into the config is not the network's to drop, because
+         every other reader of this server loses it. A session connection is the client's own. */
+      const entry = registry.configs().find((c) => c.id === id);
+      if (entry && entry.source !== 'session') {
+        send(res, 403, {
+          error: `"${entry.name}" comes from the config file and cannot be removed from here. Edit tablewalk.json on the server.`,
+        });
+        return true;
+      }
+    }
     try {
       await registry.remove(id);
     } catch (err) {
@@ -364,6 +370,8 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
       send(res, 404, { error: `No connection called "${id}".` });
       return true;
     }
+    /* Not gated on `trusted`: anyone who can reach an exposed server already reads every connection, so choosing which
+       one the page shows exposes nothing new, and refusing it would break a container with several. */
     const { schema } = await registry.open(id);
     registry.setActive(id);
     send(res, 200, { active: id, schema });

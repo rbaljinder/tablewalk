@@ -33,7 +33,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from './support/createApp.js';
 import { parseHostList } from '@mistriwork/engine/server/http/trust.js';
-import { Registry, loadConfig } from '@mistriwork/engine/server/connections.js';
+import { Registry } from '@mistriwork/engine/host';
+import { loadConfig } from '@mistriwork/engine/server/connections.js';
 import { parseViewsConfig } from '@mistriwork/engine/shared/view.js';
 import { parseQueriesConfig } from '@mistriwork/engine/shared/sqlsaved.js';
 import { makeDemoDatabase } from './make-demo-db.js';
@@ -216,6 +217,14 @@ before(async () => {
   const seed = new DatabaseSync(RW_DB);
   seed.exec(`INSERT INTO country VALUES ('ZZ','Zedland')`);
   seed.close();
+  /* tablewalk's own runtime table, for the SQL editor to be refused. */
+  for (const file of [RO_DB, RW_DB]) {
+    const reserved = new DatabaseSync(file);
+    reserved.exec(
+      `CREATE TABLE __mistri_command_audit (id INTEGER PRIMARY KEY, secret TEXT); INSERT INTO __mistri_command_audit VALUES (1, 'kept')`,
+    );
+    reserved.close();
+  }
 
   configPath = join(tmp, 'tablewalk.json');
   writeFileSync(configPath, JSON.stringify(CONFIG, null, 2));
@@ -377,6 +386,18 @@ describe('/api/sql', () => {
     });
     assert.equal(res.json.rows.length, 3);
     assert.equal(res.json.truncated, false);
+  });
+
+  test('a runtime table is refused, as the MCP sql tool refuses it, and nothing changes', async () => {
+    const read = await post('/api/sql', { text: 'select * from __mistri_command_audit' });
+    assert.equal(read.status, 200);
+    assert.match(read.json.errors[0].message, /__mistri_command_audit/);
+    assert.equal(read.json.rows, undefined);
+
+    const write = await post('/api/sql', { text: 'delete from __mistri_command_audit', write: true, conn: 'writable' });
+    assert.equal(write.status, 200);
+    assert.match(write.json.errors?.[0]?.message ?? '', /__mistri_command_audit/);
+    assert.equal(valueIn(RW_DB, 'SELECT COUNT(*) AS v FROM __mistri_command_audit'), 1);
   });
 
   test('a stacked statement is refused as 200 with errors', async () => {
@@ -968,6 +989,16 @@ describe('the connection manager trusts the browser only on loopback', () => {
     });
     assert.equal(renamed.status, 200);
     await post('/api/connections/update', { id: 'remote', name: 'remote' });
+  });
+
+  test('removing a config connection is refused', async () => {
+    const before = readFileSync(configPath, 'utf8');
+    const removed = await exposed('/api/connections/remove', { id: 'remote' });
+    assert.equal(removed.status, 403);
+    assert.match(removed.json.error, /comes from the config file/);
+    assert.ok((await get('/api/connections')).json.connections.some((c: { id: string }) => c.id === 'remote'));
+
+    assert.equal(readFileSync(configPath, 'utf8'), before);
   });
 
   test("on loopback, the same forms are still the operator's to use", async () => {

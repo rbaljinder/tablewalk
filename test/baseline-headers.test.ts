@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Server } from 'node:http';
 import { createApp } from './support/createApp.js';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Registry } from '@mistriwork/engine/host';
 import { PERMISSIONS_POLICY, REFERRER_POLICY, STRICT_TRANSPORT } from '@mistriwork/engine/server/http/baselineHeaders.js';
 import { makeDemoDatabase } from './make-demo-db.js';
 

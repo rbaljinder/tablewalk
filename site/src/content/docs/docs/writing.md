@@ -29,7 +29,7 @@ The `WHERE` names the whole primary key and the value you started from, so a row
 
 ## Undo
 
-`⌘Z`, outside a text field, undoes the last write, and so does **Undo the last edit** in the `···` menu. The server keeps one journal per connection for the life of the process, so an edit, a new row, a delete, or a write an agent made over MCP can be undone. It re-reads every row first and refuses the whole undo if one has changed since, rather than putting an old value over a newer one.
+`⌘Z`, outside a text field, undoes the last write, and so does **Undo the last edit** in the `···` menu. The server keeps a journal per connection, so an edit, a new row, a delete, or a write an agent made over MCP can be undone. It holds the last 50 writes. It lives in memory, so a restart empties it, unless you run `tablewalk journal` once for that connection: that makes a small store in its database, and the last 50 writes then survive a restart for 7 days. It re-reads every row first and refuses the whole undo if one has changed since, rather than putting an old value over a newer one.
 
 ## SQL that writes
 

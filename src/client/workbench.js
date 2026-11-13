@@ -233,11 +233,12 @@ function menu(at) {
       detail: () => (state.canWrite ? say('changesRequireReviewAndApply') : 'existing records are read-only'),
       onSelect: () => void toggleWriteMode(),
     });
+  /* Not the history read: this slot runs before the kit has named a connection, so asking here answered nothing, and
+     a reload never offered a write the journal still held (kept through a restart by `tablewalk journal`).
+     `loadStores` asks, once a connection is known. */
   if (at === 'sql') {
     initSql();
     initUndo();
-    // The Workbench's menu names the last edit, so it asks at once.
-    void refreshUndo();
   }
   if (at === 'schema')
     addMenuItem({
@@ -310,8 +311,13 @@ function menu(at) {
 export const workbenchShell = {
   start,
   brand,
-  /* Layouts, saved pages and SQL are stored per connection. */
-  loadStores: () => Promise.all([loadSavedPages(), loadSavedSql()]),
+  /* Layouts, saved pages and SQL are stored per connection, and so is Undo's history, which the menu names at once.
+     The kit runs this on arrival and on every switch, after it has named the connection. The history is not awaited:
+     a first paint does not wait on what the menu will say. */
+  loadStores: () => {
+    void refreshUndo();
+    return Promise.all([loadSavedPages(), loadSavedSql()]);
+  },
   menu,
   showWelcome,
   listConnections,

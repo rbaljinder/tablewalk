@@ -28,8 +28,10 @@ assert.ok(existsSync(built) && existsSync(join(root, 'dist/client/index.html')),
 const scratch = mkdtempSync(join(tmpdir(), 'tablewalk-built-client-'));
 const IMMUTABLE = 'public, max-age=31536000, immutable';
 /* What a cold first visit may take off the wire, page and assets, before the room paints. scripts/bundle-budget.mjs holds
-   the first paint's own ceiling at build time, and this holds what a browser actually fetched for a real room. */
-const FIRST_PAINT_WIRE_KB = 425;
+   the first paint's own ceiling at build time, and this holds what a browser actually fetched for a real room.
+   Raised from 425 in 1.0.0-rc.13: the Fog look's two faces (Inter 48 KB, Plex Mono 15 KB) are now in the first paint,
+   and the rest is the Fog stylesheet and the rc.49 kit that bundle-budget.mjs was raised for. */
+const FIRST_PAINT_WIRE_KB = 500;
 /* The chunks the Workbench's page never fetches: the App framework's and the public pages'. */
 const NEVER = ['/assets/chrome', '/assets/tenant', '/assets/public'];
 
@@ -160,8 +162,17 @@ try {
   const cold = await visit(context, url, schema);
   assert.deepEqual(cold.errors, [], `${label}: errors on a cold visit`);
   assertShipped(label, cold.files);
-  const faces = cold.files.filter((file) => file.path.endsWith('.woff2'));
-  assert.deepEqual(faces, [], `${label}: only a page wearing a look with faces of its own fetches them`);
+  // The browser's own look (Fog, native.css) sets its text in Inter and its
+  // data in IBM Plex Mono, so a landing fetches exactly those two faces and
+  // no weight or script the first paint does not draw.
+  const faces = [
+    ...new Set(cold.files.filter((file) => file.path.endsWith('.woff2')).map((file) => file.path.replace(/-[\w-]{8}\.woff2$/, ''))),
+  ].sort();
+  assert.deepEqual(
+    faces,
+    ['/assets/ibm-plex-mono-400', '/assets/inter-latin'],
+    `${label}: only the faces the browser's own look draws are fetched`,
+  );
   const chunks = cold.files.filter((file) => /^\/assets\/.+\.js$/.test(file.path)).map((file) => file.path.replace(/-[\w-]{8}\.js$/, ''));
   await cold.page.close();
   const warm = await visit(context, url, schema);

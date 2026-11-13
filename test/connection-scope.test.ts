@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { test } from 'node:test';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Registry } from '@mistriwork/engine/host';
 import { createApp } from './support/createApp.js';
 
 async function listening(registry: Registry, run: (base: string) => Promise<void>) {

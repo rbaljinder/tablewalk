@@ -17,6 +17,9 @@ test.describe('an HTTP connection in the explorer', () => {
   test.beforeEach(async ({ page }) => {
     // Its own origin, so the tour the shared fixtures mark as seen would open here.
     await page.addInitScript(() => localStorage.setItem('mistri.tour.v1', 'done'));
+    /* A list opens on 50 rows now, more than the fake's 25; the reader's own size of 20 keeps a second page to step
+       to without a total. */
+    await page.addInitScript(() => localStorage.setItem('mistri.page-size', '20'));
   });
   const last = () => source.api.seen.at(-1)!;
 

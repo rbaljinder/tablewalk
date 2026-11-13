@@ -28,7 +28,7 @@ import {
 import { makeDemoDatabase } from './make-demo-db.js';
 import { parseQueriesConfig, queriesFor } from '@mistriwork/engine/shared/sqlsaved.js';
 import { labelColumn } from '@mistriwork/engine/shared/schema.js';
-import type { TableMeta } from '@mistriwork/engine/shared/schema.js';
+import type { TableMeta } from '@mistriwork/engine/host';
 import { liveSkip } from './live.js';
 
 /* Made for this run and removed after it — never `.demo/`, where a
@@ -440,7 +440,7 @@ for (const [engine, url] of LIVE) {
     let victimRows = -1;
 
     before(async () => {
-      const { connect } = await import('@mistriwork/engine/adapters/connect.js');
+      const { connect } = await import('@mistriwork/engine/host');
       live = connect(url!, { label: engine }) as typeof live;
       const schema = await live.introspect();
       let table: (typeof schema.tables)[number] | undefined;

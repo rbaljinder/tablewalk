@@ -9,6 +9,9 @@ description: Every command and option of the tablewalk CLI, from serving a datab
 npx tablewalk postgres://localhost/app --schema public --port 4200 --open
 ```
 
+<!-- Remove with the next note once the browser-only release is published. -->
+> Until the browser-only release is published, `npx tablewalk@next` is the current build.
+
 `npx tablewalk --help` prints the short help, `--help all` prints everything, and `tablewalk <command> --help` prints one command's options. An option it does not recognize is an error, not a shrug: `tablewalk --prot 4111` says so rather than serving the default port.
 
 ## Commands
@@ -20,8 +23,9 @@ npx tablewalk postgres://localhost/app --schema public --port 4200 --open
 | `tablewalk --demo` | Builds a throwaway sample database in the temp directory and opens it |
 | `tablewalk <db> --mcp` | The database's tools for a coding agent, on stdio ([MCP](/docs/mcp/)) |
 | `tablewalk <db> --export md` | Prints the schema, then exits |
-| `tablewalk migrate <command>` | Changes the schema with versioned SQL files |
+| `tablewalk migrate <command>` | Changes the schema with versioned SQL files; `up` writes, so it needs `"writable": true` |
 | `tablewalk seed [<db>]` | Fills a writable database with believable rows |
+| `tablewalk journal [<db>]` | Keeps a writable connection's Undo history across restarts |
 
 A path typed on the command line is relative to the current directory; a path written in `tablewalk.json` is relative to that file's folder.
 
@@ -125,7 +129,7 @@ tablewalk migrate up                     # applies what is pending
 | `--schema-file <path>` | With `diff`, `check` or `squash`: the schema you want. Default `schema.sql` beside the migrations. |
 | `--dev-url <url>` | With `diff`, `check` or `squash` on PostgreSQL: where two scratch databases are made and dropped (needs `CREATEDB`). |
 
-`diff`, `check` and `squash` use Atlas's community build, pinned and checked by sha256, fetched on first use into `.tablewalk/bin`. A run holds a lock, so two deploys never migrate at once. Exit codes: 1 could not run, 2 files and history disagree, 3 a migration failed.
+`diff`, `check` and `squash` use Atlas's community build, pinned and checked by sha256, fetched on first use into `.tablewalk/bin`. A run holds a lock, so two deploys never migrate at once. `up`, `baseline` and `repair` write to the database, so they run only on a connection whose config says `"writable": true`; a database named on the command line is always read-only. `status`, `validate`, `diff`, `check`, `squash` and `new` do not need it, and neither does `--dry-run`. Exit codes: 1 could not run, 2 files and history disagree, 3 a migration failed.
 
 ## seed
 
@@ -142,6 +146,16 @@ Fills every table, parents before children, keeping `CHECK` values, keys, `NOT N
 | `--append` | Add to tables that already hold rows; otherwise a table with rows is refused. |
 
 Exit codes: 1 could not run, 2 refused (read-only, or rows already there).
+
+## journal
+
+```sh
+tablewalk journal --config tablewalk.json --connection shop
+```
+
+Makes the store that keeps a writable connection's [Undo](/docs/writing/#undo) history: two reserved tables in its database. With them, Undo and the MCP `revert` still reach the writes made before a restart, the last 50 per connection for 7 days. Opening a connection never makes them, and running the command again changes nothing. It works only on a connection marked `"writable": true`.
+
+Exit codes: 1 could not run, 2 refused (read-only, or an HTTP API).
 
 ## Version and help
 

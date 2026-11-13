@@ -5,22 +5,22 @@
  * one that reads rows, and it is here because it answers the same question
  * as the name search.
  */
-import type { Registry } from '@mistriwork/engine/server/connections.js';
-import type { Adapter } from '@mistriwork/engine/adapters/adapter.js';
-import { readRecords } from '@mistriwork/engine/server/resourceReadOperations.js';
 import {
+  readRecords,
   primaryKey,
   referencesFrom,
   referencesTo,
   renderDDL,
   tableNamed,
+  describeSchema,
+  type Registry,
+  type Adapter,
   type DatabaseSchema,
   type TableMeta,
-} from '@mistriwork/engine/shared/schema.js';
+} from '@mistriwork/engine/host';
 // Plain JS and pure on purpose — the same analysis the landing page says out
 // loud, importable here because it takes a schema and touches nothing else.
-import { describeSchema } from '@mistriwork/engine/shared/shape.js';
-import { linkTo, READS, sessionEgress, STATS, type Handler } from '../toolkit.js';
+import { linkTo, READS, sessionEgress, STATS, type Handler, ToolError } from '../toolkit.js';
 
 export const definitions = [
   {
@@ -373,9 +373,10 @@ export const handlers = {
   },
   table: async ({ args, adapter, schema, id }) => {
     const asked = String(args.table ?? '');
-    if (!asked) throw new Error('Which table? Pass `table`, e.g. {"table": "invoice"}.');
+    if (!asked) throw new ToolError('invalid_argument', 'Which table? Pass `table`, e.g. {"table": "invoice"}.');
     const table = tableNamed(schema, asked);
-    if (!table) throw new Error(`Unknown table "${asked}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`);
+    if (!table)
+      throw new ToolError('not_found', `Unknown table "${asked}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`);
     const stored = adapter.ddl ? await adapter.ddl(table.id) : undefined;
     return {
       connection: id,
@@ -420,13 +421,14 @@ export const handlers = {
     /* The description says one or the other; saying it and then quietly
        preferring one is worse than either rule. */
     if (value && needle) {
-      throw new Error(
+      throw new ToolError(
+        'invalid_argument',
         'Give `name` or `value`, not both. `name` searches table and column names; ' +
           '`value` searches the data. Two different questions, two calls.',
       );
     }
     if (value) return findValue(adapter, schema, id, value);
-    if (!needle) throw new Error('Nothing to look for. Give `name` or `value`.');
+    if (!needle) throw new ToolError('invalid_argument', 'Nothing to look for. Give `name` or `value`.');
     const lowered = needle.toLowerCase();
     /* Capped and said so: a one-letter needle on a wide schema matches half
        of it, and a silent cut reads as "that is all there is". */

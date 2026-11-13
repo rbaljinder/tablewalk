@@ -9,10 +9,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Registry, type WriteTransaction } from '@mistriwork/engine/host';
 import { createApp } from './support/createApp.js';
 import type { SqliteAdapter } from '@mistriwork/engine/adapters/sqlite.js';
-import type { WriteTransaction } from '@mistriwork/engine/adapters/adapter.js';
 
 async function fixture(run: (base: string, registry: Registry) => Promise<void>) {
   const directory = mkdtempSync(join(tmpdir(), 'tablewalk-app-response-'));

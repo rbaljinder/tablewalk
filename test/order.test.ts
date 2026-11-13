@@ -10,7 +10,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { insertOrder } from '../src/shared/order.js';
-import type { DatabaseSchema } from '@mistriwork/engine/shared/schema.js';
+import type { DatabaseSchema } from '@mistriwork/engine/host';
 
 const table = (name: string, columns: Array<Record<string, unknown>> = []) =>
   ({

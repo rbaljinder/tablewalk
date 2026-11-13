@@ -22,8 +22,7 @@ import {
   type PgPoolOptions,
   type PgResult,
 } from '@mistriwork/engine/adapters/postgresPool.js';
-import { Refusal } from '@mistriwork/engine/shared/refusal.js';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Refusal, Registry } from '@mistriwork/engine/host';
 import { parseTrustedProxies } from '@mistriwork/engine/server/http/trust.js';
 import { createApp } from './support/createApp.js';
 import { makeDemoDatabase } from './make-demo-db.js';

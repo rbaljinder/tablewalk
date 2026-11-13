@@ -17,8 +17,7 @@
  * well-connected schema can reach most of the database, and a fixture that
  * quietly contains half of production is worse than one that says it was cut.
  */
-import type { Adapter } from '@mistriwork/engine/adapters/adapter.js';
-import { findTable, primaryKey, referencesFrom, referencesTo, type DatabaseSchema } from '@mistriwork/engine/shared/schema.js';
+import { findTable, primaryKey, referencesFrom, referencesTo, type Adapter, type DatabaseSchema } from '@mistriwork/engine/host';
 import { insertOrder } from '../shared/order.js';
 
 interface FixtureOptions {

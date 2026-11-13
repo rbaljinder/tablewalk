@@ -94,7 +94,9 @@ test('section region is editable and survives reorder and save without nesting s
     ],
   };
   const props = draw(draft);
-  await user.click(screen.getAllByRole('button', { name: 'Section region' })[0]);
+  /* A listbox's button is named by its label and then the value it shows (label in name),
+     so the label is matched at the start rather than as the whole name. */
+  await user.click(screen.getAllByRole('button', { name: /^Section region\b/ })[0]);
   await user.click(screen.getByRole('option', { name: 'Aside' }));
   expect(draft.sections[0].region).toBe('aside');
   await user.click(screen.getAllByRole('button', { name: 'Move down' })[0]);
@@ -393,7 +395,7 @@ test('timeline streams survive edits and do not acquire a list column picker', a
       {
         kind: 'timeline',
         title: 'Activity',
-        streams: [{ from: 'invoice', path: 'customer_id', at: 'issued_on', show: 'id', filter: 'total > 0' }],
+        streams: [{ from: 'invoice', path: 'customer_id', at: 'issued_on', text: 'id', filter: 'total > 0' }],
         when: 'id > 0',
         width: 'half',
         offsetLeft: 'half',
@@ -450,11 +452,11 @@ test('list sizing is authored independently of section width and defaults to fit
     base: 'customer',
     sections: [{ kind: 'list', from: 'invoice', path: 'customer_id', width: 'half' }],
   });
-  await user.click(screen.getByRole('button', { name: 'Table sizing' }));
+  await user.click(screen.getByRole('button', { name: /^Table sizing\b/ }));
   await user.click(screen.getByRole('option', { name: 'Scroll columns' }));
   await user.click(screen.getByRole('button', { name: 'Save' }));
   expect(props.onSave.mock.calls[0][0].sections[0]).toMatchObject({ sizing: 'scroll', width: 'half' });
-  await user.click(screen.getByRole('button', { name: 'Table sizing' }));
+  await user.click(screen.getByRole('button', { name: /^Table sizing\b/ }));
   await user.click(screen.getByRole('option', { name: 'Fit columns' }));
   await user.click(screen.getByRole('button', { name: 'Save' }));
   expect(props.onSave.mock.calls[1][0].sections[0]).not.toHaveProperty('sizing');
@@ -474,7 +476,7 @@ test('invalid drafts cannot be saved or exported, and remain editable', async ()
   await user.click(screen.getByRole('button', { name: 'Copy as JSON' }));
   expect(screen.getByRole('alert')).toHaveTextContent('no column to sum');
   expect(props.onClose).not.toHaveBeenCalled();
-  await user.click(screen.getByRole('button', { name: 'Column' }));
+  await user.click(screen.getByRole('button', { name: /^Column\b/ }));
   await user.click(screen.getByRole('option', { name: 'total' }));
   await user.click(screen.getByRole('button', { name: 'Save' }));
   expect(props.onSave).toHaveBeenCalledOnce();

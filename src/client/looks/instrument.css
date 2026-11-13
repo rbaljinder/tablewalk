@@ -1,0 +1,324 @@
+/* Host looks: Instrument's palettes other than Fog, which is the browser's own look (native.css).
+
+   Colour only: graphite and cobalt (Instrument's own), Stone and teal, Slate and amber, Ink and violet, light and dark
+   each. The structure (Inter for words, IBM Plex Mono for figures, the hairline grid) is native.css's, scoped to the
+   native look and to these `instrument-<palette>` looks (hostLooks.js), so this sheet is fetched only when one is worn
+   and carries no rule of its own that is not a colour. */
+
+@layer theme {
+  /* Colour only, light and dark each, every pair checked: text, NULL and type ink, key and reference
+     ink on every ground they sit on (the surface, the frame, a hovered row, the head band, a current item's tint) at
+     4.5:1; a field's edge and the focus ring at 3:1; the ink on a selection; the four tones on their own bands. */
+  /* Graphite and cobalt: the baseline: cool graphite, one cobalt accent. */
+  :root[data-host-look='instrument'] {
+    --ground: #f6f7f9;
+    --surface: #ffffff;
+    --raised: #eef0f3;
+    --line: #e4e7eb;
+    --line-strong: #cfd4db;
+    --line-control: #818996;
+    --ink: #15171c;
+    --ink-muted: #565d6a;
+    --ink-subtle: #656d7c;
+    --accent: #3d5bd9;
+    --accent-ink: #3450c9;
+    --on-accent: #ffffff;
+    --accent-soft: #3d5bd914;
+    --link: #3450c9;
+    --focus: #5b77f0;
+    --status-good: #18774a;
+    --status-warning: #a3560b;
+    --status-critical: #c0362c;
+    --status-info: #6a4fc4;
+    --row-hover: #f4f6f9;
+    --pop-line: #d9dde3;
+    --head-band: #f6f7f9;
+    --graticule: #15171c1f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root[data-host-look='instrument']:not([data-theme='light']) {
+      --ground: #0f1114;
+      --surface: #14161a;
+      --raised: #1c1f24;
+      --line: #23272d;
+      --line-strong: #343941;
+      --line-control: #626a76;
+      --ink: #e7e9ec;
+      --ink-muted: #a2a9b4;
+      --ink-subtle: #8e96a2;
+      --accent: #7b92ff;
+      --accent-ink: #9aabff;
+      --on-accent: #0f1114;
+      --accent-soft: #7b92ff1f;
+      --link: #9aabff;
+      --focus: #7b92ff;
+      --status-good: #5cc58f;
+      --status-warning: #e5a45a;
+      --status-critical: #f0857a;
+      --status-info: #b9a4ff;
+      --row-hover: #191c21;
+      --pop-line: #2e3239;
+      --head-band: #171a1e;
+      --graticule: #ffffff1a;
+    }
+  }
+  :root[data-host-look='instrument'][data-theme='dark'] {
+    --ground: #0f1114;
+    --surface: #14161a;
+    --raised: #1c1f24;
+    --line: #23272d;
+    --line-strong: #343941;
+    --line-control: #626a76;
+    --ink: #e7e9ec;
+    --ink-muted: #a2a9b4;
+    --ink-subtle: #8e96a2;
+    --accent: #7b92ff;
+    --accent-ink: #9aabff;
+    --on-accent: #0f1114;
+    --accent-soft: #7b92ff1f;
+    --link: #9aabff;
+    --focus: #7b92ff;
+    --status-good: #5cc58f;
+    --status-warning: #e5a45a;
+    --status-critical: #f0857a;
+    --status-info: #b9a4ff;
+    --row-hover: #191c21;
+    --pop-line: #2e3239;
+    --head-band: #171a1e;
+    --graticule: #ffffff1a;
+  }
+  /* Stone and teal: warm stone, tablewalk's green matured to a deep teal. */
+  :root[data-host-look='instrument-stone'] {
+    --ground: #f5f4f1;
+    --surface: #fdfcfb;
+    --raised: #edebe6;
+    --line: #e4e1db;
+    --line-strong: #cdc8bf;
+    --line-control: #8a8378;
+    --ink: #1d1b18;
+    --ink-muted: #5c5750;
+    --ink-subtle: #6b665e;
+    --accent: #136a5e;
+    --accent-ink: #0f5f54;
+    --on-accent: #ffffff;
+    --accent-soft: #136a5e14;
+    --link: #0f5f54;
+    --focus: #1f8a7a;
+    --status-good: #2d7a3e;
+    --status-warning: #9a5509;
+    --status-critical: #b3362a;
+    --status-info: #5e4fa6;
+    --row-hover: #f6f4f0;
+    --pop-line: #dcd8d0;
+    --head-band: #f5f4f1;
+    --graticule: #1d1b181f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root[data-host-look='instrument-stone']:not([data-theme='light']) {
+      --ground: #141312;
+      --surface: #1a1917;
+      --raised: #23211f;
+      --line: #2c2a27;
+      --line-strong: #3f3c38;
+      --line-control: #736d65;
+      --ink: #ebe8e3;
+      --ink-muted: #aba59b;
+      --ink-subtle: #9a948a;
+      --accent: #4fc1ad;
+      --accent-ink: #6dd0be;
+      --on-accent: #141312;
+      --accent-soft: #4fc1ad1f;
+      --link: #6dd0be;
+      --focus: #4fc1ad;
+      --status-good: #79c98a;
+      --status-warning: #e3a75d;
+      --status-critical: #ef8a7c;
+      --status-info: #b6a6ef;
+      --row-hover: #1f1e1c;
+      --pop-line: #34322e;
+      --head-band: #191816;
+      --graticule: #ffffff17;
+    }
+  }
+  :root[data-host-look='instrument-stone'][data-theme='dark'] {
+    --ground: #141312;
+    --surface: #1a1917;
+    --raised: #23211f;
+    --line: #2c2a27;
+    --line-strong: #3f3c38;
+    --line-control: #736d65;
+    --ink: #ebe8e3;
+    --ink-muted: #aba59b;
+    --ink-subtle: #9a948a;
+    --accent: #4fc1ad;
+    --accent-ink: #6dd0be;
+    --on-accent: #141312;
+    --accent-soft: #4fc1ad1f;
+    --link: #6dd0be;
+    --focus: #4fc1ad;
+    --status-good: #79c98a;
+    --status-warning: #e3a75d;
+    --status-critical: #ef8a7c;
+    --status-info: #b6a6ef;
+    --row-hover: #1f1e1c;
+    --pop-line: #34322e;
+    --head-band: #191816;
+    --graticule: #ffffff17;
+  }
+  /* Slate and amber: a cool slate frame with one warm signal: amber fills Run and marks focus, its ink carries text. */
+  :root[data-host-look='instrument-slate'] {
+    --ground: #f3f5f7;
+    --surface: #ffffff;
+    --raised: #eaedf1;
+    --line: #e1e5ea;
+    --line-strong: #c9d0d8;
+    --line-control: #7f8894;
+    --ink: #141a21;
+    --ink-muted: #515c69;
+    --ink-subtle: #5f6b78;
+    --accent: #e9a23b;
+    --accent-ink: #8a5200;
+    --on-accent: #1b1305;
+    --accent-soft: #e9a23b26;
+    --link: #8a5200;
+    --focus: #b8740c;
+    --status-good: #1b7a4c;
+    --status-warning: #b4480f;
+    --status-critical: #bf3330;
+    --status-info: #5b52b8;
+    --row-hover: #f2f4f7;
+    --pop-line: #d6dce3;
+    --head-band: #f3f5f7;
+    --graticule: #141a211f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root[data-host-look='instrument-slate']:not([data-theme='light']) {
+      --ground: #0e1216;
+      --surface: #13181d;
+      --raised: #1a2027;
+      --line: #222a32;
+      --line-strong: #323c47;
+      --line-control: #5f6b78;
+      --ink: #e3e8ee;
+      --ink-muted: #9eaab7;
+      --ink-subtle: #8d99a6;
+      --accent: #f0b14f;
+      --accent-ink: #f4bd66;
+      --on-accent: #161004;
+      --accent-soft: #f0b14f1f;
+      --link: #f4bd66;
+      --focus: #f0b14f;
+      --status-good: #5cc590;
+      --status-warning: #f08c4a;
+      --status-critical: #f2837a;
+      --status-info: #b3a8ff;
+      --row-hover: #182027;
+      --pop-line: #2b343e;
+      --head-band: #161c22;
+      --graticule: #ffffff17;
+    }
+  }
+  :root[data-host-look='instrument-slate'][data-theme='dark'] {
+    --ground: #0e1216;
+    --surface: #13181d;
+    --raised: #1a2027;
+    --line: #222a32;
+    --line-strong: #323c47;
+    --line-control: #5f6b78;
+    --ink: #e3e8ee;
+    --ink-muted: #9eaab7;
+    --ink-subtle: #8d99a6;
+    --accent: #f0b14f;
+    --accent-ink: #f4bd66;
+    --on-accent: #161004;
+    --accent-soft: #f0b14f1f;
+    --link: #f4bd66;
+    --focus: #f0b14f;
+    --status-good: #5cc590;
+    --status-warning: #f08c4a;
+    --status-critical: #f2837a;
+    --status-info: #b3a8ff;
+    --row-hover: #182027;
+    --pop-line: #2b343e;
+    --head-band: #161c22;
+    --graticule: #ffffff17;
+  }
+  /* Ink and violet: ink black and the mistri mark's violet. */
+  :root[data-host-look='instrument-ink'] {
+    --ground: #f6f6f7;
+    --surface: #ffffff;
+    --raised: #eeeef0;
+    --line: #e5e5e8;
+    --line-strong: #cfcfd5;
+    --line-control: #85858f;
+    --ink: #0c0c0f;
+    --ink-muted: #56565f;
+    --ink-subtle: #66666f;
+    --accent: #6b3fd4;
+    --accent-ink: #5b31c2;
+    --on-accent: #ffffff;
+    --accent-soft: #6b3fd414;
+    --link: #5b31c2;
+    --focus: #7c55e0;
+    --status-good: #1a7a4a;
+    --status-warning: #a1530a;
+    --status-critical: #c0322f;
+    --status-info: #2f62c2;
+    --row-hover: #f4f4f6;
+    --pop-line: #dadade;
+    --head-band: #f6f6f7;
+    --graticule: #0c0c0f1f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root[data-host-look='instrument-ink']:not([data-theme='light']) {
+      --ground: #09090b;
+      --surface: #0e0e11;
+      --raised: #17171b;
+      --line: #1f1f24;
+      --line-strong: #2f2f36;
+      --line-control: #63636d;
+      --ink: #ececf0;
+      --ink-muted: #a3a3ad;
+      --ink-subtle: #8f8f99;
+      --accent: #9b7bff;
+      --accent-ink: #b39bff;
+      --on-accent: #0c0a14;
+      --accent-soft: #9b7bff1f;
+      --link: #b39bff;
+      --focus: #9b7bff;
+      --status-good: #5cc590;
+      --status-warning: #e8a65a;
+      --status-critical: #f2847a;
+      --status-info: #7fb0ff;
+      --row-hover: #141418;
+      --pop-line: #27272d;
+      --head-band: #121215;
+      --graticule: #ffffff17;
+    }
+  }
+  :root[data-host-look='instrument-ink'][data-theme='dark'] {
+    --ground: #09090b;
+    --surface: #0e0e11;
+    --raised: #17171b;
+    --line: #1f1f24;
+    --line-strong: #2f2f36;
+    --line-control: #63636d;
+    --ink: #ececf0;
+    --ink-muted: #a3a3ad;
+    --ink-subtle: #8f8f99;
+    --accent: #9b7bff;
+    --accent-ink: #b39bff;
+    --on-accent: #0c0a14;
+    --accent-soft: #9b7bff1f;
+    --link: #b39bff;
+    --focus: #9b7bff;
+    --status-good: #5cc590;
+    --status-warning: #e8a65a;
+    --status-critical: #f2847a;
+    --status-info: #7fb0ff;
+    --row-hover: #141418;
+    --pop-line: #27272d;
+    --head-band: #121215;
+    --graticule: #ffffff17;
+  }
+}

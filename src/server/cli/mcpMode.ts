@@ -6,7 +6,7 @@
 import { startupReport } from '@mistriwork/engine/shared/refusal.js';
 import { serveMcp, setAdvertiseOutputSchema, setToolProfile } from '../mcp.js';
 import { layoutsFor, pagesPath } from '@mistriwork/engine/server/layouts.js';
-import type { Registry } from '@mistriwork/engine/server/connections.js';
+import type { Registry } from '@mistriwork/engine/host';
 import type { PageDef } from '@mistriwork/engine/shared/page.js';
 import type { SavedQuery } from '@mistriwork/engine/shared/sqlsaved.js';
 import type { Options } from '@mistriwork/engine/server/cli/args.js';

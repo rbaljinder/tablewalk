@@ -1,14 +1,14 @@
 /**
  * The database browser served over HTTP: the Workbench on its connections, listening until a signal.
  *
- * The App framework's start (cli/serve.ts) does this and a great deal more — sign-in, policies, commands, jobs,
+ * The App framework's start (in the mistri package) does this and a great deal more — sign-in, policies, commands, jobs,
  * mail, analytics, an App's reload on save — and a start that serves no App paid for all of it, module by module,
  * before the first page. This is what is left when there is no App: one server, its shutdown, its port and what it
  * says when it listens. The browser's main (browserMain.ts) runs it; a start that names an App, or anything only
  * the App framework serves, is handed to the other main before it gets here.
  */
 import type { Server } from 'node:http';
-import type { Registry } from '@mistriwork/engine/server/connections.js';
+import type { Registry } from '@mistriwork/engine/host';
 import { configLocations } from '@mistriwork/engine/server/config/locations.js';
 import { createBrowserApp } from '../http/browserServer.js';
 import { collectCapacity, diagnosticsFromEnvironment } from '@mistriwork/engine/server/operations/diagnostics.js';

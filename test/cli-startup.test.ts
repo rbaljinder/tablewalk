@@ -84,12 +84,16 @@ async function served(args: string[]): Promise<string[]> {
 }
 
 /* Ceilings, from the monorepo's measurements (36 for --help, 172 for --mcp, 250 for serving) and this package's own: the
-   counts here are 35, 36, 172 and 238. A jump past one is a module reached again that a mode should leave to the one
-   that needs it. */
+   counts here are 35, 36, 175 and 244. A jump past one is a module reached again that a mode should leave to the one
+   that needs it. `--mcp` is 175, not 172, since the server modules take the engine's names from its host entry point
+   (`@mistriwork/engine/host`): one module that re-exports them, and the few modules behind it that the deeper paths did not
+   reach in this mode. Engine 1.0.0-rc.49 raised `--mcp` to 187 and serving to 258: the adapters it opens now load
+   their own reserved-table check (`reservedSql`), network policy and pool admission. Those are the engine's modules,
+   behind the same host entry point, and the modules each mode must not load still stay out. */
 const HELP_CEILING = 36;
 const VERSION_CEILING = 70;
-const MCP_CEILING = 172;
-const SERVE_CEILING = 250;
+const MCP_CEILING = 190;
+const SERVE_CEILING = 260;
 
 const oneTable = (t: { after(fn: () => void): void }): string => {
   const directory = mkdtempSync(join(tmpdir(), 'tablewalk-startup-db-'));

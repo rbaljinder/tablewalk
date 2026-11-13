@@ -54,6 +54,8 @@ test.describe('the pager steps by key', () => {
 
   test('Next, Previous and Last read by key and draw the pages an offset would', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('mistri.tour.v1', 'done'));
+    // The reader's own size: a list opens on 50 rows, and 20 keeps four steps across these 95.
+    await page.addInitScript(() => localStorage.setItem('mistri.page-size', '20'));
     const asked: Array<Record<string, unknown>> = [];
     page.on('request', (request) => {
       if (request.url().endsWith('/api/run') && request.method() === 'POST') asked.push(JSON.parse(request.postData() ?? '{}'));

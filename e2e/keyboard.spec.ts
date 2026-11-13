@@ -38,7 +38,8 @@ test('every control in the chrome is reachable with Tab alone', async ({ page })
 
   /* The header is where the tool is driven from, and a control that needs a
      mouse here is a control some people simply do not have. */
-  for (const control of ['Query', 'Show the SQL', 'Search', 'More', 'Filter tables']) {
+  // The search is named by what it shows, its shortcut included (label in name).
+  for (const control of ['Query', 'Show the SQL', 'Search ⌘K', 'More', 'Filter tables']) {
     expect(seen, `${control} should be reachable by Tab`).toContain(control);
   }
   /* More opens its menu from the keyboard's stop as well. What the menu offers on a read-only connection (no
