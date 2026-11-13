@@ -9,6 +9,9 @@ description: tablewalk speaks the Model Context Protocol on stdio, giving a codi
 npx tablewalk ./data/app.db --mcp
 ```
 
+<!-- Remove with the next note once the browser-only release is published. -->
+> Until the browser-only release is published, `npx tablewalk@next` is the current build.
+
 ## Connecting an agent
 
 Most clients take a server as a command and its arguments:
@@ -93,6 +96,25 @@ Three prompts: `orient`, `pre-migration-check` (takes `tables`) and `investigate
 - `tablewalk://{connection}/table/{table}`, one table
 - `tablewalk://{connection}/queries`, the named SQL in your config file
 - `tablewalk://{connection}/pages`, page definitions from the config file and pages saved from the browser
+
+## When a call fails
+
+A failed call is a normal result with `isError: true` and a sentence a model can act on. The sentence is for reading; to branch on it, read the `_meta` of the result, where `tablewalk/code` is one of:
+
+| Code | Means | Usually |
+| --- | --- | --- |
+| `read_only` | the connection is not `"writable": true` | the operator's to change |
+| `not_found` | a table, connection or tool that does not exist | ask `tables` or `connections` |
+| `timeout` | the statement ran into its 30-second cap | ask a narrower question |
+| `cancelled` | the client withdrew the call | nothing; it is over |
+| `invalid_argument` | an argument is wrong, missing or contradicts another | fix the call |
+| `forbidden` | not allowed here: a tool outside `--tools`, one of tablewalk's own tables, a capability the dialect lacks | do not retry |
+| `limit` | past a bound the tool sets, such as more than 20 keys in one call | take less |
+| `internal` | anything else, the database's or the server's | read the sentence |
+
+```json
+{ "isError": true, "content": [{ "type": "text", "text": "Cancelled: …" }], "_meta": { "tablewalk/code": "cancelled" } }
+```
 
 ## Limits
 

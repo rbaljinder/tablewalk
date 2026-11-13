@@ -90,7 +90,7 @@ test('late schema refresh cannot replace the selected database schema', async ({
     await expect.poll(() => new URL(page.url()).pathname).toBe(`/${WIDE}`);
     await held.settle();
     await expect(page.locator('#db-label')).toContainText(WIDE);
-    await expect(page.getByRole('navigation', { name: 'Tables' }).getByRole('button', { name: 'ticket', exact: true })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Tables' }).getByRole('button', { name: /^ticket( |$)/ })).toBeVisible();
     await expect(page.getByText(/Schema re-read/)).toHaveCount(0);
   } finally {
     held.release();
@@ -129,7 +129,7 @@ test('a failed newer switch finishes loading the connection that remains selecte
     await choose(page, SCRATCH);
     await expect(page.locator('.toast-message').filter({ hasText: /^Scratch unavailable$/ })).toBeVisible();
     await expect.poll(() => new URL(page.url()).pathname).toBe(`/${WIDE}`);
-    await expect(page.getByRole('navigation', { name: 'Tables' }).getByRole('button', { name: 'ticket', exact: true })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Tables' }).getByRole('button', { name: /^ticket( |$)/ })).toBeVisible();
     const arrived = page.waitForResponse((response) => response.url().includes('/api/layouts?conn=wide'));
     release();
     await arrived;

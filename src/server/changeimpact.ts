@@ -28,16 +28,16 @@
  *     than being flattened to `false` — advising someone their foreign key is
  *     unindexed when nobody checked is worse than saying nothing.
  */
-import type { Adapter } from '@mistriwork/engine/adapters/adapter.js';
 import {
   findTable,
   referencesFrom,
   referencesTo,
+  inBatches,
+  type Adapter,
   type DatabaseSchema,
   type DeleteRule,
   type ForeignKey,
-} from '@mistriwork/engine/shared/schema.js';
-import { inBatches } from '@mistriwork/engine/server/impact.js';
+} from '@mistriwork/engine/host';
 
 /** One table that points at the thing being changed. */
 interface Dependent {

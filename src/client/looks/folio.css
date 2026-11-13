@@ -1,0 +1,157 @@
+/* Host look: Folio. "The data typeset: a printed table on quiet paper, one face, one green ink."
+
+   A result is set the way a well-made book sets a table: no vertical rules and no boxes, a rule in the ink above the
+   heads and one closing the last row (the design system's own "a table is its rows under a rule in the ink", carried
+   to both ends), hairlines between rows so a wide row still reads across. One face does all the work, Inter, with
+   tabular figures so numbers align without a monospace; the code face is kept for what is code (the query, SQL, a
+   table's DDL). Hierarchy is ink and weight, not colour or containers: names at 600 in the ink, labels in a quieter
+   ink, types and counts quieter still. A record reads as a typeset sheet of particulars, each label set flush right
+   against its value. The paper is a barely warm white (not the refused beige) and the one colour is tablewalk's green,
+   deepened to an ink and spent only on what you can follow: a reference, focus, a selected tab's rule. The filled
+   action, Run, is printed in the ink itself. Dark is the same page under a lamp: warm charcoal, never blue.
+
+   Bends: none of the refusal list's. A null keeps the native italic (the typesetter's mark for what is not the text). */
+/* Its structure is refined-base.css, drawn by native.css (the first stylesheet) and keyed to include Folio; this sheet is
+   Folio's own, and is fetched only when it is worn. */
+@layer theme {
+  :root[data-host-look='folio'] {
+    --ground: #f8f7f4;
+    --surface: #fdfcfa;
+    --raised: #f1efea;
+    --line: #e9e6df;
+    --line-strong: #d3cfc5;
+    --line-control: #8e887d;
+    --ink: #1c1a17;
+    --ink-muted: #5d5951;
+    --ink-subtle: #6e695f;
+    /* The fill is the ink: Run, Apply, Done print in it. The green is the accent's ink, the link and the ring. */
+    --accent: #1c1a17;
+    --accent-ink: #1a5d4b;
+    --on-accent: #fdfcfa;
+    --accent-soft: #1e6a5512;
+    --link: #1a5d4b;
+    --focus: #2b8a6e;
+    --status-good: #2a7a4a;
+    --status-warning: #98570c;
+    --status-critical: #ad3a2d;
+    --status-info: #5b4ea6;
+    --figures: var(--face-ui);
+    --row-hover: #f5f3ef;
+    --pop-line: #dedad2;
+    --rule: var(--ink);
+    --shadow-pop: 0 1px 2px rgb(40 30 20 / 0.05), 0 10px 28px rgb(40 30 20 / 0.09);
+    --shadow-panel: 0 1px 2px rgb(40 30 20 / 0.05), 0 14px 36px rgb(40 30 20 / 0.11);
+    --shadow-modal: 0 2px 6px rgb(40 30 20 / 0.07), 0 24px 64px rgb(40 30 20 / 0.16);
+    --scrim: rgb(28 26 23 / 0.28);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root[data-host-look='folio']:not([data-theme='light']) {
+      --ground: #141311;
+      --surface: #191816;
+      --raised: #23211e;
+      --line: #2b2926;
+      --line-strong: #403d38;
+      --line-control: #716b62;
+      --ink: #eceae5;
+      --ink-muted: #aca79d;
+      --ink-subtle: #9c978d;
+      --accent: #eceae5;
+      --accent-ink: #80d0b4;
+      --on-accent: #141311;
+      --accent-soft: #6cc3a51c;
+      --link: #80d0b4;
+      --focus: #6cc3a5;
+      --status-good: #6cc58e;
+      --status-warning: #e0a861;
+      --status-critical: #ee8a7c;
+      --status-info: #b8a8f0;
+      --row-hover: #1f1d1b;
+      --pop-line: #36332f;
+      --rule: #8f8a80;
+      --shadow-pop: 0 0 0 1px rgb(0 0 0 / 0.3), 0 10px 28px rgb(0 0 0 / 0.5);
+      --shadow-panel: 0 0 0 1px rgb(0 0 0 / 0.3), 0 14px 36px rgb(0 0 0 / 0.55);
+      --shadow-modal: 0 0 0 1px rgb(0 0 0 / 0.35), 0 28px 72px rgb(0 0 0 / 0.6);
+      --scrim: rgb(0 0 0 / 0.55);
+    }
+  }
+  :root[data-host-look='folio'][data-theme='dark'] {
+    --ground: #141311;
+    --surface: #191816;
+    --raised: #23211e;
+    --line: #2b2926;
+    --line-strong: #403d38;
+    --line-control: #716b62;
+    --ink: #eceae5;
+    --ink-muted: #aca79d;
+    --ink-subtle: #9c978d;
+    --accent: #eceae5;
+    --accent-ink: #80d0b4;
+    --on-accent: #141311;
+    --accent-soft: #6cc3a51c;
+    --link: #80d0b4;
+    --focus: #6cc3a5;
+    --status-good: #6cc58e;
+    --status-warning: #e0a861;
+    --status-critical: #ee8a7c;
+    --status-info: #b8a8f0;
+    --row-hover: #1f1d1b;
+    --pop-line: #36332f;
+    --rule: #8f8a80;
+    --shadow-pop: 0 0 0 1px rgb(0 0 0 / 0.3), 0 10px 28px rgb(0 0 0 / 0.5);
+    --shadow-panel: 0 0 0 1px rgb(0 0 0 / 0.3), 0 14px 36px rgb(0 0 0 / 0.55);
+    --shadow-modal: 0 0 0 1px rgb(0 0 0 / 0.35), 0 28px 72px rgb(0 0 0 / 0.6);
+    --scrim: rgb(0 0 0 / 0.55);
+  }
+
+  :root[data-host-look='folio'] {
+    /* ---------- one sheet of paper ---------- */
+
+    & .topbar, & .sidebar, & .crumbs-host { background: var(--ground); }
+    & .content { background: var(--surface); }
+    & #query { background: var(--surface); }
+    & #table-list button[aria-current='true'] { background: var(--raised); color: var(--ink); font-weight: 600; }
+    & #table-list button[aria-current='true'] .rows { color: var(--ink-muted); }
+    & .tab[aria-selected='true'] { border-bottom-color: var(--accent-ink); font-weight: 600; }
+    & .result-head .result-title { font-size: var(--text-xl); letter-spacing: -0.016em; }
+
+    /* ---------- the table, typeset ---------- */
+
+    & .table-wrap > table { border-top: 1.5px solid var(--rule); }
+    & th { background: var(--surface); border-bottom: 1px solid var(--rule); color: var(--ink); font-weight: 600; }
+    & th.sorted { border-bottom-color: var(--rule); }
+    & td { border-bottom: 1px solid var(--line); }
+    & tbody tr:last-child > td { border-bottom: 1.5px solid var(--rule); }
+    & .detail-row > td { border-bottom: 1px solid var(--line); }
+    & td.reflink { color: var(--link); }
+    & td.reflink:hover { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; } /* motion-ok: no motion */
+    & td.null, & .field dd.null { font-style: italic; }
+    & th .pk { color: var(--ink-subtle); }
+    & th :is(.fk, .th-arrow) { color: var(--ink-subtle); }
+    & tbody tr.clickable:hover { background: var(--row-hover); } /* motion-ok: colour only */
+
+    /* ---------- a record: a sheet of particulars ---------- */
+
+    & .field dt { text-align: right; color: var(--ink-muted); }
+    & .field dd { color: var(--ink); }
+    & .panel > .record-heading { font-size: calc(17px * var(--type-k)); letter-spacing: -0.014em; } /* off-scale: the sheet's title, a step between --text-lg and --text-xl */
+    & .ref-jump { border-color: transparent; background: none; padding-inline: 0; }
+    & .ref-jump-value { color: var(--link); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--link) 35%, transparent); text-underline-offset: 3px; }
+    & .ref-jump:hover { background: none; border-color: transparent; } /* motion-ok: colour only */
+    & .ref-jump:hover .ref-jump-value { text-decoration-color: var(--link); } /* motion-ok: colour only */
+    & .related-item[aria-selected='true'] { background: var(--raised); }
+    & .related-item[aria-selected='true'] .related-count { color: var(--ink); }
+    & .related-item[aria-selected='true'] .related-table { font-weight: 600; }
+    & .record-children .table-wrap > table { border-top-width: 1px; }
+
+    /* ---------- the landing and the schema: plain paper ---------- */
+
+    & .landing-chip { border-color: transparent; background: none; padding-inline: 0; margin-inline-end: var(--space-4); }
+    & .landing-chip:hover { background: none; border-color: transparent; } /* motion-ok: colour only */
+    & .landing-chip:hover .landing-chip-name { color: var(--link); text-decoration: underline; text-underline-offset: 3px; } /* motion-ok: colour only */
+    & .diagram-viewport { background-color: var(--surface); }
+    & .node > rect { stroke: var(--line-strong); }
+    & .node-head text { fill: var(--ink); }
+    & .node-focus > rect { stroke: var(--ink); }
+    & .edge { stroke: var(--line-strong); }
+  }
+}

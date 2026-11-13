@@ -8,14 +8,24 @@
  * transaction (graph.ts) with no journal entry, so `revert` cannot take them
  * back and their results carry no `undoId`. The tool descriptions say so.
  */
-import { history, lastRevertible, revert } from '@mistriwork/engine/server/journal.js';
-import { changingReferences, recordedDelete, recordedInsert, recordedUpdate } from '@mistriwork/engine/server/recordWriteOperations.js';
-import { deleteImpact } from '@mistriwork/engine/server/impact.js';
-import { explainWriteFailure, writeFailureOutcome } from '@mistriwork/engine/server/constraints.js';
+import {
+  history,
+  lastRevertible,
+  revert,
+  changingReferences,
+  recordedDelete,
+  recordedInsert,
+  recordedUpdate,
+  deleteImpact,
+  explainWriteFailure,
+  writeFailureOutcome,
+  Refusal,
+  TransactionOutcomeUnknown,
+  tableNamed,
+  type UpdateRequest,
+} from '@mistriwork/engine/host';
 import { deleteGraph, flattenTables, insertGraph, type GraphRow } from '../../graph.js';
-import { Refusal, TransactionOutcomeUnknown, type UpdateRequest } from '@mistriwork/engine/adapters/adapter.js';
-import { tableNamed } from '@mistriwork/engine/shared/schema.js';
-import { linkTo, STATS, wholeKeyOrThrow, type Handler, type ToolCall } from '../toolkit.js';
+import { linkTo, STATS, wholeKeyOrThrow, type Handler, type ToolCall, ToolError } from '../toolkit.js';
 
 /**
  * Offered only when some connection's config says `"writable": true` — the
@@ -408,7 +418,10 @@ async function confirmedBy(args: Record<string, unknown>, message: string, title
 function writableOrThrow({ registry, id }: ToolCall): void {
   const config = registry.configOf(id);
   if (!config?.writable) {
-    throw new Error(`"${config?.name ?? id}" is read-only. ` + 'Add "writable": true to its entry in your tablewalk.json to allow edits.');
+    throw new ToolError(
+      'read_only',
+      `"${config?.name ?? id}" is read-only. ` + 'Add "writable": true to its entry in your tablewalk.json to allow edits.',
+    );
   }
 }
 
@@ -416,14 +429,17 @@ export const handlers = {
   update: async (call) => {
     const { args, adapter, schema, id } = call;
     writableOrThrow(call);
-    if (!adapter.update) throw new Error(`${schema.dialect} connections are read-only in this build.`);
+    if (!adapter.update) throw new ToolError('read_only', `${schema.dialect} connections are read-only in this build.`);
     const table = tableNamed(schema, String(args.table ?? ''));
     if (!table)
-      throw new Error(`Unknown table "${String(args.table)}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`);
+      throw new ToolError(
+        'not_found',
+        `Unknown table "${String(args.table)}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`,
+      );
     const key = (args.key ?? {}) as Record<string, string | number>;
     wholeKeyOrThrow(schema, table, key);
     const values = (args.set ?? {}) as Record<string, string | number | boolean | null>;
-    if (!Object.keys(values).length) throw new Error('Nothing to set.');
+    if (!Object.keys(values).length) throw new ToolError('invalid_argument', 'Nothing to set.');
     /* The adapter independently verifies the key matches exactly one row and
        refuses anything else — the same guarantee the browser's edits get. */
     let stored;
@@ -442,7 +458,7 @@ export const handlers = {
         return { connection: id, table: table.id, key, outcome: 'unknown', errors: [err.message] };
       }
       if (err instanceof Refusal) throw err;
-      throw new Error(await explainWriteFailure(adapter, schema, table.id, values, (err as Error).message));
+      throw new ToolError('invalid_argument', await explainWriteFailure(adapter, schema, table.id, values, (err as Error).message));
     }
     const { result, undoId } = stored;
     const body =
@@ -465,10 +481,13 @@ export const handlers = {
   insert: async (call) => {
     const { args, adapter, schema, id } = call;
     writableOrThrow(call);
-    if (!adapter.insert) throw new Error(`${schema.dialect} connections are read-only in this build.`);
+    if (!adapter.insert) throw new ToolError('read_only', `${schema.dialect} connections are read-only in this build.`);
     const table = tableNamed(schema, String(args.table ?? ''));
     if (!table)
-      throw new Error(`Unknown table "${String(args.table)}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`);
+      throw new ToolError(
+        'not_found',
+        `Unknown table "${String(args.table)}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`,
+      );
     const values = (args.values ?? {}) as Record<string, string | number | boolean | null>;
     try {
       const { result, undoId } = await recordedInsert({ adapter, connection: id }, { table: table.id, values });
@@ -507,10 +526,13 @@ export const handlers = {
   delete: async (call) => {
     const { args, adapter, schema, id } = call;
     writableOrThrow(call);
-    if (!adapter.remove) throw new Error(`${schema.dialect} connections cannot delete in this build.`);
+    if (!adapter.remove) throw new ToolError('read_only', `${schema.dialect} connections cannot delete in this build.`);
     const table = tableNamed(schema, String(args.table ?? ''));
     if (!table)
-      throw new Error(`Unknown table "${String(args.table)}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`);
+      throw new ToolError(
+        'not_found',
+        `Unknown table "${String(args.table)}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`,
+      );
     const key = (args.key ?? {}) as Record<string, string | number>;
     wholeKeyOrThrow(schema, table, key);
 
@@ -572,9 +594,9 @@ export const handlers = {
     const grouped = Array.isArray(args.tables)
       ? flattenTables(args.tables as Array<{ table: string; rows: Array<Record<string, unknown>> }>)
       : undefined;
-    if (listed && grouped) throw new Error('Give either `rows` or `tables`, not both.');
+    if (listed && grouped) throw new ToolError('invalid_argument', 'Give either `rows` or `tables`, not both.');
     const rows = listed ?? grouped;
-    if (!rows) throw new Error('Give the rows to insert, as `rows` or as `fixture`\u2019s `tables`.');
+    if (!rows) throw new ToolError('invalid_argument', 'Give the rows to insert, as `rows` or as `fixture`\u2019s `tables`.');
 
     try {
       /* `rowsWritten` is dropped here on purpose: every tool reports what it

@@ -6,11 +6,8 @@
  * for — and their errors are taught here, because the engine's own "no such
  * table" has nothing in it to retry with.
  */
-import { clampLimit } from '@mistriwork/engine/adapters/adapter.js';
-import { STATEMENT_TIMEOUT_MS } from '@mistriwork/engine/adapters/statementControl.js';
-import type { DatabaseSchema } from '@mistriwork/engine/shared/schema.js';
-import { distance } from '@mistriwork/engine/shared/suggest.js';
-import { READS, STATS, type Handler } from '../toolkit.js';
+import { Refusal, clampLimit, STATEMENT_TIMEOUT_MS, distance, type DatabaseSchema } from '@mistriwork/engine/host';
+import { READS, STATS, type Handler, ToolError } from '../toolkit.js';
 
 export const definitions = [
   {
@@ -60,7 +57,7 @@ export const definitions = [
       '"does this use the index or walk the table" answer `sql` cannot give, because its ' +
       'bounding wrap changes the plan. Feed it the `sql` a `query` answer returned — text ' +
       'and params both, placeholders included — or any statement of your own. Plans only, ' +
-      'never executes: the analysing variants that run the statement are refused by ' +
+      'never executes: the analyzing variants that run the statement are refused by ' +
       'construction, so explaining a write is safe and tells you what the write would do ' +
       'to the indexes. A statement that touches tablewalk’s own runtime or sign-in tables is ' +
       'refused, as in `sql`.',
@@ -99,10 +96,10 @@ type Name = (typeof definitions)[number]['name'];
 export const handlers = {
   sql: async ({ args, adapter, schema, id }) => {
     if (!adapter.runSql) {
-      throw new Error(`${schema.dialect} connections cannot run SQL in this build. Use \`query\`.`);
+      throw new ToolError('forbidden', `${schema.dialect} connections cannot run SQL in this build. Use \`query\`.`);
     }
     const statement = String(args.statement ?? '').trim();
-    if (!statement) throw new Error('Nothing to run.');
+    if (!statement) throw new ToolError('invalid_argument', 'Nothing to run.');
     // Never a write. The read-only handle refuses one anyway; not asking is
     // what makes this tool safe to hand to something that retries.
     const result = await teaching(schema, () =>
@@ -118,10 +115,10 @@ export const handlers = {
   },
   explain: async ({ args, adapter, schema, id }) => {
     if (!adapter.explainSql) {
-      throw new Error(`${schema.dialect} connections cannot explain in this build.`);
+      throw new ToolError('forbidden', `${schema.dialect} connections cannot explain in this build.`);
     }
     const statement = String(args.statement ?? '').trim();
-    if (!statement) throw new Error('Nothing to explain.');
+    if (!statement) throw new ToolError('invalid_argument', 'Nothing to explain.');
     const params = Array.isArray(args.params) ? args.params : [];
     const result = await teaching(schema, () => adapter.explainSql!({ text: statement, params, refuseReserved: true }));
     return { connection: id, plan: result.plan };
@@ -152,13 +149,20 @@ async function teaching<T>(schema: DatabaseSchema, run: () => Promise<T>): Promi
   } catch (err) {
     const message = (err as Error).message ?? String(err);
     const named = NO_SUCH_TABLE.map((p) => p.exec(message)).find(Boolean)?.[1];
-    if (!named) throw err;
+    if (!named) {
+      /* A statement that reaches a reserved table is refused by the engine as a Refusal: not the caller's mistake in the
+         sense an argument is, but a boundary — the one this tool is built around. */
+      if (err instanceof Refusal && message.startsWith('This statement touches '))
+        throw new ToolError('forbidden', message, { cause: err });
+      throw err;
+    }
     const bare = named.replace(/^.*\./, '').replace(/["`]/g, '');
     const near = schema.tables
       .map((t) => ({ id: t.id, d: distance(bare.toLowerCase(), t.name.toLowerCase()) }))
       .sort((a, b) => a.d - b.d)[0];
     const suggestion = near && near.d <= 3 ? ` Did you mean "${near.id}"?` : '';
-    throw new Error(
+    throw new ToolError(
+      'not_found',
       `${message}.${suggestion} Ask \`tables\` for what exists — or \`refresh\` if it was ` +
         'just created. Names here are as the database spells them, schema included.',
     );

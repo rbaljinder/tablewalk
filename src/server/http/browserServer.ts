@@ -6,7 +6,7 @@
  * same way, so what they prove is the wiring that ships.
  */
 import type { Server, ServerResponse } from 'node:http';
-import type { Registry } from '@mistriwork/engine/server/connections.js';
+import type { Registry } from '@mistriwork/engine/host';
 import type { RequestDiagnostics } from '@mistriwork/engine/server/operations/diagnostics.js';
 import type { PageDef } from '@mistriwork/engine/shared/page.js';
 import type { ConfigLayout } from '@mistriwork/engine/shared/recordview.js';

@@ -15,6 +15,9 @@ npx tablewalk mydata.sqlite   # or your own: SQLite or Postgres
 npx tablewalk                 # or nothing, and the page asks for a connection
 ```
 
+<!-- Remove with the next note once the browser-only release is published. -->
+> Until the browser-only release is published, `npx tablewalk@next` is the current build.
+
 No config, no build step, no schema to define first — it reads the catalog on
 connect. **Read-only** until you turn editing on, per connection. Runs from
 `npx`, a [Docker image](#docker-and-a-desktop-app), or a desktop app. It needs
@@ -32,15 +35,6 @@ npx tablewalk mydata.sqlite --export md >> CLAUDE.md    # the schema, as a commi
 npx tablewalk postgres://… --lint --fail-on high         # what the shape costs, for CI
 npx tablewalk --config ./tablewalk.json --diff staging   # is staging the same shape?
 ```
-
-## Apps are mistri's
-
-An App — pages, commands, policies, jobs and workflows declared in TypeScript
-over a database you already have — is the App framework's, a package and a
-command of its own: [mistri](https://www.npmjs.com/package/@mistriwork/mistri)
-(`npm create mistri`, `npx @mistriwork/mistri dev`). `tablewalk` is the database browser
-alone: it refuses an App's start (`--app`, `check`, `dev`, a config that lists
-`apps`) and names the `npx @mistriwork/mistri` command that runs it.
 
 ## The idea
 
@@ -253,7 +247,8 @@ Undo reports `applied`, `not_applied`, or `unknown`. An unknown result may have
 committed: inspect the stored records and do not retry it. Pending or uncertain
 Undo blocks falling through to older writes. Keep the exact `expectedId` after
 a lost response; never replace it with an older entry to retry. This journal is
-bounded and in-memory, not a durable recovery receipt.
+bounded, and not a durable recovery receipt: it is kept across a restart only
+where `tablewalk journal` made its store, and is in memory otherwise.
 
 A fixture is a graph, so `insert_graph` takes one: several related rows in one
 transaction, where either all of them land or none does. A row that cannot
@@ -481,7 +476,14 @@ thinking about it.
 - "Read-only" is enforced at the session and transaction level, not the
   role level. A superuser can still `COPY … TO PROGRAM` inside a Postgres
   `READ ONLY` transaction. Connect as a role that can only read and the database
-  enforces what tablewalk promises. A connection that is not writable but
+  enforces what tablewalk promises. On Postgres, connect as a read-only role
+  (`GRANT SELECT` on what is to be seen, no more). A `READ ONLY` transaction
+  blocks table writes but not a function with side effects, and a role with
+  only `SELECT` can still call functions, because Postgres grants `EXECUTE` to
+  `PUBLIC` by default. Revoke that default where it matters
+  (`REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC`, then grant
+  `EXECUTE` back only where needed).
+  A connection that is not writable but
   opens over a role that could do more (a superuser, a write grant, `CREATE`)
   gets one line on stderr saying what that role can do.
 - **The connection manager trusts the browser only on loopback.** Adding a
@@ -521,8 +523,9 @@ predicate itself.
 ```
 tablewalk                     no target: serve, and ask for one in the browser
 tablewalk <target>            a SQLite file path, sqlite:<path>, or postgres:// URL
-tablewalk migrate <command>   change the schema with versioned SQL files (below)
+tablewalk migrate <command>   change the schema with versioned SQL files; up writes (below)
 tablewalk seed [<db>]         believable rows in a writable database (below)
+tablewalk journal [<db>]      keep a writable connection's Undo across restarts (below)
 mistri --app <dir>            an App, served: the App framework's, npx @mistriwork/mistri
   -d, --db <target>           the same thing, explicitly (or set DATABASE_URL,
                               used when no config names connections)
@@ -627,7 +630,10 @@ tablewalk migrate diff <name> | check | squash
                               baseline records an existing database as
                               version 0 and writes baseline.schema.json;
                               repair fixes the history. A lock keeps two
-                              deploys apart. Exit 1 could not run, 2 files
+                              deploys apart. up, baseline and repair write,
+                              so they run only on a connection whose config
+                              says "writable": true (a database named on the
+                              command line is always read-only). Exit 1 could not run, 2 files
                               and history disagree, 3 a migration failed.
                               diff writes the next V file from schema.sql
                               (beside the migrations): what they still lack,
@@ -648,6 +654,17 @@ tablewalk seed [<db> | --db <target> | --config <path>]
       --rows <n>              with seed: rows per main table (default 40)
       --seed <n>              with seed: the same rows again, on the same day
       --append                with seed: add to tables that already hold rows
+
+tablewalk journal [<db> | --db <target> | --config <path>]
+                [--connection <name>]
+                              make the store a writable connection's Undo
+                              history is kept in: two reserved tables in its
+                              database. With them a restart keeps the last 50
+                              writes per connection, for 7 days; without them
+                              the history lasts as long as the process. Made
+                              only by this command, never by opening a
+                              connection; run again it changes nothing. Exit 1
+                              could not run, 2 refused (read-only)
 ```
 
 A path typed on the command line (`--config`, `--migrations`) is relative to the
@@ -804,6 +821,10 @@ serves that build — so the promise is still `npx tablewalk mydb.sqlite`
 and nothing else, and the build is the maintainer's, never the user's.
 Architecture, in one page ([`docs/architecture.md`](https://github.com/rbaljinder/mistri/blob/main/docs/architecture.md)) says what runs where;
 `CONTRIBUTING.md` says which constraints are load-bearing.
+
+## Apps
+
+An App (pages, commands, policies, jobs, in TypeScript) is [mistri](https://www.npmjs.com/package/@mistriwork/mistri)'s, not this tool's: `npx @mistriwork/mistri --help`. `tablewalk` refuses an App's start and names the command that runs it.
 
 ## License
 

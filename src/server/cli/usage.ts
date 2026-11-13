@@ -17,8 +17,9 @@ tablewalk — browse a relational database as a graph you walk.
   tablewalk --demo                a throwaway sample database, opened
   tablewalk <db> --mcp            the database's tools for a coding agent, on stdio
   tablewalk <db> --export md      the schema in words; mermaid or json too
-  tablewalk migrate <command>     change the schema with versioned SQL files (see below)
+  tablewalk migrate <command>     change the schema with versioned SQL files; up writes (see below)
   tablewalk seed [<db>]           believable rows in a writable database (see below)
+  tablewalk journal [<db>]        keep a writable connection's Undo across restarts (see below)
 
 An App (pages, commands and policies over a database) is mistri's: npx @mistriwork/mistri
 dev, npx @mistriwork/mistri check, npx @mistriwork/mistri --app <dir>. tablewalk refuses an App's start
@@ -193,6 +194,10 @@ Changing the schema — versioned SQL files in Flyway's format, forward only:
   A run holds a lock — PostgreSQL: the advisory lock Flyway takes for the same
   table; SQLite: its write lock — so two deploys never migrate
   at once. Scoped to the connection's schemas, or --schema.
+  up, baseline and repair write to the database, so they run only on a
+  connection whose config says "writable": true (a database named on the
+  command line is always read-only); status, validate, diff, check, squash
+  and new do not need it. --dry-run prints what up would do and needs nothing.
   Exit codes: 1 could not run, 2 files and history disagree, 3 a migration
   failed. An App's migrate (its types regenerated and checked after up, its
   stores and files) is mistri's: npx @mistriwork/mistri migrate --app <dir>.
@@ -219,6 +224,17 @@ Rows to look at — a draft judged on believable data, with no seed script:
   Exit codes: 1 could not run, 2 refused (read-only, or rows already there).
   An App's seed, each status the way its machine moves it, is mistri's:
   npx @mistriwork/mistri seed --app <dir>.
+
+Undo across restarts — a writable connection's history, kept in its database:
+
+  tablewalk journal [<db> | --db <target> | --config <path>] [--connection <name>]
+
+  Makes the store: two reserved tables in the database, made by this command
+  and never by opening a connection. With them, Undo and the MCP revert reach
+  the writes made before a restart (the last 50 per connection, for 7 days);
+  without them, the history lasts as long as the process. Run again, it changes
+  nothing. Only a connection whose config says "writable": true has one.
+  Exit codes: 1 could not run, 2 refused (read-only, or an HTTP API).
 
 Connections can also come from a tablewalk.json:
 
@@ -255,8 +271,9 @@ tablewalk — browse a relational database as a graph you walk.
   tablewalk [<sqlite-file> | postgres://… | --db <target>]
                                   browse a database; the page asks when none is named
   tablewalk --demo                a throwaway sample database, opened
-  tablewalk migrate <command>     change the schema with versioned SQL files
+  tablewalk migrate <command>     change the schema with versioned SQL files; up writes
   tablewalk seed [<db>]           believable rows in a writable database
+  tablewalk journal [<db>]        keep a writable connection's Undo across restarts
 
 Common options:
   -d, --db <target>   SQLite file path or postgres:// URL (or set DATABASE_URL)
@@ -277,7 +294,9 @@ An App is mistri's: npx @mistriwork/mistri --help.
 /**
  * The App framework's command words. Each is mistri's, and `tablewalk <word>` is refused with `npx @mistriwork/mistri <word>`
  * rather than opened as a SQLite file of that name. This binary does not import the App framework to ask it, so the
- * list is written here, and test/cli-binaries.test.ts holds it to the words mistri's USAGE names.
+ * list is written here, by hand, from the words mistri's USAGE names; nothing in this repository holds it to them.
+ * `migrate` and `seed` are not in it: they are this binary's own (cli/browserCommands.ts), and a near miss of either
+ * is answered with `tablewalk migrate`, not mistri's.
  */
 export const APP_COMMAND_WORDS: readonly string[] = [
   'agent',
@@ -297,11 +316,9 @@ export const APP_COMMAND_WORDS: readonly string[] = [
   'jobs',
   'mail-dns',
   'messages',
-  'migrate',
   'new',
   'observe',
   'schema',
-  'seed',
   'shot',
   'suite',
   'tenant',

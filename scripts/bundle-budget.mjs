@@ -27,9 +27,15 @@ export const CLIENT = join(ROOT, 'dist/client');
 
 /* Bytes, per first page. Brotli is what a browser is sent (the server prefers the `.br` beside each file); raw is what it
    parses and compiles. The Workbench is the kit's shell page and the Workbench's own chunk, which the shell loads the
-   moment it shows the Workbench. */
+   moment it shows the Workbench. The style ceilings rose with rc.17 (raw 378_860 to 384_000, brotli 51_800 to 52_300): the
+   kit's stylesheet is larger than rc.14's by about 3 KB, and this package added no CSS.
+   They rose again for 1.0.0-rc.13, on kit rc.49 (script raw 1_287_900 to 1_318_000; style raw 384_000 to 440_000,
+   brotli 52_300 to 58_000). The browser's own look is now Instrument in Fog and moss (looks/native.css), drawn in the
+   first stylesheet on purpose so the first paint is already in it rather than flashing the kit's tokens: the Workbench
+   chunk's sheet went from about 10 KB to 50 KB with it, Inter's and Plex Mono's faces included. The kit's own sheet grew
+   by about 13 KB and its script by about 38 KB from rc.17 to rc.49; this package's script barely moved. */
 export const BUDGET = {
-  workbench: { script: { raw: 1_287_900, br: 361_400 }, style: { raw: 378_860, br: 51_800 } },
+  workbench: { script: { raw: 1_318_000, br: 361_400 }, style: { raw: 440_000, br: 58_000 } },
 };
 
 /* The chrome's words in a language besides English (src/client/copy/<lang>.ts), one chunk each, which only a reader of

@@ -16,8 +16,8 @@
 #
 # The result is a runtime stage holding node and a node_modules laid out as
 # `npm install tablewalk` leaves it: this package as `npm pack` ships it, the
-# @mistriwork packages it pins from the registry, and their dependencies (pg
-# among them). Nothing else.
+# @mistriwork packages it pins and their dependencies (pg among them), all at the
+# versions package-lock.json records. Nothing else.
 
 # Node 24 is not a preference, it is a requirement: the SQLite adapter is
 # `node:sqlite`, which needs an --experimental-sqlite flag before 23.4 and is
@@ -49,15 +49,22 @@ COPY scripts/build.mjs scripts/bundle-budget.mjs ./scripts/
 COPY src ./src
 RUN npm run build
 
-# The package as the registry would get it (`files` in package.json), installed
-# the way a user installs it: production dependencies only. tsx, typescript, vite
-# and esbuild exist to build; the client's libraries are in dist/client's bundle.
-# `pg` survives: it is an optional dependency of the engine, not a dev one.
+# The package as the registry would get it (`files` in package.json), beside
+# the production dependencies the lockfile pins: the very versions CI tested,
+# not whatever the registry resolves to on the day the image is built (an
+# install of the tarball resolved every transitive range afresh, and a rebuild
+# six months on could differ from the image that was tested). tsx, typescript,
+# vite and esbuild exist to build; the client's libraries are in dist/client's
+# bundle. `pg` survives: it is an optional dependency of the engine, not a dev
+# one. The tarball is unpacked rather than installed, since an install would
+# resolve its ranges again.
 RUN mkdir /pack /stage \
  && npm pack --pack-destination /pack --silent \
+ && cp /src/package.json /src/package-lock.json /stage/ \
  && cd /stage \
- && npm init -y >/dev/null \
- && npm install --omit=dev --no-audit --no-fund --no-package-lock /pack/tablewalk-*.tgz
+ && npm ci --omit=dev --no-audit --no-fund \
+ && mkdir node_modules/tablewalk \
+ && tar -xzf /pack/tablewalk-*.tgz -C node_modules/tablewalk --strip-components=1
 
 # The source maps ship in the npm package, for a person debugging an installed
 # copy. An image is run, not debugged in place, and they were most of dist/'s

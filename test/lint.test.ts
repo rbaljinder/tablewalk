@@ -10,7 +10,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { lintCounts, lintReport, lintSchema } from '../src/shared/lint.js';
-import type { DatabaseSchema } from '@mistriwork/engine/shared/schema.js';
+import type { DatabaseSchema } from '@mistriwork/engine/host';
 
 const base = (over: Partial<DatabaseSchema> = {}): DatabaseSchema => ({
   label: 'test',

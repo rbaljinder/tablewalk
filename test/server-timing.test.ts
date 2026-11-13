@@ -19,7 +19,7 @@ import {
   timeClient,
   timedListener,
 } from '@mistriwork/engine/adapters/telemetry/serverTiming.js';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Registry } from '@mistriwork/engine/host';
 import { createApp } from './support/createApp.js';
 import { makeDemoDatabase } from './make-demo-db.js';
 

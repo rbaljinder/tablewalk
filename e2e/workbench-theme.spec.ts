@@ -22,10 +22,13 @@ async function openDialog(page: Page, name: 'Theme lab' | 'Preferences') {
   return dialog;
 }
 
+/* A listbox's button is named by its label and then the value it shows (label in name, WCAG 2.5.3). */
+const labelled = (label: string) => new RegExp(`^${label} `);
+
 async function choose(page: Page, dialog: Locator, control: string, option: string) {
-  await dialog.getByRole('button', { name: control, exact: true }).click();
+  await dialog.getByRole('button', { name: labelled(control) }).click();
   await page.getByRole('option', { name: option, exact: true }).click();
-  await expect(dialog.getByRole('button', { name: control, exact: true }).locator('.dd-value')).toHaveText(option);
+  await expect(dialog.getByRole('button', { name: labelled(control) }).locator('.dd-value')).toHaveText(option);
 }
 
 async function nativeLook(page: Page) {
@@ -33,7 +36,8 @@ async function nativeLook(page: Page) {
   for (const attribute of ['data-visual-theme', 'data-theme-style', 'data-custom-theme', 'data-theme-palette', 'data-record-branding']) {
     await expect(root).not.toHaveAttribute(attribute);
   }
-  await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(251, 250, 248)');
+  // Fog's ground: the browser's own look is Instrument in the Fog and moss palette (native.css).
+  await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(245, 245, 245)');
   expect(
     await root.evaluate((node) =>
       ['--ground', '--surface', '--heading-font', '--field-radius', '--mono'].map((key) =>
@@ -54,7 +58,7 @@ test('Workbench: native default, real Theme lab and Preferences looks, canonical
   }));
 
   let lab = await openDialog(page, 'Theme lab');
-  await expect(lab.getByRole('button', { name: 'Visual theme', exact: true })).toContainText('Workbench default');
+  await expect(lab.getByRole('button', { name: labelled('Visual theme') })).toContainText('Workbench default');
   await choose(page, lab, 'Visual theme', 'Sage');
   await expect(page.locator('html')).toHaveAttribute('data-visual-theme', 'sage');
   await expect(page.locator('html')).toHaveAttribute('data-theme-style', 'sage');
@@ -76,12 +80,12 @@ test('Workbench: native default, real Theme lab and Preferences looks, canonical
     await expect(page.locator('html')).toHaveAttribute('data-theme', value);
     await expect(page.locator('body')).toHaveCSS('background-color', background);
     lab = await openDialog(page, 'Theme lab');
-    await expect(lab.getByRole('button', { name: 'Color mode', exact: true }).locator('.dd-value')).toHaveText(label);
+    await expect(lab.getByRole('button', { name: labelled('Color mode') }).locator('.dd-value')).toHaveText(label);
   }
   await lab.getByRole('button', { name: 'Close', exact: true }).click();
 
   let prefs = await openDialog(page, 'Preferences');
-  await expect(prefs.getByRole('button', { name: 'Visual theme', exact: true })).toContainText('Sage');
+  await expect(prefs.getByRole('button', { name: labelled('Visual theme') })).toContainText('Sage');
   await choose(page, prefs, 'Visual theme', 'Mono');
   await expect(page.locator('html')).toHaveAttribute('data-visual-theme', 'mono');
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
@@ -126,7 +130,7 @@ test('Workbench does not inherit saved App looks or offer App branding as its na
   await openWorkbench(page);
   await nativeLook(page);
   const prefs = await openDialog(page, 'Preferences');
-  await prefs.getByRole('button', { name: 'Visual theme', exact: true }).click();
+  await prefs.getByRole('button', { name: labelled('Visual theme') }).click();
   await expect(page.getByRole('option', { name: 'Workbench default', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('option', { name: /dealer.brand/i })).toHaveCount(0);
   await page.getByRole('option', { name: 'Sage', exact: true }).click();
@@ -160,7 +164,7 @@ for (const density of ['comfortable', 'spacious'] as const)
       for (const width of [390, 320]) {
         await page.setViewportSize({ width, height: 844 });
         for (const control of ['Visual theme', 'Color mode']) {
-          const button = dialog.getByRole('button', { name: control, exact: true });
+          const button = dialog.getByRole('button', { name: labelled(control) });
           await expect(button).toBeInViewport();
           await button.click();
           const list = page.getByRole('listbox', { name: control, exact: true });

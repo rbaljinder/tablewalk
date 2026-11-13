@@ -2,11 +2,11 @@
  * The database browser's modes that answer and exit rather than serve: the schema in words (`--export md`,
  * `mermaid`, `json`), `--diff` and `--lint`. Each is a build step — its answer on stdout, every startup line
  * already sent to stderr — and a build step that starts a web server is one nobody wires into CI. An App's
- * exports (types, OpenAPI, AsyncAPI) are the App framework's (oneShot.ts). With Apps named, the App framework's main
- * loads and vets them first, then hands the mode back here (mistriMain.ts backToBrowser).
+ * exports (types, OpenAPI, AsyncAPI) are the App framework's. With Apps named, the App framework's main (in the mistri
+ * package) loads and vets them first, then hands the mode back here.
  */
 import { startupReport } from '@mistriwork/engine/shared/refusal.js';
-import type { Registry } from '@mistriwork/engine/server/connections.js';
+import type { Registry } from '@mistriwork/engine/host';
 
 /** `--export md | markdown | mermaid | json` (the formats startFor gives this main). */
 export async function exportSchemaText(given: string, registry: Registry): Promise<void> {

@@ -32,7 +32,8 @@ for (const width of [320, 390])
 
     await page.getByRole('combobox', { name: 'Query', exact: true }).fill('not_a_real_table_with_a_long_name_for_a_readable_query_error');
     await page.getByRole('combobox', { name: 'Query', exact: true }).press('Enter');
-    await fitsViewport(page, '#errors', width - 1);
+    // The refined looks set the error as a card inset by its margins, so it keeps the workspace's width less those.
+    await fitsViewport(page, '#errors', width - 40);
     await expect(page.locator('#errors')).toContainText('not_a_real_table');
 
     await page.keyboard.press('ControlOrMeta+Shift+Enter');

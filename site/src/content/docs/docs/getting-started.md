@@ -9,6 +9,9 @@ tablewalk is one command that serves a database browser on your own machine.
 npx tablewalk ./data/app.db
 ```
 
+<!-- Remove with the next note once the browser-only release is published. -->
+> Until the browser-only release is published, `npx tablewalk@next` is the current build.
+
 It needs Node.js 24.22.1 or newer, and there is no build step. The server prints the address it listens on, `http://localhost:4111` by default, bound to `127.0.0.1` so nothing beyond your machine can reach it.
 
 ## What you can open

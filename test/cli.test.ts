@@ -16,12 +16,13 @@
  * So these spawn the real thing. Every case has a timeout: a regression here
  * is a hang, and a suite that hangs is worse than one that fails.
  */
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { makeDemoDatabase } from './make-demo-db.js';
 
@@ -88,6 +89,24 @@ describe('the command line', () => {
     assert.doesNotMatch(err, /browse a relational database/);
   });
 
+  test("a near miss of the browser's own command is answered with its own", async () => {
+    for (const [said, meant] of [
+      ['migrat', 'migrate'],
+      ['seeed', 'seed'],
+    ]) {
+      const { code, err } = await run([said, '--no-config']);
+      assert.equal(code, 1);
+      assert.match(err, new RegExp(`Did you mean tablewalk ${meant}\\?`));
+      assert.doesNotMatch(err, /mistri/);
+    }
+  });
+
+  test("a near miss of the App framework's command is still mistri's", async () => {
+    const { code, err } = await run(['chek', '--no-config']);
+    assert.equal(code, 1);
+    assert.match(err, /Did you mean npx @mistriwork\/mistri check\?/);
+  });
+
   test('--help fits one screen, and --help all is the whole usage (UX-17)', async () => {
     const short = await run(['--help']);
     assert.equal(short.code, 0);
@@ -139,4 +158,65 @@ describe('the command line', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+describe('migrate writes, so it asks for "writable": true', () => {
+  /* One config, two connections over two files: the only difference between them is the flag. */
+  const dir = mkdtempSync(join(tmpdir(), 'tablewalk-cli-migrate-'));
+  const migrations = join(dir, 'migrations');
+  const config = join(dir, 'tablewalk.json');
+  /* Empty, so `up` has a clean start rather than a database it asks to be baselined first. */
+  for (const file of ['ro.db', 'rw.db']) new DatabaseSync(join(dir, file)).close();
+  mkdirSync(migrations);
+  writeFileSync(join(migrations, 'V1__note.sql'), 'CREATE TABLE migrated_note (id INTEGER PRIMARY KEY);\n');
+  writeFileSync(
+    config,
+    JSON.stringify({
+      connections: [
+        { name: 'ro', url: join(dir, 'ro.db') },
+        { name: 'rw', url: join(dir, 'rw.db'), writable: true },
+      ],
+    }),
+  );
+  const migrate = (sub: string, ...rest: string[]) => run(['migrate', sub, '--config', config, '--migrations', migrations, ...rest]);
+  const tablesIn = (file: string) => {
+    const db = new DatabaseSync(file, { readOnly: true });
+    try {
+      return (db.prepare(`SELECT name FROM sqlite_master WHERE name = 'migrated_note'`).all() as unknown[]).length;
+    } finally {
+      db.close();
+    }
+  };
+
+  for (const sub of ['up', 'baseline', 'repair']) {
+    test(`${sub} on a read-only connection is refused, naming the flag, and nothing changes`, async () => {
+      const { code, err } = await migrate(sub, '--connection', 'ro');
+      assert.equal(code, 1);
+      assert.match(err, /"ro" is read-only/);
+      assert.match(err, /"writable": true/);
+      assert.equal(tablesIn(join(dir, 'ro.db')), 0);
+    });
+  }
+
+  test('a database named on the command line is always read-only', async () => {
+    const { code, err } = await run(['migrate', 'up', join(dir, 'ro.db'), '--no-config', '--migrations', migrations]);
+    assert.equal(code, 1);
+    assert.match(err, /is read-only/);
+    assert.equal(tablesIn(join(dir, 'ro.db')), 0);
+  });
+
+  test('status stays allowed on a read-only connection', async () => {
+    /* Its exit code says there is a migration pending (for CI), which is not the refusal under test. */
+    const { out, err } = await migrate('status', '--connection', 'ro');
+    assert.doesNotMatch(err, /is read-only/);
+    assert.match(out, /V1|pending/i);
+  });
+
+  test('up on a writable connection runs', async () => {
+    const { code, err } = await migrate('up', '--connection', 'rw');
+    assert.equal(code, 0, err);
+    assert.equal(tablesIn(join(dir, 'rw.db')), 1);
+  });
+
+  after(() => rmSync(dir, { recursive: true, force: true }));
 });

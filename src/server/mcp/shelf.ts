@@ -6,13 +6,20 @@
  * docs`) is the App framework's, and an agent building an App reads it through
  * `tablewalk observe --mcp` (observe/mcp.ts): this server serves no App.
  */
-import type { Registry } from '@mistriwork/engine/server/connections.js';
+import {
+  findTable,
+  referencesFrom,
+  referencesTo,
+  renderDDL,
+  tableNamed,
+  toMarkdown,
+  type Registry,
+  type DatabaseSchema,
+} from '@mistriwork/engine/host';
 import { queriesFor, type SavedQuery } from '@mistriwork/engine/shared/sqlsaved.js';
 import type { PageDef } from '@mistriwork/engine/shared/page.js';
-import { findTable, referencesFrom, referencesTo, renderDDL, tableNamed, type DatabaseSchema } from '@mistriwork/engine/shared/schema.js';
 // Pure like shape.js, and split out for exactly this reason: the same brief
 // the browser downloads and the CLI prints, offered as ambient context.
-import { toMarkdown } from '@mistriwork/engine/shared/schematext.js';
 import { openFor } from './toolkit.js';
 import type { Answer } from './protocol.js';
 

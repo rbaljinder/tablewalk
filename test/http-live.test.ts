@@ -10,7 +10,7 @@ import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Server } from 'node:http';
 import { createApp } from './support/createApp.js';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Registry } from '@mistriwork/engine/host';
 import { liveSkip } from './live.js';
 
 interface Answer {
@@ -115,7 +115,10 @@ for (const [engine, liveUrl] of LIVE) {
            vocabulary rather than as a failed request. */
       const res = await postTo(where, '/api/sql', { text: `delete from ${table} where 1 = 0` });
       assert.equal(res.status, 200);
-      assert.match(res.json.errors[0].message, /read.only|cannot execute|denied/i);
+      /* Engine 1.0.0-rc.49 refuses a statement the planner cannot explain before
+           it reaches Postgres (its reserved-table check), so the engine's
+           words may be that refusal rather than Postgres's own. */
+      assert.match(res.json.errors[0].message, /read.only|cannot execute|denied|planner can explain/i);
       assert.equal(res.json.error, undefined);
     });
 

@@ -1,0 +1,88 @@
+/* Instrument's structure, shared by the browser's own look and Instrument's palettes (native.css imports it).
+
+   What is not colour: the figures' face (IBM Plex Mono, self-hosted by the kit's faces.css), the per-mode shadows, the
+   hairline measuring grid, the record readout, the schema's graticule. Scoped to the native look (no host look worn)
+   and to each Instrument palette, so a palette's sheet carries colour alone. The look's idea is told in native.css. */
+
+@layer theme {
+  /* What every palette shares: the figures' face and, per mode, the shadows (a palette is colour only). */
+  :root:is(:not([data-host-look]), [data-host-look='instrument'], [data-host-look^='instrument-']) {
+    --figures: 'IBM Plex Mono', var(--code);
+    --shadow-pop: 0 1px 2px rgb(16 20 28 / 0.06), 0 8px 24px rgb(16 20 28 / 0.1);
+    --shadow-panel: 0 1px 2px rgb(16 20 28 / 0.06), 0 12px 32px rgb(16 20 28 / 0.12);
+    --shadow-modal: 0 2px 6px rgb(16 20 28 / 0.08), 0 24px 64px rgb(16 20 28 / 0.18);
+    --scrim: rgb(16 20 28 / 0.32);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:is(:not([data-host-look]), [data-host-look='instrument'], [data-host-look^='instrument-']):not([data-theme='light']) {
+      --shadow-pop: 0 0 0 1px rgb(0 0 0 / 0.3), 0 10px 28px rgb(0 0 0 / 0.5);
+      --shadow-panel: 0 0 0 1px rgb(0 0 0 / 0.3), 0 14px 36px rgb(0 0 0 / 0.55);
+      --shadow-modal: 0 0 0 1px rgb(0 0 0 / 0.35), 0 28px 72px rgb(0 0 0 / 0.65);
+      --scrim: rgb(0 0 0 / 0.55);
+    }
+  }
+  :root:is(:not([data-host-look]), [data-host-look='instrument'], [data-host-look^='instrument-'])[data-theme='dark'] {
+    --shadow-pop: 0 0 0 1px rgb(0 0 0 / 0.3), 0 10px 28px rgb(0 0 0 / 0.5);
+    --shadow-panel: 0 0 0 1px rgb(0 0 0 / 0.3), 0 14px 36px rgb(0 0 0 / 0.55);
+    --shadow-modal: 0 0 0 1px rgb(0 0 0 / 0.35), 0 28px 72px rgb(0 0 0 / 0.65);
+    --scrim: rgb(0 0 0 / 0.55);
+  }
+
+  :root:is(:not([data-host-look]), [data-host-look='instrument'], [data-host-look^='instrument-']) {
+    /* ---------- the frame: graphite chrome round a white working surface ---------- */
+
+    & .sidebar { background: var(--ground); }
+    & .crumbs-host { background: var(--surface); }
+    & #query { background: var(--ground); }
+    & #query:focus { background: var(--surface); }
+    & .tab[aria-selected='true'] { border-bottom-color: var(--accent); }
+
+    /* ---------- the measuring grid ---------- */
+
+    & .grid-inset > .table-wrap { border: 1px solid var(--line); border-radius: var(--radius); padding-bottom: 0; margin-bottom: var(--space-4); }
+    & .grid-inset > .table-wrap th:first-child,
+    & .grid-inset > .table-wrap td:first-child { padding-left: var(--space-3h); }
+    & .grid-inset > .table-wrap th:last-child,
+    & .grid-inset > .table-wrap td:last-child { padding-right: var(--space-3h); }
+    & th { background: var(--head-band); border-bottom: 1px solid var(--line-strong); }
+    & th.sorted { border-bottom-color: var(--accent); }
+    & :is(th, td) { border-right: 1px solid var(--line); }
+    & :is(th, td):last-child { border-right: 0; }
+    & tbody tr:last-child td { border-bottom: 0; }
+    /* Figures, keys and codes on the instrument's face: they line up to the digit. */
+    & :is(td.num, td.mono, td.reflink, .num-value, .date-value) { font-family: var(--figures); font-size: var(--text-sm); }
+    & td.reflink { color: var(--link); }
+    & td.null, & .field dd.null {
+      font-family: var(--face-ui); font-style: normal; font-variant-caps: all-small-caps; letter-spacing: 0.04em;
+      font-size: var(--text-base);
+    }
+    & td.expander-cell, & th.expander-cell { border-right-color: var(--line); }
+    & th .pk { color: var(--accent-ink); }
+
+    /* ---------- a record: an inspector's readout ---------- */
+
+    & .field { border-bottom: 1px solid var(--line); }
+    & .fields > .field:last-child { border-bottom: 0; }
+    & .field dd :is(.num-value, .date-value) { color: var(--ink); }
+    & .ref-jump-value { font-family: var(--figures); font-size: var(--text-sm); }
+    & .record-children .table-wrap { margin-inline: var(--space-4h); border: 1px solid var(--line); border-radius: var(--radius); padding-bottom: 0; }
+    & .record-children .table-wrap th:first-child,
+    & .record-children .table-wrap td:first-child { padding-left: var(--space-3h); }
+
+    /* ---------- the schema on its graticule ---------- */
+
+    & .diagram-viewport {
+      background-image: radial-gradient(circle at 1px 1px, var(--graticule) 1px, transparent 1.2px);
+      background-size: 16px 16px;
+    }
+    & .node > rect { stroke: var(--line-strong); }
+    & .node-focus > rect { stroke: var(--accent); }
+    & .node-field.is-key, & .node-field.is-ref { font-family: var(--figures); }
+    & .edge { stroke: var(--line-strong); }
+
+    /* ---------- figures elsewhere ---------- */
+
+    & :is(.stat, .pager-range, .conn-meta, .start-rows, .landing-chip-table, .detail-count) { font-family: var(--figures); font-size: var(--text-xs); }
+    & .result-head .stat-order { font-family: var(--face-ui); font-size: var(--text-sm); }
+  }
+}

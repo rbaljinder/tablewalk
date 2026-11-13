@@ -8,8 +8,8 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { Registry } from '@mistriwork/engine/server/connections.js';
-import { clearJournal, history } from '@mistriwork/engine/server/journal.js';
+import { Registry, history } from '@mistriwork/engine/host';
+import { clearJournal } from '@mistriwork/engine/server/journal.js';
 import { createApp } from './support/createApp.js';
 import { runTool } from '../src/server/mcp.js';
 

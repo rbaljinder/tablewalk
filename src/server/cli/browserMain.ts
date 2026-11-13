@@ -94,10 +94,13 @@ export const main: Main = async () => {
   /* A word one slip from an App command (`tablewalk chek`) and no file of that name: the near miss is mistri's. */
   if (opts.target && /^[a-z][a-z-]*$/.test(opts.target)) {
     const [{ existsSync }, { didYouMean }] = await Promise.all([import('node:fs'), import('@mistriwork/engine/server/cli/usage.js')]);
-    const near = existsSync(opts.target) ? '' : await didYouMean(opts.target, APP_COMMAND_WORDS);
+    /* The browser's own commands first, answered as this binary's; only then the App framework's, which are mistri's. */
+    const own = existsSync(opts.target) ? '' : await didYouMean(opts.target, Object.keys(BROWSER_COMMANDS));
+    const near = own || (existsSync(opts.target) ? '' : await didYouMean(opts.target, APP_COMMAND_WORDS));
     if (near) {
+      const runner = own ? 'tablewalk ' : 'npx @mistriwork/mistri ';
       console.error(
-        `tablewalk: "${opts.target}" is not a database here, and no file of that name is.${near.replace('Did you mean ', 'Did you mean npx @mistriwork/mistri ')}`,
+        `tablewalk: "${opts.target}" is not a database here, and no file of that name is.${near.replace('Did you mean ', `Did you mean ${runner}`)}`,
       );
       process.exitCode = 1;
       return;
@@ -116,7 +119,7 @@ export const main: Main = async () => {
   if (printing) console.log = (...args: unknown[]) => console.error(...args);
 
   const [{ Registry, redact }, { readStartupConfig }, { configLocations }, { configureWriteOrder }] = await Promise.all([
-    import('@mistriwork/engine/server/connections.js'),
+    import('@mistriwork/engine/host'),
     import('@mistriwork/engine/server/cli/config.js'),
     import('@mistriwork/engine/server/config/locations.js'),
     import('@mistriwork/engine/adapters/writeLanes.js'),

@@ -133,7 +133,7 @@ namespace is reachable by nothing outside it, so the image sets
 
 ```
 Listening on http://0.0.0.0:4111
-Warning: bound to 0.0.0.0, beyond loopback, with no sign-in. Anyone who can reach this port can read the database. Bind --host 127.0.0.1, put it behind a proxy that signs people in (--auth-proxy-header), or give the App sign-in.
+Warning: bound to 0.0.0.0, beyond loopback, with no sign-in. Anyone who can reach this port can read the database. Bind --host 127.0.0.1, put it behind a proxy that signs people in (--auth-proxy-header).
 ```
 
 Binding wider also changes what the server accepts *from* the browser. On

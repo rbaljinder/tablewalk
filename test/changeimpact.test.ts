@@ -18,8 +18,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { changeImpact } from '../src/server/changeimpact.js';
-import type { Adapter, Filter } from '@mistriwork/engine/adapters/adapter.js';
-import type { DatabaseSchema } from '@mistriwork/engine/shared/schema.js';
+import type { Adapter, Filter, DatabaseSchema } from '@mistriwork/engine/host';
 
 const base = (over: Partial<DatabaseSchema> = {}): DatabaseSchema => ({
   label: 'test',

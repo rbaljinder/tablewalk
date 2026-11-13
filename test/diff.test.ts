@@ -10,7 +10,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { diffReport, diffSchemas } from '../src/shared/diff.js';
-import type { DatabaseSchema } from '@mistriwork/engine/shared/schema.js';
+import type { DatabaseSchema } from '@mistriwork/engine/host';
 
 const schema = (over: Partial<DatabaseSchema> = {}): DatabaseSchema => ({
   label: 'left',

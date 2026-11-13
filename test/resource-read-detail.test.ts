@@ -4,11 +4,19 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { Refusal, type Adapter, type QueryRequest, type QueryResult } from '@mistriwork/engine/adapters/adapter.js';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import {
+  Refusal,
+  Registry,
+  readBreakdown,
+  readCount,
+  readRecords,
+  readView,
+  type Adapter,
+  type DatabaseSchema,
+} from '@mistriwork/engine/host';
+import { type QueryRequest, type QueryResult } from '@mistriwork/engine/adapters/adapter.js';
 import { runTool } from '../src/server/mcp.js';
-import { readBreakdown, readCount, readRecords, readView, type ResourceReader } from '@mistriwork/engine/server/resourceReadOperations.js';
-import type { DatabaseSchema } from '@mistriwork/engine/shared/schema.js';
+import { type ResourceReader } from '@mistriwork/engine/server/resourceReadOperations.js';
 import type { ViewDef } from '@mistriwork/engine/shared/view.js';
 
 type Reply = Awaited<ReturnType<typeof runTool>>;

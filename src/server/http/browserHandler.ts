@@ -8,17 +8,16 @@
  *
  * Nothing here loads the App framework: an App's sign-in, row policy,
  * commands, public pages and forms are the App framework's dispatcher's
- * (handler.ts). This product's rules are its hooks below — the connection's
+ * (in the mistri package). This product's rules are its hooks below — the connection's
  * `writable` flag and the reader's grant on a write, every write journaled
  * for Undo, the schema's suggested page — and nothing else.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { attributeWrites } from '@mistriwork/engine/adapters/writeAttribution.js';
+import { attributeWrites, type Registry } from '@mistriwork/engine/host';
 import { readsAs } from '@mistriwork/engine/adapters/replicas.js';
 import { currentSpan } from '@mistriwork/engine/adapters/telemetry/trace.js';
 import { serveClient } from '@mistriwork/engine/server/clientHttp.js';
 import { CLIENT_FILES } from '../clientFiles.js';
-import type { Registry } from '@mistriwork/engine/server/connections.js';
 import type { RequestDiagnostics } from '@mistriwork/engine/server/operations/diagnostics.js';
 import { FIRST_PAINT_ELEMENT } from '@mistriwork/engine/shared/firstPaint.js';
 import { mountJson, NO_MOUNT, type AddressMount } from '@mistriwork/engine/shared/mount.js';
@@ -82,14 +81,6 @@ const BROWSER_DATA: DataHooks = {
 
 /** Its routes, tried in order; the last answers whatever is left. */
 const ROUTES: readonly Route<RequestContext>[] = [
-  /* An operator's reads (readiness, the support bundle, workflows) are an authenticated App host's: an
-     unauthenticated host says nothing about itself, and says so uncached, as an App server without sign-in does. */
-  (ctx) => {
-    if (ctx.path !== '/api/operations' && !ctx.path.startsWith('/api/operations/')) return false;
-    ctx.res.setHeader('cache-control', 'no-store');
-    send(ctx.res, 404, { error: 'Operator reads are available only on an authenticated App host.' });
-    return true;
-  },
   (ctx) => connectionRoutes(ctx),
   /* Everything else that takes a body, on the source the body names (dataRoutes.ts). */
   async (ctx) => {
@@ -160,9 +151,10 @@ export async function handleBrowser(req: IncomingMessage, res: ServerResponse, u
     configQueries: serving.queries ?? [],
     configPages: (serving.pages ?? []).slice(),
     configLayouts: serving.layouts ?? [],
+    /* The engine's RequestContext asks for what an App host would say here; a browser has no policy, command or App,
+       and these four are its answer to each. */
     policyUnavailable: false,
     diagnostics,
-    /* No route here is a command's. */
     commandRequest: false,
     commandRefusal: () => send(res, 404, { error: `No such endpoint: ${path}` }),
     mount,
@@ -186,11 +178,7 @@ export async function handleBrowser(req: IncomingMessage, res: ServerResponse, u
 async function serveShell(ctx: RequestContext): Promise<void> {
   const { req, res } = ctx;
   const pages = ctx.configPages.slice();
-  /* `?authorize=`: an OAuth consent page's address. Its one button gives a token away, so nothing frames it. */
-  const consenting = ctx.url.searchParams.has('authorize');
-  if (consenting) res.setHeader('x-frame-options', 'DENY');
   return serveClient(CLIENT_FILES, req, res, {
-    ...(consenting ? { unframed: true } : {}),
     /* Every page says where it is mounted, so the client reads and writes its addresses by the server's rule (client addressMount.js). */
     mount: { base: ctx.mount.base, json: mountJson(ctx.mount) },
     path: ctx.path,

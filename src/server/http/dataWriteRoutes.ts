@@ -3,13 +3,19 @@
  * SQL and Undo. A record's update, insert and delete are both products'
  * (recordWrites.ts), and this product's part of them is `BROWSER_WRITES`:
  * the connection's `writable` flag, and every write journaled for the Undo
- * below. An App has neither: it refuses raw SQL among its diagnostic tools
- * (appConnections.ts), and a save is corrected by another save.
+ * below. An App has neither: it refuses raw SQL among its diagnostic tools,
+ * and a save is corrected by another save.
  */
-import { clampLimit } from '@mistriwork/engine/adapters/adapter.js';
-import { withCancellation } from '@mistriwork/engine/adapters/statementControl.js';
-import { attributeAction } from '@mistriwork/engine/adapters/writeAttribution.js';
-import { history, latestRevertible, recordWrite as recordJournalWrite, revert, summarise } from '@mistriwork/engine/server/journal.js';
+import {
+  clampLimit,
+  withCancellation,
+  attributeAction,
+  history,
+  latestRevertible,
+  recordWrite as recordJournalWrite,
+  revert,
+  summarise,
+} from '@mistriwork/engine/host';
 import { writeRefusal } from '@mistriwork/engine/server/http/writeRefusal.js';
 import { send, sendResource } from '@mistriwork/engine/server/http/reply.js';
 import type { PostContext } from '@mistriwork/engine/server/http/context.js';
@@ -35,8 +41,7 @@ export async function dataWriteRoutes(post: PostContext): Promise<boolean> {
    */
   if (path === '/api/sql') {
     if (!adapter.runSql) {
-      /* An App whose reads the server authorizes (roles, or hidden columns)
-         has no runSql by design: a statement could name what it keeps out. */
+      /* An adapter without runSql is one where a statement could name what the server keeps out (an HTTP source). */
       send(res, 501, { error: `${schema.dialect} connections cannot run SQL in this build.` });
       return true;
     }
@@ -47,7 +52,7 @@ export async function dataWriteRoutes(post: PostContext): Promise<boolean> {
     }
 
     const write = body.write === true;
-    /* A raw write names no single table; an App server refuses /api/sql before this (appConnections.ts). */
+    /* A raw write names no single table; an App server refuses /api/sql before this. */
     const refused = write ? writeRefusal(registry, undefined, connection, undefined) : null;
     if (refused) {
       send(res, 403, { error: refused, code: 'forbidden' });
@@ -63,9 +68,15 @@ export async function dataWriteRoutes(post: PostContext): Promise<boolean> {
         if (!res.writableEnded) stop.abort();
       };
       res.once('close', left);
-      const result = await withCancellation(stop.signal, () => adapter.runSql!({ text, limit: clampLimit(body.limit), write })).finally(
-        () => res.off('close', left),
-      );
+      const result = await withCancellation(stop.signal, () =>
+        adapter.runSql!({
+          text,
+          limit: clampLimit(body.limit),
+          write,
+          /* The same refusal the MCP sql tool makes: tablewalk's own runtime tables (__mistri_*) are not this editor's to read or change. */
+          refuseReserved: true,
+        }),
+      ).finally(() => res.off('close', left));
       /* A raw write is history too — listed, and marked as what it is: a
          statement with no general inverse, which undo will not guess at.
          The MCP `sql` tool never writes; this route was the one place a

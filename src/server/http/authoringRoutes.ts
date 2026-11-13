@@ -2,15 +2,14 @@
  * The database browser's POST routes that author rather than change data:
  * stored layouts and saved pages, the agent console's tool call, and a view
  * compiled without running. An App's rooms are its definition, so an App
- * server refuses the first two (appAuthoring.ts) and the last two are its
- * diagnostic tools, which it does not offer (appConnections.ts). A page's
- * plans, a record's references and a list's saved filters are both
- * products' (pageRoutes.ts).
+ * server refuses the first two and the last two are its diagnostic tools,
+ * which it does not offer. A page's plans, a record's references and a list's
+ * saved filters are both products' (the engine's pageRoutes).
  */
 import { pagesPath, writeLayout, type StoredLayout } from '@mistriwork/engine/server/layouts.js';
 import { normaliseView, styleFor } from '@mistriwork/engine/server/resourceReadHttp.js';
 import { runTool } from '../mcp.js';
-import { attributeWrites } from '@mistriwork/engine/adapters/writeAttribution.js';
+import { attributeWrites } from '@mistriwork/engine/host';
 import { PathError, compileView, explainView } from '@mistriwork/engine/shared/view.js';
 import { suggestPage } from '@mistriwork/engine/shared/page.js';
 import type { PageHooks } from '@mistriwork/engine/server/http/pageRoutes.js';
@@ -23,6 +22,9 @@ export const BROWSER_PAGES: PageHooks = { suggested: (post, table) => suggestPag
 export async function authoringRoutes(post: PostContext): Promise<boolean> {
   const { res, path, body, schema, registry, connection } = post;
 
+  /* Not refused for an untrusted client, though it writes a file under this machine's config directory: the client has no
+     way yet to hide the save control when the server is exposed (/api/runtime carries no such flag), and a 403 there is a
+     silent failure. Gate it together with that flag. */
   /**
    * Store a record layout, or remove one.
    *

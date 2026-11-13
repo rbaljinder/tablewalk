@@ -137,6 +137,33 @@ test('a record is edited from its page, and a boolean is a choice not a box', as
   await expect.poll(() => scalar(SCRATCH_DB, 'SELECT email FROM customer WHERE id = ?', ROW_ON_PAGE)).toBe(original);
 });
 
+test('after a reload the menu still names the last edit, and undoes it', async ({ page }) => {
+  /* The journal outlives the tab (and, with `tablewalk journal`, the process), so a reload is no reason to forget
+     the edit. The menu used to ask before the page had named a connection, so after a reload it said "nothing to
+     undo" while the server still held the write. Row 4 is this test's own. */
+  const ROW_RELOADED = 4;
+  const original = scalar(SCRATCH_DB, 'SELECT email FROM customer WHERE id = ?', ROW_RELOADED);
+
+  await open(page, SCRATCH, 'customer');
+  await enableWriteMode(page);
+  await page.getByRole('combobox', { name: 'Query' }).fill(`customer id = ${ROW_RELOADED}`);
+  await page.getByRole('button', { name: 'Run' }).click();
+  await dataRows(page).first().click();
+  await page.getByLabel('email (TEXT)').fill(EDITED);
+  await page.getByRole('button', { name: 'Review & apply' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Apply' }).click();
+  await expect.poll(() => scalar(SCRATCH_DB, 'SELECT email FROM customer WHERE id = ?', ROW_RELOADED)).toBe(EDITED);
+
+  await page.reload();
+  await expect(page.locator('html')).not.toHaveAttribute('data-starting');
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  const undo = page.getByRole('menuitem', { name: /^Undo the last edit/ });
+  await expect(undo).toContainText(`Updated customer ${ROW_RELOADED}`);
+  await undo.click();
+  await expect(toast(page)).toContainText(`Undone: Updated customer ${ROW_RELOADED}`);
+  await expect.poll(() => scalar(SCRATCH_DB, 'SELECT email FROM customer WHERE id = ?', ROW_RELOADED)).toBe(original);
+});
+
 test('a read-only connection offers no editing, and the server refuses a write sent anyway', async ({ page }) => {
   const original = String(scalar(DEMO_DB, 'SELECT email FROM customer WHERE id = 1'));
 

@@ -20,7 +20,7 @@ import {
 import { isPoolBusy, PoolBusy, POOL_BUSY_MESSAGE } from '@mistriwork/engine/adapters/poolMetrics.js';
 import { asBackgroundWork } from '@mistriwork/engine/adapters/writeLanes.js';
 import { createApp } from './support/createApp.js';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Registry } from '@mistriwork/engine/host';
 import { makeDemoDatabase } from './make-demo-db.js';
 
 class Client implements PgClient {

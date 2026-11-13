@@ -15,15 +15,9 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { Registry } from '@mistriwork/engine/server/connections.js';
+import { Registry, STATEMENT_TIMEOUT_MS, StatementStopped, stoppedReason } from '@mistriwork/engine/host';
 import { runTool } from '../src/server/mcp.js';
-import {
-  onCancel,
-  STATEMENT_TIMEOUT_MS,
-  statementCap,
-  StatementStopped,
-  stoppedReason,
-} from '@mistriwork/engine/adapters/statementControl.js';
+import { onCancel, statementCap } from '@mistriwork/engine/adapters/statementControl.js';
 import { liveSkip } from './live.js';
 
 type Reply = Awaited<ReturnType<typeof runTool>>;
@@ -175,6 +169,31 @@ describe('MCP safety on SQLite', () => {
     const plan = answered(await call('explain', { statement: 'select * from child where parent_id = ?', params: [1] }));
     assert.ok((plan.plan as string[]).length);
     refusedWith(await call('sql', { statement: 'select * from nonesuch' }), /no such table: nonesuch.*Ask `tables`/s);
+  });
+
+  test('a failed call carries a stable code in _meta, and its text is untouched', async () => {
+    const coded = async (reply: Promise<Reply>, code: string, pattern: RegExp) => {
+      const got = await reply;
+      assert.equal(got.isError, true);
+      assert.equal(got._meta?.['tablewalk/code'], code, got.content[0].text);
+      assert.match(got.content[0].text, pattern);
+    };
+    await coded(call('update', { table: 'parent', key: { id: 1 }, set: { name: 'x' } }), 'read_only', /^".*" is read-only/);
+    await coded(call('table', { table: 'nonesuch' }), 'not_found', /^Unknown table/);
+    await coded(call('sql', {}), 'invalid_argument', /missing "statement"/);
+    await coded(call('sql', { statement: 'select * from __mistri_command_audit' }), 'forbidden', /__mistri_command_audit/);
+    await coded(call('sql', { statement: 'select * from nonesuch' }), 'not_found', /no such table/);
+    await coded(
+      call('record', { table: 'parent', keys: Array.from({ length: 21 }, (_, id) => ({ id })) }),
+      'limit',
+      /more than one call carries/,
+    );
+    await coded(call('sql', { statement: SLOW_SQLITE, timeout_ms: 300 }), 'timeout', /cap/);
+    const withdrawn = new AbortController();
+    withdrawn.abort();
+    await coded(call('sql', { statement: 'select 1' }, withdrawn.signal), 'cancelled', /^Cancelled/);
+    assert.equal(answered(await call('sql', { statement: 'select 1' })).connection, owner);
+    assert.equal((await call('sql', { statement: 'select 1' }))._meta, undefined);
   });
 
   test('a statement past its cap is stopped, and the answer says what to do', async () => {
