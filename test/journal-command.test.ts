@@ -68,3 +68,25 @@ test('a read-only connection, or a database named on the command line, is refuse
   assert.match(named.stderr, /always read-only/);
   assert.deepEqual(reserved(file), []);
 });
+
+test("a connection under the row-security backstop is refused: its url is a tenant App's restricted role", () => {
+  /* Nothing listens on these: the refusal is read off the config, before anything connects. */
+  const path = join(directory, 'fenced.json');
+  writeFileSync(
+    path,
+    JSON.stringify({
+      connections: [
+        {
+          name: 'fenced',
+          url: 'postgres://app@127.0.0.1:1/shop',
+          owner: 'postgres://owner@127.0.0.1:1/shop',
+          backstop: 'rls',
+          writable: true,
+        },
+      ],
+    }),
+  );
+  const refused = run('journal', '--config', path);
+  assert.equal(refused.status, 2, refused.stderr);
+  assert.match(refused.stderr, /"fenced" is under the row-security backstop/);
+});

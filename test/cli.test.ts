@@ -220,3 +220,31 @@ describe('migrate writes, so it asks for "writable": true', () => {
 
   after(() => rmSync(dir, { recursive: true, force: true }));
 });
+
+describe("a connection under the row-security backstop is not the browser's to open", () => {
+  /* Its url signs in as a tenant App's restricted role, which sees no tenant row without a tenant set: the browser
+     would show every table empty. Nothing listens on these URLs; the refusal comes before anything connects. */
+  const dir = mkdtempSync(join(tmpdir(), 'tablewalk-cli-backstop-'));
+  const config = join(dir, 'tablewalk.json');
+  new DatabaseSync(join(dir, 'plain.db')).close();
+  writeFileSync(
+    config,
+    JSON.stringify({
+      connections: [
+        { name: 'plain', url: join(dir, 'plain.db') },
+        { name: 'fenced', url: 'postgres://app@127.0.0.1:1/shop', owner: 'postgres://owner@127.0.0.1:1/shop', backstop: 'rls' },
+      ],
+    }),
+  );
+
+  for (const mode of [[], ['--mcp']]) {
+    test(`a start${mode.length ? ` with ${mode[0]}` : ''} is refused, naming the connection`, async () => {
+      const { code, err } = await run(['--config', config, '--port', '0', ...mode]);
+      assert.equal(code, 2, err);
+      assert.match(err, /connection "fenced" is under the row-security backstop/);
+      assert.match(err, /owner's URL/);
+    });
+  }
+
+  after(() => rmSync(dir, { recursive: true, force: true }));
+});

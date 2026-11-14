@@ -128,6 +128,20 @@ export const main: Main = async () => {
   /* Config first, then the command line, so an explicitly named database is the one you land on even when a
      config file lists others. */
   const config = await readStartupConfig(opts, registry, browserSections);
+  /* A connection under the row-security backstop signs in as a tenant App's restricted role, which sees no tenant
+     row until a tenant is set: every table would open empty and say nothing of why. Only a tenant App reads through
+     it, as mistri refuses the same of its Workbench. Refused before anything connects. */
+  const fenced = registry.configs().find((each) => each.backstop === 'rls');
+  if (fenced) {
+    console.error(
+      `tablewalk: connection "${fenced.name}" is under the row-security backstop ("backstop": "rls"); only a tenant App ` +
+        "reads through it, and the database browser would see none of its tenant rows. Point it at the owner's URL instead, " +
+        'or remove "backstop".',
+    );
+    await registry.closeAll();
+    process.exitCode = 2;
+    return;
+  }
   // The database browser's writes run one at a time, the order its Undo needs (writeLanes.ts).
   configureWriteOrder('serial');
   /* The browser's agent tools — SQL, the schema, every table — take no App, since an App serves only its declared
