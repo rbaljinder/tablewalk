@@ -1,6 +1,6 @@
 {
   "name": "tablewalk-desktop",
-  "version": "1.0.0-rc.13",
+  "version": "1.0.0-rc.14",
   "private": true,
   "description": "tablewalk in a window: the same server, the same client, a native shell.",
   "license": "MIT",

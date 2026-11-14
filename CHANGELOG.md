@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0-rc.14
+
+Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.55`.
+
+- A connection under the row-security backstop (`"backstop": "rls"`) is refused at start, by name, before anything
+  connects. Its `url` signs in as a tenant App's restricted role, which sees no tenant row until a tenant is set, so
+  every table would have opened empty without saying why. Point a connection at the owner's URL instead.
+  `tablewalk journal` refuses one too.
+
 ## 1.0.0-rc.13
 
 tablewalk, the database browser, now lives in its own repository and ships as its own

@@ -72,6 +72,14 @@ export async function runJournal(
       : undefined;
     const target = targetConnection(registry, { connection, argument }, undefined, 'journal');
     if (target.http) return fail(`"${target.name}" is an HTTP API; it keeps no journal.`, EXIT.refused);
+    /* Its url is a tenant App's restricted role, which the browser never serves (browserMain.ts): a journal made
+       through it would belong to that role and be read by no one. */
+    if (target.backstop === 'rls')
+      return fail(
+        `"${target.name}" is under the row-security backstop ("backstop": "rls"), which the database browser does not open. ` +
+          "Point a connection at the owner's URL instead.",
+        EXIT.refused,
+      );
     if (target.writable !== true)
       return fail(
         `"${target.name}" is read-only, and only a writable connection keeps an Undo journal. Give the connection "writable": true in its config — ` +
