@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.0.0-rc.15
+
+Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.60`. `@mistriwork/ui` is now
+drawn over UI SDK instead of Base UI, so the browser takes `@ui-sdk/core` and `@ui-sdk/react` as direct dependencies and
+no longer depends on `@base-ui/react`.
+
+### Looks
+
+- The browser's own look is Instrument in the Graphite and cobalt palette: cool graphite greys with one cobalt accent,
+  every text colour at 4.5:1 or more on every ground it sits on. Fog and moss, the former default, is one of Instrument's
+  other palettes in Preferences; `?look=instrument&palette=fog` picks it.
+- The first-visit tour dims what is outside its spotlight with a dark scrim instead of a wash of the ground, so the table
+  list and the wordmark stay legible (4.5:1 or more) while the tour points at them.
+
+### Fixes
+
+- The page builder draws its box with the kit's dialog, the one its confirm, prompt and field-arranger dialogs already
+  use, so nested Escape and focus stay in one library.
+- The overflow menu's checkable rows (Preferences, Dark mode) no longer start with an empty tick column; the tick
+  follows the label.
+
+### Known gaps
+
+- Preferences lists Graphite twice: once as Instrument's palette and once as the kit's own Graphite look.
+
 ## 1.0.0-rc.14
 
 Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.55`.

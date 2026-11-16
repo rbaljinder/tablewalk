@@ -66,7 +66,7 @@ export function ConnectionManager({ onClose, onOpen, onAdd, onEdit, onRemove, on
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       // Not while a dialog of our own is on top of us, and not mid-edit.
-      if (shellQuery('dialog[open], .modal[role="dialog"], .modal[role="alertdialog"]')) return;
+      if (shellQuery('dialog[open], [data-slot="dialog-content"], .modal[role="dialog"], .modal[role="alertdialog"]')) return;
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') {
         (document.activeElement as HTMLElement).blur();

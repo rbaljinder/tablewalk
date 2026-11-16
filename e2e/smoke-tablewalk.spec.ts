@@ -69,6 +69,6 @@ test('the explorer’s rooms all render', async ({ page }) => {
 
   // The pager's dropdown constructs — back on a table, where the pager lives.
   await runQuery(page, 'invoice');
-  await page.locator('.pager .dd-button').first().click();
+  await page.locator('.pager [data-slot="select-trigger"]').first().click();
   await page.keyboard.press('Escape');
 });

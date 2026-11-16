@@ -6,7 +6,7 @@
 
 @layer theme {
   /* What every palette shares: the figures' face and, per mode, the shadows (a palette is colour only). */
-  :root:is(:not([data-host-look]), [data-host-look='instrument'], [data-host-look^='instrument-']) {
+  :root:is(:not([data-host-look], [data-visual-theme]), [data-host-look^='instrument-']) {
     --figures: 'IBM Plex Mono', var(--code);
     --shadow-pop: 0 1px 2px rgb(16 20 28 / 0.06), 0 8px 24px rgb(16 20 28 / 0.1);
     --shadow-panel: 0 1px 2px rgb(16 20 28 / 0.06), 0 12px 32px rgb(16 20 28 / 0.12);
@@ -14,36 +14,35 @@
     --scrim: rgb(16 20 28 / 0.32);
   }
   @media (prefers-color-scheme: dark) {
-    :root:is(:not([data-host-look]), [data-host-look='instrument'], [data-host-look^='instrument-']):not([data-theme='light']) {
+    :root:is(:not([data-host-look], [data-visual-theme]), [data-host-look^='instrument-']):not([data-theme='light']) {
       --shadow-pop: 0 0 0 1px rgb(0 0 0 / 0.3), 0 10px 28px rgb(0 0 0 / 0.5);
       --shadow-panel: 0 0 0 1px rgb(0 0 0 / 0.3), 0 14px 36px rgb(0 0 0 / 0.55);
       --shadow-modal: 0 0 0 1px rgb(0 0 0 / 0.35), 0 28px 72px rgb(0 0 0 / 0.65);
       --scrim: rgb(0 0 0 / 0.55);
     }
   }
-  :root:is(:not([data-host-look]), [data-host-look='instrument'], [data-host-look^='instrument-'])[data-theme='dark'] {
+  :root:is(:not([data-host-look], [data-visual-theme]), [data-host-look^='instrument-'])[data-theme='dark'] {
     --shadow-pop: 0 0 0 1px rgb(0 0 0 / 0.3), 0 10px 28px rgb(0 0 0 / 0.5);
     --shadow-panel: 0 0 0 1px rgb(0 0 0 / 0.3), 0 14px 36px rgb(0 0 0 / 0.55);
     --shadow-modal: 0 0 0 1px rgb(0 0 0 / 0.35), 0 28px 72px rgb(0 0 0 / 0.65);
     --scrim: rgb(0 0 0 / 0.55);
   }
 
-  :root:is(:not([data-host-look]), [data-host-look='instrument'], [data-host-look^='instrument-']) {
+  :root:is(:not([data-host-look], [data-visual-theme]), [data-host-look^='instrument-']) {
     /* ---------- the frame: graphite chrome round a white working surface ---------- */
 
     & .sidebar { background: var(--ground); }
-    & .crumbs-host { background: var(--surface); }
-    & #query { background: var(--ground); }
-    & #query:focus { background: var(--surface); }
+    & :is(.content, .crumbs-host) { background: var(--surface); }
     & .tab[aria-selected='true'] { border-bottom-color: var(--accent); }
 
     /* ---------- the measuring grid ---------- */
 
-    & .grid-inset > .table-wrap { border: 1px solid var(--line); border-radius: var(--radius); padding-bottom: 0; margin-bottom: var(--space-4); }
-    & .grid-inset > .table-wrap th:first-child,
-    & .grid-inset > .table-wrap td:first-child { padding-left: var(--space-3h); }
-    & .grid-inset > .table-wrap th:last-child,
-    & .grid-inset > .table-wrap td:last-child { padding-right: var(--space-3h); }
+    /* The grid runs edge to edge on the working surface, ruled off from the result's head above it. (It sat in a card
+       once; the card's selector no longer met the grid once the result table gained a wrapper, and edge to edge is the
+       quieter answer.) */
+    & .grid-inset .table-wrap { border-top: 1px solid var(--line); padding-bottom: 0; }
+    & .grid-inset .table-wrap :is(th, td):first-child { padding-left: var(--space-3h); }
+    & .grid-inset .table-wrap :is(th, td):last-child { padding-right: var(--space-4h); }
     & th { background: var(--head-band); border-bottom: 1px solid var(--line-strong); }
     & th.sorted { border-bottom-color: var(--accent); }
     & :is(th, td) { border-right: 1px solid var(--line); }
@@ -82,7 +81,8 @@
 
     /* ---------- figures elsewhere ---------- */
 
-    & :is(.stat, .pager-range, .conn-meta, .start-rows, .landing-chip-table, .detail-count) { font-family: var(--figures); font-size: var(--text-xs); }
+    /* A start's row count stays in the interface face: the chip is a sentence ("30 rows"), not a readout. */
+    & :is(.stat, .pager-range, .conn-meta, .detail-count) { font-family: var(--figures); font-size: var(--text-xs); }
     & .result-head .stat-order { font-family: var(--face-ui); font-size: var(--text-sm); }
   }
 }
