@@ -33,9 +33,13 @@ export const CLIENT = join(ROOT, 'dist/client');
    brotli 52_300 to 58_000). The browser's own look is now Instrument in Fog and moss (looks/native.css), drawn in the
    first stylesheet on purpose so the first paint is already in it rather than flashing the kit's tokens: the Workbench
    chunk's sheet went from about 10 KB to 50 KB with it, Inter's and Plex Mono's faces included. The kit's own sheet grew
-   by about 13 KB and its script by about 38 KB from rc.17 to rc.49; this package's script barely moved. */
+   by about 13 KB and its script by about 38 KB from rc.17 to rc.49; this package's script barely moved.
+   They rose again for 1.0.0-rc.15, on kit rc.60 (script raw 1_318_000 to 1_390_000, brotli 361_400 to 380_000; style
+   raw 440_000 to 545_000, brotli 58_000 to 70_000). rc.59 redrew @mistriwork/ui over UI SDK with one controls sheet and
+   eight built-in looks: the kit's stylesheet grew by about 85 KB raw and its script by about 56 KB. This package's own
+   Workbench sheet grew by about 10 KB, for Graphite as the browser's default look with its contrast fixed. */
 export const BUDGET = {
-  workbench: { script: { raw: 1_318_000, br: 361_400 }, style: { raw: 440_000, br: 58_000 } },
+  workbench: { script: { raw: 1_390_000, br: 380_000 }, style: { raw: 545_000, br: 70_000 } },
 };
 
 /* The chrome's words in a language besides English (src/client/copy/<lang>.ts), one chunk each, which only a reader of

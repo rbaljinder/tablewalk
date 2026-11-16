@@ -137,13 +137,13 @@ test.describe('with nothing connected', () => {
     /* The form used to contradict itself here: the parts switched to SQLite
        and the Driver control went on reading "postgres", because assigning to
        a custom dropdown's `value` set an expando on a div and did nothing. */
-    await expect(page.locator('.dd-value')).toHaveText('sqlite');
+    await expect(page.locator('[data-slot="select-value"]')).toHaveText('sqlite');
     await expect(page.getByLabel('File', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: 'postgres://' }).click();
 
     await expect(page.getByLabel('Connection URL or file path')).toHaveValue('postgres://postgres@127.0.0.1/tablewalk');
-    await expect(page.locator('.dd-value')).toHaveText('postgres');
+    await expect(page.locator('[data-slot="select-value"]')).toHaveText('postgres');
     await expect(page.getByLabel('Host')).toHaveValue('127.0.0.1');
     await expect(page.getByLabel('Database')).toHaveValue('tablewalk');
     await expect(page.locator('.conn-scheme-hint')).toBeHidden();

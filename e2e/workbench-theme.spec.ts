@@ -28,7 +28,7 @@ const labelled = (label: string) => new RegExp(`^${label} `);
 async function choose(page: Page, dialog: Locator, control: string, option: string) {
   await dialog.getByRole('button', { name: labelled(control) }).click();
   await page.getByRole('option', { name: option, exact: true }).click();
-  await expect(dialog.getByRole('button', { name: labelled(control) }).locator('.dd-value')).toHaveText(option);
+  await expect(dialog.getByRole('button', { name: labelled(control) }).locator('[data-slot="select-value"]')).toHaveText(option);
 }
 
 async function nativeLook(page: Page) {
@@ -36,8 +36,8 @@ async function nativeLook(page: Page) {
   for (const attribute of ['data-visual-theme', 'data-theme-style', 'data-custom-theme', 'data-theme-palette', 'data-record-branding']) {
     await expect(root).not.toHaveAttribute(attribute);
   }
-  // Fog's ground: the browser's own look is Instrument in the Fog and moss palette (native.css).
-  await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(245, 245, 245)');
+  // Graphite's ground: the browser's own look is Instrument in the Graphite and cobalt palette (native.css).
+  await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(246, 247, 249)');
   expect(
     await root.evaluate((node) =>
       ['--ground', '--surface', '--heading-font', '--field-radius', '--mono'].map((key) =>
@@ -80,7 +80,7 @@ test('Workbench: native default, real Theme lab and Preferences looks, canonical
     await expect(page.locator('html')).toHaveAttribute('data-theme', value);
     await expect(page.locator('body')).toHaveCSS('background-color', background);
     lab = await openDialog(page, 'Theme lab');
-    await expect(lab.getByRole('button', { name: labelled('Color mode') }).locator('.dd-value')).toHaveText(label);
+    await expect(lab.getByRole('button', { name: labelled('Color mode') }).locator('[data-slot="select-value"]')).toHaveText(label);
   }
   await lab.getByRole('button', { name: 'Close', exact: true }).click();
 
@@ -158,7 +158,7 @@ for (const density of ['comfortable', 'spacious'] as const)
     await openWorkbench(page);
     // Wider fallback fonts exposed this on Linux. Exercise the same long-option
     // geometry on every platform, with a list that still fits either viewport.
-    await page.addStyleTag({ content: '.dd-list { min-width: max(var(--anchor-width), 220px); }' });
+    await page.addStyleTag({ content: '[data-slot="select-content"] { min-width: max(var(--anchor-width), 220px); }' });
     for (const name of ['Theme lab', 'Preferences'] as const) {
       const dialog = await openDialog(page, name);
       for (const width of [390, 320]) {

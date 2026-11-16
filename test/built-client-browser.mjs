@@ -30,8 +30,10 @@ const IMMUTABLE = 'public, max-age=31536000, immutable';
 /* What a cold first visit may take off the wire, page and assets, before the room paints. scripts/bundle-budget.mjs holds
    the first paint's own ceiling at build time, and this holds what a browser actually fetched for a real room.
    Raised from 425 in 1.0.0-rc.13: the Fog look's two faces (Inter 48 KB, Plex Mono 15 KB) are now in the first paint,
-   and the rest is the Fog stylesheet and the rc.49 kit that bundle-budget.mjs was raised for. */
-const FIRST_PAINT_WIRE_KB = 500;
+   and the rest is the Fog stylesheet and the rc.49 kit that bundle-budget.mjs was raised for. Raised to 540 in
+   1.0.0-rc.15: kit rc.59/rc.60 redrew @mistriwork/ui over UI SDK (about 19 KB more brotli script and 12 KB more style
+   in the Workbench's first paint, the same growth bundle-budget.mjs records). */
+const FIRST_PAINT_WIRE_KB = 540;
 /* The chunks the Workbench's page never fetches: the App framework's and the public pages'. */
 const NEVER = ['/assets/chrome', '/assets/tenant', '/assets/public'];
 
@@ -162,7 +164,7 @@ try {
   const cold = await visit(context, url, schema);
   assert.deepEqual(cold.errors, [], `${label}: errors on a cold visit`);
   assertShipped(label, cold.files);
-  // The browser's own look (Fog, native.css) sets its text in Inter and its
+  // The browser's own look (Graphite, native.css) sets its text in Inter and its
   // data in IBM Plex Mono, so a landing fetches exactly those two faces and
   // no weight or script the first paint does not draw.
   const faces = [

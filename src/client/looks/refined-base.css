@@ -18,18 +18,18 @@
 @import '@mistriwork/kit/client/fonts/faces.css';
 
 @layer theme {
-  :root:is(:not([data-host-look]), [data-host-look='instrument'], [data-host-look^='instrument-'], [data-host-look='folio']) {
+  :root:is(:not([data-host-look], [data-visual-theme]), [data-host-look^='instrument-'], [data-host-look='folio']) {
     --face-ui: Inter, 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
     --sans: var(--face-ui);
     /* The kit's seam for a host look's data face (tokens.css): every chrome string the native look set in the code
        face reads it, so pointing it at the interface face moves them all; each look then sets its data where it wants. */
     --data-face: var(--face-ui);
     --radius: 6px;
-    --control-h: 30px;
+    --control-h: 32px;
     --grid-head-char: 6.8;
   }
 
-  :root:is(:not([data-host-look]), [data-host-look='instrument'], [data-host-look^='instrument-'], [data-host-look='folio']) {
+  :root:is(:not([data-host-look], [data-visual-theme]), [data-host-look^='instrument-'], [data-host-look='folio']) {
     & body {
       --radius-item: 5px;
       --radius-pop: 8px;
@@ -48,15 +48,15 @@
     & .topbar { gap: var(--space-4); padding-block: var(--space-2h); background: var(--surface); border-bottom: 1px solid var(--line); }
     & body.write-mode .topbar { border-bottom-color: var(--status-critical); }
     & .brand-name { font: 600 var(--text-md) var(--face-ui); letter-spacing: -0.01em; }
-    & .conn-picker .dd-button {
+    & .conn-picker [data-slot='select-trigger'] {
       min-height: 28px; padding: 0 var(--space-3); border-color: transparent; background: none;
       font: 500 var(--text-base) var(--face-ui); color: var(--ink);
     }
-    & .conn-picker .dd-button:hover { background: var(--raised); } /* motion-ok: colour only, at the hover token */
+    & .conn-picker [data-slot='select-trigger']:hover { background: var(--raised); } /* motion-ok: colour only, at the hover token */
     & .conn-manage { color: var(--ink-subtle); }
-    & #query { font-size: var(--text-base); line-height: 1.4; padding-block: var(--space-2h); border-radius: var(--radius); }
+    & #query { font-size: var(--text-base); line-height: 1.4; padding-block: 0; block-size: var(--control-h); border-radius: var(--radius); background: var(--field-fill); }
     & #querybar > button {
-      padding: var(--space-2h) var(--space-4); font: 500 var(--text-base) var(--face-ui);
+      padding: 0 var(--space-4); block-size: var(--control-h); font: 500 var(--text-base) var(--face-ui);
       border-radius: var(--radius);
     }
     & .icon-button { font: 500 var(--text-sm) var(--face-ui); color: var(--ink-muted); padding: var(--space-2) var(--space-3); }
@@ -94,10 +94,16 @@
     & .tab[aria-selected='true'] { color: var(--ink); }
     & .applist-filterbar { gap: var(--space-3); }
     & .applist-field-label { font: 500 var(--text-sm) var(--face-ui); color: var(--ink-muted); }
-    & .applist-quick, & .applist-field .dd-button, & .picker-input, & .conn-filter, & .cell-edit, & .edit-field-surface :is(input, select, textarea) {
+    & .applist-quick, & .applist-field [data-slot='select-trigger'], & .picker-input, & .conn-filter, & .cell-edit, & .edit-field-surface :is(input, select, textarea) {
       border-radius: var(--radius); font-family: var(--face-ui);
     }
-    & .applist-go { font: 500 var(--text-base) var(--face-ui); }
+    /* One control height: a field, a select and the button beside them stand on one line at one height, on the
+       field's own fill (the quick filters sat grey beside white selects). */
+    & :is(.applist-quick, .applist-field [data-slot='select-trigger'], .applist-go, #table-filter, .prefs [data-slot='select-trigger'], .prefs-foot > button) {
+      block-size: var(--control-h); padding-block: 0; background: var(--field-fill);
+    }
+    & .applist-go { font: 500 var(--text-base) var(--face-ui); border: 1px solid var(--line-strong); border-radius: var(--radius); align-self: end; }
+    & .applist-go:hover { background: var(--raised); } /* motion-ok: colour only */
     & .result-head { align-items: baseline; row-gap: var(--space-2); }
     & .result-head .result-title { font: 600 var(--text-lg) var(--face-ui); letter-spacing: -0.012em; }
     & .result-head .stat { font: var(--text-sm) var(--face-ui); color: var(--ink-muted); font-variant-numeric: tabular-nums; }
@@ -133,17 +139,27 @@
     /* ---------- a record ---------- */
 
     & .panel > .record-heading {
-      font: 600 var(--text-lg) var(--face-ui); color: var(--ink); letter-spacing: -0.012em; gap: var(--space-2h);
+      font: 600 var(--text-lg) var(--face-ui); color: var(--ink); letter-spacing: -0.012em; gap: var(--space-2);
     }
-    /* The name keeps its line: when the tools do not fit beside it they step down a line, rather than the name breaking. */
+    /* The tools stay on the name's line in a record pane: a long name gives way first, down to an ellipsis at 6rem, and
+       only a pane too narrow for that sends the tools down a line. A wrapped heading made every record pane two rows
+       taller than its neighbour and left Layout alone on a line. */
     & .panel > .record-heading { flex-wrap: wrap; row-gap: var(--space-2h); }
-    & .panel > .record-heading > span { flex: 1 1 auto; overflow-wrap: normal; }
-    & .record-heading button { white-space: nowrap; }
-    & :is(.record-as-page, .record-layout, .record-delete, .record-heading button.ghost) {
-      padding: var(--space-1h) var(--space-3); font: 500 var(--text-sm) var(--face-ui); border-radius: var(--radius);
+    & .panel > .record-heading > span {
+      flex: 1 1 0; min-inline-size: 6rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal;
     }
-    & .field { border-left: 0; padding-block: var(--space-2h); border-radius: 0; }
-    & .field:hover { background: var(--raised); } /* motion-ok: colour only */
+    & .record-heading button { white-space: nowrap; }
+    /* The tools are a compact row, so they sit beside the name in a record pane rather than leaving one on a line of
+       its own. */
+    & :is(.record-as-page, .record-layout, .record-delete, .record-heading button.ghost) {
+      block-size: 28px; padding: 0 var(--space-2h); font: 500 var(--text-sm) var(--face-ui); border-radius: var(--radius);
+    }
+    & .record-heading .record-trail { margin-inline-end: var(--space-1); }
+    /* The stepper's arrows keep the structure layer's 36px target; only the count's inner padding tightens. */
+    & .record-heading .record-trail-at { padding-inline: var(--space-2); }
+    & .field { border-left: 0; padding-block: var(--space-2h); border-radius: 0; min-block-size: 37px; align-items: center; }
+    & .field:hover { background: var(--row-hover); } /* motion-ok: colour only */
+    & .field .ref-jump { line-height: 1.35; }
     & .field dt { font: var(--text-base)/1.5 var(--face-ui); color: var(--ink-muted); }
     & .field dt .type, & .field .req { font: var(--text-xs) var(--figures); color: var(--ink-subtle); }
     & .field .pk { font: 500 var(--text-xs) var(--face-ui); color: var(--ink-subtle); }
@@ -176,18 +192,22 @@
 
     /* ---------- popups: one hairline, one radius step, one soft shadow ---------- */
 
-    & :is(.th-menu, .more-list, .dd-popup, .ac, .palette, .history-panel) {
+    & :is(.th-menu, .more-list, .ac, .palette, .history-panel, [data-slot='select-content'], [data-slot='menu-content'], [data-slot='popover-content']) {
       background: var(--surface); border: 1px solid var(--pop-line); border-radius: var(--radius-pop); box-shadow: var(--shadow-pop);
     }
-    & :is(.th-menu-item, .more-item, .dd-option, .ac-item, .palette-item) { border-radius: var(--radius-item); }
+    & :is(.th-menu-item, .more-item, .ac-item, .palette-item, [data-slot='select-item']) { border-radius: var(--radius-item); }
     /* motion-ok: colour only, the highlighted item's fill */
-    & :is(.th-menu-item, .more-item, .dd-option, .ac-item):hover,
-    & :is(.th-menu-item, .more-item, .dd-option)[data-highlighted],
+    & :is(.th-menu-item, .more-item, .ac-item):hover,
+    & :is(.th-menu-item, .more-item, [data-slot='select-item'])[data-highlighted],
     & .ac-item.active { background: var(--raised); } /* motion-ok: colour only */
-    & :is(.th-menu-label, .more-item, .more-label, .dd-label, .dd-text) { font: var(--text-base) var(--face-ui); color: var(--ink); }
-    & :is(.th-menu-cond, .more-detail, .dd-detail) { font: var(--text-sm) var(--face-ui); color: var(--ink-subtle); }
+    & :is(.th-menu-label, .more-item, .more-label) { font: var(--text-base) var(--face-ui); color: var(--ink); }
+    & :is(.th-menu-cond, .more-detail) { font: var(--text-sm) var(--face-ui); color: var(--ink-subtle); }
+    /* A group with a checkable row (Preferences beside Dark mode) draws a tick column, and the kit puts it before the label,
+       so the group's rows stood in from every other row's text. The tick goes after the label: all labels share one edge. */
+    & .more-item:not(.no-tick) { grid-template-columns: minmax(0, 1fr) auto auto; }
+    & .more-item:not(.no-tick) .more-tick { order: 3; min-width: 1ch; }
     & .more-group-label { font: 600 var(--text-xs) var(--face-ui); color: var(--ink-subtle); }
-    & .th-menu-sep, & .dd-divider { background: var(--line); }
+    & .th-menu-sep { background: var(--line); }
     & .ac-label { font: var(--text-base) var(--code); }
     & .ac-detail { font: var(--text-sm) var(--face-ui); color: var(--ink-subtle); }
 
@@ -201,6 +221,22 @@
 
     & .modal { border: 1px solid var(--pop-line); border-radius: var(--radius-dialog); box-shadow: var(--shadow-modal); background: var(--surface); }
     & .modal :is(h2, h3) { font: 600 var(--text-lg) var(--face-ui); letter-spacing: -0.012em; }
+    /* A tall dialog (Add a connection) is held to the window and scrolls inside. Its own ceiling was in vh, which the
+       density zoom does not divide, so it stood 12% taller than the window and its title went off the top. */
+    & .confirm { max-block-size: calc(var(--shell-vh, 100vh) - 2 * var(--space-5)); border-color: var(--pop-line); box-shadow: var(--shadow-modal); }
+    & .confirm h2 { font: 600 var(--text-lg) var(--face-ui); letter-spacing: -0.012em; }
+    /* The completer is held to the window: on a phone its 22rem floor ran off the right edge and the page scrolled
+       sideways. The floor gives way to the query bar's own width, and the ceiling to the window's; vw does not know about
+       the density zoom on the root, so it is divided out. */
+    & .ac {
+      min-inline-size: min(22rem, 100%);
+      max-inline-size: calc(100vw / var(--density-zoom, 1) - 2 * var(--space-4));
+    }
+    /* Preferences: every select one width, so the column of values has one edge; a row is one height with or without
+       its hint, so the rules between rows keep one rhythm. */
+    & .prefs-row { min-block-size: 60px; align-items: center; }
+    & .prefs [data-slot='select-trigger'] { inline-size: 12rem; }
+    & .prefs-hint { font: var(--text-sm) var(--face-ui); color: var(--ink-subtle); }
     & .confirm-diff { font: var(--text-base) var(--face-ui); }
     & .confirm-diff td { font-family: var(--figures); }
     & .toast {
@@ -219,8 +255,17 @@
     & .sql-head { border-bottom: 1px solid var(--line); }
     & .sql-title, & .sql-eyebrow { font: 600 var(--text-sm) var(--face-ui); color: var(--ink); }
     & .sql-target { font: var(--text-sm) var(--face-ui); color: var(--ink-muted); }
-    & .sql-input { font: var(--text-base)/1.55 var(--code); border-radius: var(--radius); }
+    /* The editor is a field, so it takes the field's fill: on the ground's grey it read as a disabled box. */
+    & .sql-input { font: var(--text-base)/1.55 var(--code); border-radius: var(--radius); background: var(--field-fill); }
     & .sql-stats, & .sql-walk { font: var(--text-sm) var(--face-ui); color: var(--ink-muted); }
+    /* A failed statement says so in the critical ink on a hairline, as the query bar's error does, not on a pink slab. */
+    & .sql-error {
+      background: var(--surface); border: 1px solid color-mix(in srgb, var(--status-critical) 35%, var(--line));
+      font: var(--text-sm)/1.55 var(--code);
+    }
+    & .sql-head-actions button { block-size: var(--control-h); padding-block: 0; font: 500 var(--text-base) var(--face-ui); }
+    /* The results grid stands in from the pane's edge as the table grid does, so a first column is not on the glass. */
+    & .sql-results > .table-wrap { margin-inline: var(--space-5); border: 1px solid var(--line); border-radius: var(--radius); inline-size: auto; }
 
     /* ---------- the landing: rules, not a card of chips ---------- */
 
@@ -246,32 +291,102 @@
     & .zoom-controls { border: 1px solid var(--line); border-radius: var(--radius); box-shadow: none; background: var(--surface); }
     & .diagram-legend { font: var(--text-sm) var(--face-ui); color: var(--ink-subtle); }
     & .ddl { font: var(--text-sm)/1.6 var(--code); }
+    /* The welcome's promise is a hairline note on the page's white, and its notes share the page's left edge (the
+       generic note's inset stood them in from the list above them). */
+    & .welcome-assure { background: var(--surface); font: var(--text-base)/1.55 var(--face-ui); }
+    & .welcome-examples .note { padding-inline: 0; font: var(--text-base)/1.6 var(--face-ui); }
 
     /* ---------- connections ---------- */
 
-    & .conn-manager { background: var(--ground); }
+    /* The manager and the agent console are work surfaces, so they are white; the grey is the sidebar's alone. */
+    & .conn-manager { background: var(--surface); }
+    & .conn-head { flex-wrap: wrap; row-gap: var(--space-4); }
+    & .conn-head-actions { flex-wrap: wrap; gap: var(--space-3); }
+    & .conn-head-actions > button { block-size: var(--control-h); padding-block: 0; font: 500 var(--text-base) var(--face-ui); }
     & .conn-head h2, & .conn-brand-name { font: 600 var(--text-xl) var(--face-ui); letter-spacing: -0.012em; }
     & .conn-lede { font: var(--text-base) var(--face-ui); color: var(--ink-muted); }
+    & .conn-filter { block-size: var(--control-h); padding-block: 0; background: var(--field-fill); }
     & .conn-list { border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); overflow: hidden; }
     & .conn-row { border-bottom: 1px solid var(--line); }
     & .conn-row:last-child { border-bottom: 0; }
     & .conn-row:hover { background: var(--raised); } /* motion-ok: colour only */
+    /* The cursor row is the tint alone: the kit's 3px bar down its side is on the refusal list. */
+    & :is(.conn-row.cursor, .conn-row:focus-visible) { box-shadow: none; background: var(--raised); }
     & .conn-name-text { font: 500 var(--text-base) var(--face-ui); }
     & :is(.conn-detail, .conn-meta, .conn-status, .conn-count) { font: var(--text-sm) var(--face-ui); color: var(--ink-subtle); }
-    & .conn-badge { font: 500 var(--text-xs) var(--face-ui); color: var(--ink-muted); border-radius: 999px; }
+    & .conn-badge { font: 500 var(--text-xs) var(--face-ui); color: var(--ink-muted); border-radius: var(--radius); }
     & .conn-action { font: 500 var(--text-sm) var(--face-ui); }
+    /* A phone has no room for six columns: the row is two lines, the name and its state over the target. */
+    @media (max-width: 600px) {
+      & .conn-row { grid-template-columns: 8px minmax(0, 1fr) auto; row-gap: var(--space-1); }
+      & .conn-row > .conn-detail { grid-column: 2 / -1; grid-row: 2; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      & .conn-row > .conn-meta { grid-column: 2 / -1; grid-row: 3; }
+      & .conn-row > .conn-actions { grid-column: 2 / -1; }
+    }
+    /* Fields in the connection dialog sit on the field's fill, as every other field does. */
+    & .cell-edit:not(.dirty, .saved) { background: var(--field-fill); }
+
+    /* ---------- the agent console ---------- */
+
+    & .agent-tool.active { box-shadow: none; background: var(--raised); color: var(--ink); font-weight: 600; }
+    & .agent-badge { font: 500 var(--text-xs) var(--face-ui); letter-spacing: 0; text-transform: none; border-radius: var(--radius); }
+    /* Read-only is the ordinary case, so it is the quiet badge; only a write or a risk keeps a colour. */
+    & .agent-badge.tone-ok { color: var(--ink-subtle); border-color: var(--line); }
+    & .agent-desc-row h3 { font: 600 var(--text-lg) var(--code); }
+    & :is(.agent-desc, .agent-field label, .agent-error) { font-family: var(--face-ui); }
+    & .agent-input { min-block-size: var(--control-h); background: var(--field-fill); font-family: var(--code); }
+    & .agent-run-row > button { block-size: var(--control-h); padding-block: 0; font: 500 var(--text-base) var(--face-ui); }
+    & .agent-transcript h4 { font: 600 var(--text-sm) var(--face-ui); text-transform: none; letter-spacing: 0; }
+
+    /* ---------- the page builder ---------- */
+
+    /* A section is a row between hairlines, not a grey card: its name and size on the first line, its settings on the
+       second, its moves at the right of the first. The kit's single line ran wider than the dialog on a phone. */
+    & .pb-section {
+      flex-wrap: wrap; row-gap: var(--space-3); background: none; border: 0; border-bottom: 1px solid var(--line);
+      border-radius: 0; padding-inline: 0;
+    }
+    & .pb-section::before { content: ''; order: 2; flex-basis: 100%; block-size: 0; }
+    & .pb-section > :is([data-slot='dropdown'], .pb-cols, .pb-width, .pb-limit, .pb-advanced) { order: 4; }
+    & .pb-section > .pb-section-actions { order: 1; margin-inline-start: auto; }
+    & .pb-section > .pb-title-input { flex: 1 1 10rem; min-inline-size: 8rem; }
+    & .pb-kind { font: 500 var(--text-sm) var(--face-ui); color: var(--ink-subtle); }
+    & .pb-holds { font: var(--text-sm) var(--face-ui); color: var(--ink-subtle); }
+    & :is(.pb-input, .pb-section [data-slot='select-trigger'], .pb-fields-btn, .pb-add-btn, .pb-foot > button) {
+      block-size: var(--control-h); padding-block: 0; font: var(--text-base) var(--face-ui); border-radius: var(--radius);
+    }
+    & :is(.pb-input, .pb-section [data-slot='select-trigger']) { background: var(--field-fill); }
+    & .pb-section-actions button { inline-size: var(--control-h); block-size: var(--control-h); padding: 0; justify-content: center; }
+    & .pb-advanced summary { white-space: nowrap; font: var(--text-sm) var(--face-ui); color: var(--ink-muted); }
+    & .pb-add-btn { border: 1px solid var(--line-strong); }
+    & .pb-error { border-left: 0; }
+    & .pb-foot { flex-wrap: wrap; row-gap: var(--space-3); }
+    @media (max-width: 600px) {
+      & .pb-section > :is(.pb-title-input, .pb-fields-btn) { order: 3; }
+    }
 
     /* ---------- states ---------- */
 
+    /* A query's error stands over the page, under the bar it came from, instead of pushing the page down a line: the
+       rows and the record below keep their place while it is said and when it goes. */
     & .errors {
-      margin: var(--space-3) var(--space-4h); padding: var(--space-3) var(--space-4); border-radius: var(--radius);
-      background: color-mix(in srgb, var(--status-critical) 6%, var(--surface));
-      border: 1px solid color-mix(in srgb, var(--status-critical) 30%, var(--line));
+      position: absolute; top: auto; inset-inline: var(--space-4h); z-index: 30;
+      margin: var(--space-2) 0 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius);
+      background: var(--surface); box-shadow: var(--shadow-pop);
+      border: 1px solid color-mix(in srgb, var(--status-critical) 35%, var(--line));
       color: var(--status-critical); font: var(--text-base) var(--face-ui);
     }
     & :is(.grid-inset, .table-wrap) > .note { font: var(--text-base) var(--face-ui); color: var(--ink-muted); }
     & .clause { border-radius: var(--radius); font-family: var(--face-ui); }
     & .clause-label { font: 500 var(--text-xs) var(--face-ui); color: var(--ink-subtle); }
     & .clause-text { font-family: var(--code); }
+
+    /* A phone is narrower than the tab row plus its page and export tools: the tools take a second line rather than
+       pushing the content pane sideways, and a definition wraps its long lines instead of scrolling. */
+    @media (max-width: 600px) {
+      & .tabs { flex-wrap: wrap; block-size: auto; }
+      & .result-head { flex-wrap: wrap; }
+      & .ddl { white-space: pre-wrap; overflow-wrap: anywhere; }
+    }
   }
 }

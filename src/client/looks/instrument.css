@@ -1,6 +1,6 @@
-/* Host looks: Instrument's palettes other than Fog, which is the browser's own look (native.css).
+/* Host looks: Instrument's palettes other than Graphite, which is the browser's own look (native.css).
 
-   Colour only: graphite and cobalt (Instrument's own), Stone and teal, Slate and amber, Ink and violet, light and dark
+   Colour only: Fog and moss (the browser's default once), Stone and teal, Slate and amber, Ink and violet, light and dark
    each. The structure (Inter for words, IBM Plex Mono for figures, the hairline grid) is native.css's, scoped to the
    native look and to these `instrument-<palette>` looks (hostLooks.js), so this sheet is fetched only when one is worn
    and carries no rule of its own that is not a colour. */
@@ -9,83 +9,83 @@
   /* Colour only, light and dark each, every pair checked: text, NULL and type ink, key and reference
      ink on every ground they sit on (the surface, the frame, a hovered row, the head band, a current item's tint) at
      4.5:1; a field's edge and the focus ring at 3:1; the ink on a selection; the four tones on their own bands. */
-  /* Graphite and cobalt: the baseline: cool graphite, one cobalt accent. */
-  :root[data-host-look='instrument'] {
-    --ground: #f6f7f9;
-    --surface: #ffffff;
-    --raised: #eef0f3;
-    --line: #e4e7eb;
-    --line-strong: #cfd4db;
-    --line-control: #818996;
-    --ink: #15171c;
-    --ink-muted: #565d6a;
-    --ink-subtle: #656d7c;
-    --accent: #3d5bd9;
-    --accent-ink: #3450c9;
+  /* Fog and moss: near-monochrome neutral grey, one low-chroma moss for what you can follow. */
+  :root[data-host-look='instrument-fog'] {
+    --ground: #f5f5f5;
+    --surface: #fefefe;
+    --raised: #ededed;
+    --line: #e3e3e3;
+    --line-strong: #cccccc;
+    --line-control: #858585;
+    --ink: #171717;
+    --ink-muted: #575757;
+    --ink-subtle: #686868;
+    --accent: #4d6b2b;
+    --accent-ink: #42601f;
     --on-accent: #ffffff;
-    --accent-soft: #3d5bd914;
-    --link: #3450c9;
-    --focus: #5b77f0;
-    --status-good: #18774a;
-    --status-warning: #a3560b;
-    --status-critical: #c0362c;
-    --status-info: #6a4fc4;
-    --row-hover: #f4f6f9;
-    --pop-line: #d9dde3;
-    --head-band: #f6f7f9;
-    --graticule: #15171c1f;
+    --accent-soft: #4d6b2b14;
+    --link: #42601f;
+    --focus: #5f8336;
+    --status-good: #1f7a5a;
+    --status-warning: #9c5a06;
+    --status-critical: #b8352c;
+    --status-info: #5b54a8;
+    --row-hover: #f3f3f3;
+    --pop-line: #d9d9d9;
+    --head-band: #f5f5f5;
+    --graticule: #1717171f;
   }
   @media (prefers-color-scheme: dark) {
-    :root[data-host-look='instrument']:not([data-theme='light']) {
-      --ground: #0f1114;
-      --surface: #14161a;
-      --raised: #1c1f24;
-      --line: #23272d;
-      --line-strong: #343941;
-      --line-control: #626a76;
-      --ink: #e7e9ec;
-      --ink-muted: #a2a9b4;
-      --ink-subtle: #8e96a2;
-      --accent: #7b92ff;
-      --accent-ink: #9aabff;
-      --on-accent: #0f1114;
-      --accent-soft: #7b92ff1f;
-      --link: #9aabff;
-      --focus: #7b92ff;
-      --status-good: #5cc58f;
-      --status-warning: #e5a45a;
+    :root[data-host-look='instrument-fog']:not([data-theme='light']) {
+      --ground: #101010;
+      --surface: #151515;
+      --raised: #1d1d1d;
+      --line: #262626;
+      --line-strong: #363636;
+      --line-control: #6b6b6b;
+      --ink: #e8e8e8;
+      --ink-muted: #a6a6a6;
+      --ink-subtle: #939393;
+      --accent: #9cc26a;
+      --accent-ink: #b0d283;
+      --on-accent: #121410;
+      --accent-soft: #9cc26a1f;
+      --link: #b0d283;
+      --focus: #9cc26a;
+      --status-good: #5cc6a0;
+      --status-warning: #e6a85c;
       --status-critical: #f0857a;
-      --status-info: #b9a4ff;
-      --row-hover: #191c21;
-      --pop-line: #2e3239;
-      --head-band: #171a1e;
-      --graticule: #ffffff1a;
+      --status-info: #b2aaf5;
+      --row-hover: #1a1a1a;
+      --pop-line: #2c2c2c;
+      --head-band: #1b1b1b;
+      --graticule: #ffffff17;
     }
   }
-  :root[data-host-look='instrument'][data-theme='dark'] {
-    --ground: #0f1114;
-    --surface: #14161a;
-    --raised: #1c1f24;
-    --line: #23272d;
-    --line-strong: #343941;
-    --line-control: #626a76;
-    --ink: #e7e9ec;
-    --ink-muted: #a2a9b4;
-    --ink-subtle: #8e96a2;
-    --accent: #7b92ff;
-    --accent-ink: #9aabff;
-    --on-accent: #0f1114;
-    --accent-soft: #7b92ff1f;
-    --link: #9aabff;
-    --focus: #7b92ff;
-    --status-good: #5cc58f;
-    --status-warning: #e5a45a;
+  :root[data-host-look='instrument-fog'][data-theme='dark'] {
+    --ground: #101010;
+    --surface: #151515;
+    --raised: #1d1d1d;
+    --line: #262626;
+    --line-strong: #363636;
+    --line-control: #6b6b6b;
+    --ink: #e8e8e8;
+    --ink-muted: #a6a6a6;
+    --ink-subtle: #939393;
+    --accent: #9cc26a;
+    --accent-ink: #b0d283;
+    --on-accent: #121410;
+    --accent-soft: #9cc26a1f;
+    --link: #b0d283;
+    --focus: #9cc26a;
+    --status-good: #5cc6a0;
+    --status-warning: #e6a85c;
     --status-critical: #f0857a;
-    --status-info: #b9a4ff;
-    --row-hover: #191c21;
-    --pop-line: #2e3239;
-    --head-band: #171a1e;
-    --graticule: #ffffff1a;
+    --status-info: #b2aaf5;
+    --row-hover: #1a1a1a;
+    --pop-line: #2c2c2c;
+    --head-band: #1b1b1b;
+    --graticule: #ffffff17;
   }
   /* Stone and teal: warm stone, tablewalk's green matured to a deep teal. */
   :root[data-host-look='instrument-stone'] {

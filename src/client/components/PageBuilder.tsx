@@ -7,7 +7,7 @@
  * `pagebuilder.js`.
  */
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Dialog } from '@base-ui/react/dialog';
+import { Modal } from '@mistriwork/ui/Modal.js';
 import { findTable, refsFrom, tableAtPrefix, toast } from '@mistriwork/kit/client/core.js';
 import {
   FIELD_COLUMNS,
@@ -30,7 +30,7 @@ import type { RecoveredPageDraft, RecoveryStatus } from '../pageDraftRecovery.js
 import type { PagePreviewContext } from './PagePreview.js';
 import { formatDateTime } from '@mistriwork/kit/client/locale.js';
 import { say } from '../copy/workbench/components/PageBuilder.js';
-import { addHostListener, popupContainer, removeHostListener } from '@mistriwork/kit/client/shellHost.js';
+import { addHostListener, removeHostListener } from '@mistriwork/kit/client/shellHost.js';
 
 const PagePreview = lazy(() => import('./PagePreview.js').then((module) => ({ default: module.PagePreview })));
 
@@ -145,9 +145,19 @@ export function PageBuilder({
   const refocusSection = useRef<number | null>(null);
   useLayoutEffect(() => {
     if (refocusSection.current === null) return;
-    panel.current?.querySelectorAll('.pb-section')[refocusSection.current]?.querySelector<HTMLButtonElement>('.pb-fields-btn')?.focus();
+    panel.current
+      ?.closest('[data-slot="dialog-content"]')
+      ?.querySelectorAll('.pb-section')
+      [refocusSection.current]?.querySelector<HTMLButtonElement>('.pb-fields-btn')
+      ?.focus();
     refocusSection.current = null;
   }, [open]);
+  // The modal draws the box, so the busy mark is put on it from here.
+  useEffect(() => {
+    const box = panel.current?.closest('[data-slot="dialog-content"]');
+    if (!box) return;
+    box.setAttribute('aria-busy', String(pending !== null));
+  }, [pending]);
   const requestClose = () => {
     if (inFlight.current) return;
     if (JSON.stringify(draft) !== initial) setDiscard(true);
@@ -210,168 +220,172 @@ export function PageBuilder({
     draw();
   };
   return (
-    <Dialog.Root
-      open
-      onOpenChange={(next, details) => {
-        if (next) return;
-        details.cancel();
-        if (inFlight.current) return;
+    <Modal
+      className="pb"
+      ariaLabel={say('editPage')}
+      initialFocus={name}
+      fullscreen={false}
+      closeDisabled={pending !== null}
+      // The builder decides what closing means (a menu, the field arranger, then the discard question), so the
+      // modal never closes itself: `requestClose` unmounts it through `onClose` once it is clean.
+      beforeClose={() => {
+        if (inFlight.current) return false;
         // Menus dismiss themselves first; the inline field arranger is the next layer.
-        if (details.reason === 'escape-key' && open >= 0) {
+        if (open >= 0) {
           refocusSection.current = open;
           setOpen(-1);
-          return;
+          return false;
         }
         requestClose();
+        return false;
       }}
+      onClose={onClose}
     >
-      <Dialog.Portal container={popupContainer()}>
-        <Dialog.Backdrop className="pb-backdrop" />
-        <Dialog.Popup ref={panel} className="pb" aria-label={say('editPage')} initialFocus={name} aria-busy={pending !== null}>
-          <div className="pb-head">
-            <h2 className="pb-title">{derived ? say('newPage') : say('editPage')}</h2>
-            <span className="pb-base">{say('aboutOne', { base: draft.base })}</span>
-            <Dialog.Close
-              disabled={pending !== null}
-              render={<button type="button" className="ghost pb-close" aria-label={say('common.close')} />}
-            >
-              ×
-            </Dialog.Close>
-          </div>
-          {recoveryChoice && recovery && (
-            <div className="pb-recovery" role="region" aria-label={say('recoverPageDraft')}>
-              <p>
-                {say('unsavedDraft')} {recovery.draft.name || say('common.untitled')}{' '}
-                <time dateTime={new Date(recovery.updatedAt).toISOString()}>{formatDateTime(recovery.updatedAt)}</time>
-              </p>
-              {recoverySourceChanged && <p role="alert">{say('theOriginalPageHasChanged')}</p>}
-              <button type="button" className="primary" onClick={() => resolveRecovery(true)}>
-                {say('restoreDraft')}
-              </button>
-              <button type="button" className="ghost" onClick={() => resolveRecovery(false)}>
-                {say('discardRecoveredDraft')}
-              </button>
-            </div>
-          )}
-          <div key={`name-${formVersion}`} className="pb-name-row" inert={pending !== null || recoveryChoice}>
-            <label className="pb-label">{say('common.name')}</label>
-            <input
-              ref={name}
-              aria-label={say('pageName')}
-              className="pb-input"
-              defaultValue={draft.name}
-              onInput={(e) => {
-                draft.name = e.currentTarget.value;
-                draw();
-              }}
+      <div ref={panel} className="pb-head">
+        <h2 className="pb-title">{derived ? say('newPage') : say('editPage')}</h2>
+        <span className="pb-base">{say('aboutOne', { base: draft.base })}</span>
+        <button
+          type="button"
+          className="ghost pb-close"
+          aria-label={say('common.close')}
+          disabled={pending !== null}
+          onClick={requestClose}
+        >
+          ×
+        </button>
+      </div>
+      {recoveryChoice && recovery && (
+        <div className="pb-recovery" role="region" aria-label={say('recoverPageDraft')}>
+          <p>
+            {say('unsavedDraft')} {recovery.draft.name || say('common.untitled')}{' '}
+            <time dateTime={new Date(recovery.updatedAt).toISOString()}>{formatDateTime(recovery.updatedAt)}</time>
+          </p>
+          {recoverySourceChanged && <p role="alert">{say('theOriginalPageHasChanged')}</p>}
+          <button type="button" className="primary" onClick={() => resolveRecovery(true)}>
+            {say('restoreDraft')}
+          </button>
+          <button type="button" className="ghost" onClick={() => resolveRecovery(false)}>
+            {say('discardRecoveredDraft')}
+          </button>
+        </div>
+      )}
+      <div key={`name-${formVersion}`} className="pb-name-row" inert={pending !== null || recoveryChoice}>
+        <label className="pb-label">{say('common.name')}</label>
+        <input
+          ref={name}
+          aria-label={say('pageName')}
+          className="pb-input"
+          defaultValue={draft.name}
+          onInput={(e) => {
+            draft.name = e.currentTarget.value;
+            draw();
+          }}
+        />
+        {/* Tabs are the default, so this is the way out of them: a fact about the page, beside the name. */}
+        <label className="pb-tabs-toggle" title={say('listsThatSitNext')}>
+          <input
+            type="checkbox"
+            checked={draft.listTabs !== false}
+            onChange={(e) => {
+              draft.listTabs = e.currentTarget.checked ? undefined : false;
+              draw();
+            }}
+          />
+          <span>{say('listsAsTabs')}</span>
+        </label>
+      </div>
+      <div key={`sections-${formVersion}`} className="pb-body" inert={pending !== null || recoveryChoice}>
+        {draft.sections.length ? (
+          draft.sections.map((section, i) => (
+            <SectionRow
+              key={sectionKey(section)}
+              draft={draft}
+              section={section}
+              index={i}
+              relations={relations}
+              references={references}
+              draw={draw}
+              open={open}
+              setOpen={setOpen}
             />
-            {/* Tabs are the default, so this is the way out of them: a fact about the page, beside the name. */}
-            <label className="pb-tabs-toggle" title={say('listsThatSitNext')}>
-              <input
-                type="checkbox"
-                checked={draft.listTabs !== false}
-                onChange={(e) => {
-                  draft.listTabs = e.currentTarget.checked ? undefined : false;
-                  draw();
-                }}
-              />
-              <span>{say('listsAsTabs')}</span>
-            </label>
-          </div>
-          <div key={`sections-${formVersion}`} className="pb-body" inert={pending !== null || recoveryChoice}>
-            {draft.sections.length ? (
-              draft.sections.map((section, i) => (
-                <SectionRow
-                  key={sectionKey(section)}
-                  draft={draft}
-                  section={section}
-                  index={i}
-                  relations={relations}
-                  references={references}
-                  draw={draw}
-                  open={open}
-                  setOpen={setOpen}
-                />
-              ))
-            ) : (
-              <p className="note">{say('noSectionsYetAdd')}</p>
-            )}
-          </div>
-          <div className="pb-add" inert={pending !== null || recoveryChoice}>
-            <span className="pb-label">{say('common.add')}</span>
-            <AddFields draft={draft} push={push} />
-            <AddRelation label={say('count')} kind="metric" draft={draft} relations={relations} references={references} push={push} />
-            <AddRelation label={say('list')} kind="list" draft={draft} relations={relations} references={references} push={push} />
-          </div>
-          {error && (
-            <p ref={errorBox} className="pb-error" role="alert" tabIndex={-1}>
-              {error}
-            </p>
-          )}
-          {localStatus && localStatus !== 'empty' && (
-            <p
-              className={`pb-recovery-status${localStatus === 'unavailable' || localStatus === 'conflict' ? ' pb-error' : ''}`}
-              role={localStatus === 'unavailable' || localStatus === 'conflict' ? 'alert' : undefined}
-              aria-live="polite"
-            >
-              {localStatus === 'stored'
-                ? say('draftRecoveryStoredInThisBrowser')
-                : localStatus === 'unavailable'
-                  ? say('browserDraftStorageIsUnavailable')
-                  : say('anotherEditorChangedTheRecovery')}
-            </p>
-          )}
-          <div className="pb-foot">
-            {/* Config and suggested pages are edited as copies, never deleted here. */}
-            {derived ? null : (
-              <button
-                type="button"
-                disabled={pending !== null || recoveryChoice}
-                className="ghost pb-delete"
-                title={say('deleteSavedPage', { name: original.name })}
-                onClick={() => setPrompt({ kind: 'delete' })}
-              >
-                {say('delete')}
-              </button>
-            )}
-            <button
-              type="button"
-              disabled={pending !== null || recoveryChoice}
-              className="ghost pb-json"
-              title={say('pasteIntoTablewalkJson')}
-              onClick={() => void copyJson()}
-            >
-              {say('copyAsJson')}
-            </button>
-            {previewContext && (
-              <button
-                type="button"
-                className="ghost"
-                disabled={pending !== null || recoveryChoice}
-                onClick={() => {
-                  try {
-                    setPreview(checkedDraft(draft));
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : String(err));
-                  }
-                }}
-              >
-                {say('preview')}
-              </button>
-            )}
-            <span className="pb-spacer" />
-            <span className="pb-status" role="status">
-              {pending === 'save' ? say('common.saving') : pending === 'delete' ? say('deleting') : say('destination', { destination })}
-            </span>
-            <Dialog.Close disabled={pending !== null} render={<button type="button" className="ghost" />}>
-              {say('common.cancel')}
-            </Dialog.Close>
-            <button type="button" disabled={pending !== null || recoveryChoice} className="primary" onClick={() => void persist('save')}>
-              {say('common.save')}
-            </button>
-          </div>
-        </Dialog.Popup>
-      </Dialog.Portal>
+          ))
+        ) : (
+          <p className="note">{say('noSectionsYetAdd')}</p>
+        )}
+      </div>
+      <div className="pb-add" inert={pending !== null || recoveryChoice}>
+        <span className="pb-label">{say('common.add')}</span>
+        <AddFields draft={draft} push={push} />
+        <AddRelation label={say('count')} kind="metric" draft={draft} relations={relations} references={references} push={push} />
+        <AddRelation label={say('list')} kind="list" draft={draft} relations={relations} references={references} push={push} />
+      </div>
+      {error && (
+        <p ref={errorBox} className="pb-error" role="alert" tabIndex={-1}>
+          {error}
+        </p>
+      )}
+      {localStatus && localStatus !== 'empty' && (
+        <p
+          className={`pb-recovery-status${localStatus === 'unavailable' || localStatus === 'conflict' ? ' pb-error' : ''}`}
+          role={localStatus === 'unavailable' || localStatus === 'conflict' ? 'alert' : undefined}
+          aria-live="polite"
+        >
+          {localStatus === 'stored'
+            ? say('draftRecoveryStoredInThisBrowser')
+            : localStatus === 'unavailable'
+              ? say('browserDraftStorageIsUnavailable')
+              : say('anotherEditorChangedTheRecovery')}
+        </p>
+      )}
+      <div className="pb-foot">
+        {/* Config and suggested pages are edited as copies, never deleted here. */}
+        {derived ? null : (
+          <button
+            type="button"
+            disabled={pending !== null || recoveryChoice}
+            className="ghost pb-delete"
+            title={say('deleteSavedPage', { name: original.name })}
+            onClick={() => setPrompt({ kind: 'delete' })}
+          >
+            {say('delete')}
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={pending !== null || recoveryChoice}
+          className="ghost pb-json"
+          title={say('pasteIntoTablewalkJson')}
+          onClick={() => void copyJson()}
+        >
+          {say('copyAsJson')}
+        </button>
+        {previewContext && (
+          <button
+            type="button"
+            className="ghost"
+            disabled={pending !== null || recoveryChoice}
+            onClick={() => {
+              try {
+                setPreview(checkedDraft(draft));
+              } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+              }
+            }}
+          >
+            {say('preview')}
+          </button>
+        )}
+        <span className="pb-spacer" />
+        <span className="pb-status" role="status">
+          {pending === 'save' ? say('common.saving') : pending === 'delete' ? say('deleting') : say('destination', { destination })}
+        </span>
+        <button type="button" className="ghost" disabled={pending !== null} onClick={requestClose}>
+          {say('common.cancel')}
+        </button>
+        <button type="button" disabled={pending !== null || recoveryChoice} className="primary" onClick={() => void persist('save')}>
+          {say('common.save')}
+        </button>
+      </div>
       {discard && (
         <ConfirmDialog
           title={say('discardUnsavedChanges')}
@@ -415,7 +429,7 @@ export function PageBuilder({
           <PagePreview {...previewContext} draft={preview} onClose={() => setPreview(null)} />
         </Suspense>
       )}
-    </Dialog.Root>
+    </Modal>
   );
 }
 

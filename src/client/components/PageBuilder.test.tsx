@@ -300,11 +300,11 @@ test('Delete is a nested prompt and requires the original saved page name', asyn
   expect(props.onDelete).not.toHaveBeenCalled();
   await user.click(remove);
   await user.type(screen.getByRole('textbox', { name: 'Type the page name to confirm' }), 'Wrong name');
-  await user.click(screen.getByRole('button', { name: 'Delete' }));
+  await user.click(within(screen.getByRole('dialog', { name: 'Delete "Customer"?' })).getByRole('button', { name: 'Delete' }));
   expect(props.onDelete).not.toHaveBeenCalled();
   await user.click(remove);
   await user.type(screen.getByRole('textbox', { name: 'Type the page name to confirm' }), 'Customer');
-  await user.click(screen.getByRole('button', { name: 'Delete' }));
+  await user.click(within(screen.getByRole('dialog', { name: 'Delete "Customer"?' })).getByRole('button', { name: 'Delete' }));
   expect(props.onDelete).toHaveBeenCalledExactlyOnceWith(props.original);
 });
 
@@ -372,14 +372,14 @@ test('failed deletion retains the editor and restores available actions', async 
   );
   await user.click(screen.getByRole('button', { name: 'Delete' }));
   await user.type(screen.getByRole('textbox', { name: 'Type the page name to confirm' }), 'Customer');
-  await user.click(screen.getByRole('button', { name: 'Delete' }));
+  await user.click(within(screen.getByRole('dialog', { name: 'Delete "Customer"?' })).getByRole('button', { name: 'Delete' }));
   expect(screen.getByRole('status')).toHaveTextContent('Deleting');
-  expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
+  expect(within(screen.getByRole('dialog', { name: 'Edit page' })).getByRole('button', { name: 'Delete' })).toBeDisabled();
   await user.keyboard('{Escape}');
   expect(props.onClose).not.toHaveBeenCalled();
   await act(async () => reject(new Error('Permission denied')));
   expect(screen.getByRole('alert')).toHaveTextContent('Page deletion was not confirmed. Permission denied');
-  expect(screen.getByRole('button', { name: 'Delete' })).toBeEnabled();
+  expect(within(screen.getByRole('dialog', { name: 'Edit page' })).getByRole('button', { name: 'Delete' })).toBeEnabled();
   expect(screen.getByRole('textbox', { name: 'Page name' })).toHaveValue('Customer');
 });
 
