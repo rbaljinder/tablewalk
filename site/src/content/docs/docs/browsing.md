@@ -5,13 +5,13 @@ description: Tables, records and the walk between them. Every foreign key is a l
 
 In tablewalk a foreign key is a place you can go: from an invoice to its customer, and from the customer back to all of its invoices.
 
-![A customer record: its fields, its invoices listed under them, and a Related rail counting every table that points at it](/shots/record.webp)
+![A customer record: its fields, its invoices listed under them, and a Related rail counting every table that points at it](/shots/record.webp?v=2)
 
 ## A table
 
 Click a table in the sidebar, or type its name in the query bar. The grid shows its rows, newest first where an indexed column allows it.
 
-![The invoice table queried as "invoice total >= 500 sort total desc", with the query's parts as chips and quick filters above the grid](/shots/query.webp)
+![The invoice table queried as "invoice total >= 500 sort total desc", with the query's parts as chips and quick filters above the grid](/shots/query.webp?v=2)
 
 - **Quick filters** above the grid narrow by a column's common values. The parts of the current query show as chips, and **+ Save this filter** keeps it as a view.
 - **A column header** opens a menu: pin the column, sort, or filter by equals, greater than, less than, between, is empty or is not empty.

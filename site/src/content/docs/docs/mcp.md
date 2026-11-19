@@ -32,7 +32,7 @@ claude mcp add tablewalk -- npx tablewalk --mcp --db postgres://localhost/app
 
 Every answer carries a `link` the person beside the agent can open in the page, and says what it cost in rows and milliseconds. To see exactly what an agent receives, open **Agent console** from the `···` menu or `⌘K`: it runs the same tools by hand and shows each answer with its size in tokens.
 
-![The Agent console running the record tool on customer 1, with the answer and its cost](/shots/agent.webp)
+![The Agent console running the record tool on customer 1, with the answer and its cost](/shots/agent.webp?v=2)
 
 ## The tools
 
