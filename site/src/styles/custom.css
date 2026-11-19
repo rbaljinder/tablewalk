@@ -1,5 +1,5 @@
-/* Starlight owns layout and interaction. tablewalk dresses it in the browser's own look: warm paper, warm greys,
-   one green for links, focus and the primary action, and data set in mono. Bold comes from type and contrast, not
+/* Starlight owns layout and interaction. tablewalk dresses it in the browser's own look: cool graphite greys,
+   one cobalt for links, focus and the primary action, and data set in mono. Bold comes from type and contrast, not
    from color. Unlayered, so these win over Starlight's @layer rules. */
 
 /* Inter's variable Latin subset (SIL Open Font License beside it in public/fonts), and a fallback cut to its
@@ -32,39 +32,39 @@
   line-gap-override: 0%;
 }
 
-/* By night (Starlight's default scheme): the browser's dark ground and its light green. */
+/* By night (Starlight's default scheme): the browser's dark ground and its light cobalt. */
 :root {
   --sl-font: Inter, 'Inter Fallback', system-ui, sans-serif;
   --sl-font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
 
-  --sl-color-white: #f1efea;
-  --sl-color-gray-1: #e0ddd6;
-  --sl-color-gray-2: #c2bdb4;
-  --sl-color-gray-3: #99938a;
-  --sl-color-gray-4: #6a655e;
-  --sl-color-gray-5: #2e2d2a;
-  --sl-color-gray-6: #1d1f21;
-  --sl-color-gray-7: #191b1d;
-  --sl-color-black: #16181a;
+  --sl-color-white: #e7e9ec;
+  --sl-color-gray-1: #d2d6dc;
+  --sl-color-gray-2: #a2a9b4;
+  --sl-color-gray-3: #8e96a2;
+  --sl-color-gray-4: #626a76;
+  --sl-color-gray-5: #343941;
+  --sl-color-gray-6: #1c1f24;
+  --sl-color-gray-7: #14161a;
+  --sl-color-black: #0f1114;
 
-  --sl-color-accent-low: #12332c;
-  --sl-color-accent: #5fc9ad;
-  --sl-color-accent-high: #a9e6d5;
+  --sl-color-accent-low: #1b2240;
+  --sl-color-accent: #7b92ff;
+  --sl-color-accent-high: #c3cdff;
 
   --sl-color-bg-nav: var(--sl-color-black);
   --sl-color-bg-sidebar: var(--sl-color-black);
   --sl-color-bg-inline-code: var(--sl-color-gray-6);
-  --sl-color-hairline: #2a2c2e;
-  --sl-color-hairline-light: #2f3133;
-  --sl-color-hairline-shade: #0e0f10;
+  --sl-color-hairline: #23272d;
+  --sl-color-hairline-light: #2a2e34;
+  --sl-color-hairline-shade: #0a0b0d;
 
-  --tw-surface: #1c1e20;
-  --tw-line: #2f3133;
-  --tw-ink-strong: #5fc9ad;
-  --tw-on-strong: #0f1a17;
+  --tw-surface: #14161a;
+  --tw-line: #23272d;
+  --tw-ink-strong: #7b92ff;
+  --tw-on-strong: #0f1114;
   --tw-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 24px 48px -24px rgb(0 0 0 / 0.7);
-  --tw-code-bg: #191b1d;
-  --tw-code-bar: #1d1f21;
+  --tw-code-bg: #14161a;
+  --tw-code-bar: #1c1f24;
 
   --sl-text-h1: 2rem;
   --sl-text-h2: 1.5rem;
@@ -74,36 +74,36 @@
   --sl-line-height-headings: 1.2;
   --sl-sidebar-pad-x: 1.25rem;
 }
-/* By day: the browser's warm paper, its ink and its green. */
+/* By day: the browser's cool graphite greys and its one cobalt. */
 :root[data-theme='light'] {
-  --sl-color-white: #24211c;
-  --sl-color-gray-1: #2f2b25;
-  --sl-color-gray-2: #48433c;
-  --sl-color-gray-3: #5c574f;
-  --sl-color-gray-4: #8f8981;
-  --sl-color-gray-5: #d9d5cd;
-  --sl-color-gray-6: #f2f0eb;
-  --sl-color-gray-7: #f7f6f2;
-  --sl-color-black: #fbfaf8;
+  --sl-color-white: #15171c;
+  --sl-color-gray-1: #262a31;
+  --sl-color-gray-2: #3c424c;
+  --sl-color-gray-3: #565d6a;
+  --sl-color-gray-4: #818996;
+  --sl-color-gray-5: #cfd4db;
+  --sl-color-gray-6: #eef0f3;
+  --sl-color-gray-7: #f6f7f9;
+  --sl-color-black: #fbfcfd;
 
-  --sl-color-accent-low: #e3f1ec;
-  --sl-color-accent: #1d6a5a;
-  --sl-color-accent-high: #124438;
+  --sl-color-accent-low: #e8ecfb;
+  --sl-color-accent: #3450c9;
+  --sl-color-accent-high: #22379a;
 
   --sl-color-bg-nav: var(--sl-color-black);
   --sl-color-bg-sidebar: var(--sl-color-black);
   --sl-color-bg-inline-code: var(--sl-color-gray-6);
-  --sl-color-hairline: #e7e3dc;
-  --sl-color-hairline-light: #ebe8e1;
-  --sl-color-hairline-shade: #e2ded6;
+  --sl-color-hairline: #e4e7eb;
+  --sl-color-hairline-light: #e9ecef;
+  --sl-color-hairline-shade: #dde1e6;
 
   --tw-surface: #ffffff;
-  --tw-line: #e2ded6;
-  --tw-ink-strong: #1d6a5a;
+  --tw-line: #e4e7eb;
+  --tw-ink-strong: #3d5bd9;
   --tw-on-strong: #ffffff;
-  --tw-shadow: 0 1px 2px rgb(36 33 28 / 0.05), 0 24px 48px -24px rgb(36 33 28 / 0.22);
-  --tw-code-bg: #f7f6f2;
-  --tw-code-bar: #f2f0eb;
+  --tw-shadow: 0 1px 2px rgb(21 23 28 / 0.05), 0 24px 48px -24px rgb(21 23 28 / 0.22);
+  --tw-code-bg: #f6f7f9;
+  --tw-code-bar: #eef0f3;
 }
 @media (min-width: 50em) {
   :root {
@@ -187,7 +187,7 @@ site-search button[data-open-modal] { border-radius: 8px; border-color: var(--sl
   background-color: var(--sl-color-accent-low);
 }
 
-/* ---------- Buttons: square-ish, green for the one that matters ---------- */
+/* ---------- Buttons: square-ish, cobalt for the one that matters ---------- */
 .sl-link-button { border-radius: 8px; font-weight: 600; }
 .sl-link-button.primary { background: var(--tw-ink-strong); border-color: var(--tw-ink-strong); color: var(--tw-on-strong); }
 .sl-link-button.primary:hover { color: var(--tw-on-strong); opacity: 0.9; }
