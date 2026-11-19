@@ -45,7 +45,11 @@ const alt =
   </div>
   <figure class="tw-window not-content">
     <div class="tw-window-bar" aria-hidden="true"><span></span><span></span><span></span><b>localhost:4111/demo/customer/~1</b></div>
-    <img src="/shots/record.webp" {alt} width="1280" height="800" loading="eager" fetchpriority="high" />
+    {/* A phone shows the page drawn at its own width (record-phone.webp), not the desk shrunk to a third. */}
+    <picture>
+      <source media="(max-width: 40rem)" srcset="/shots/record-phone.webp" width="780" height="1440" />
+      <img src="/shots/record.webp" {alt} width="1280" height="800" loading="eager" fetchpriority="high" />
+    </picture>
   </figure>
 </div>
 )}
