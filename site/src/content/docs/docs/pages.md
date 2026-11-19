@@ -30,7 +30,7 @@ A layout is how the record view arranges every row of one table. On a record, cl
 
 A page gathers one record with what surrounds it: its fields, figures and related lists as tabs. Open one with **As a page →** on a record, or **Page →** on a table. Its address is `/{connection}/@{page}~{id}`, such as `/demo/@customer~1`.
 
-![The customer page for Harbour Freight, with its related lists as tabs](/shots/page.webp)
+![The customer page for Harbour Freight: its fields, then its invoices](/shots/page.webp)
 
 tablewalk suggests a page for any table. **Copy layout** starts your own copy of it, and on a saved page **Layout** changes it. The star pins a page to the home screen.
 
