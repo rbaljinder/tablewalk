@@ -1,4 +1,6 @@
-# Screenshots keep their names when they are re-taken, so a browser that kept one for the default four hours went on
-# showing the old look after a deploy. They revalidate on every visit instead; the ETag makes that a 304 when unchanged.
+# Screenshots keep their names when they are re-taken, so a browser that kept one for four hours went on showing the
+# old look after a deploy. They revalidate on every visit instead; the ETag makes that a 304 when unchanged.
+# The tablewalk.dev zone's Browser Cache TTL (4 hours) overrides a shorter origin header, so the links also carry a
+# version (?v=N in Hero.astro and the docs): bump it when the shots are re-taken.
 /shots/*
   Cache-Control: public, max-age=0, must-revalidate

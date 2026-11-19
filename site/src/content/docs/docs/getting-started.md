@@ -33,13 +33,13 @@ Add `--open` to have it open your browser, and `--port <n>` to listen somewhere 
 
 Run `npx tablewalk` alone and the page offers the sample database or a form to connect one. A connection added here is read-only. Only a [config file](/docs/connections/) can make one writable.
 
-![The welcome page: "Follow the data", with buttons to open the sample database or connect one](/shots/connect.webp)
+![The welcome page: "Follow the data", with buttons to open the sample database or connect one](/shots/connect.webp?v=2)
 
 ## The first page
 
 Once a database is open, the home page reads the schema for you: the tables it centers on, the ones that record events, the longest chain of references, and a table to start at. Under that is a diagram of every table and foreign key. The sidebar lists every table with its row count, and the query bar at the top takes [a question in one line](/docs/query/).
 
-![The home page of the sample database: what the schema centers on, the sidebar of tables, and the query bar](/shots/home.webp)
+![The home page of the sample database: what the schema centers on, the sidebar of tables, and the query bar](/shots/home.webp?v=2)
 
 From here:
 

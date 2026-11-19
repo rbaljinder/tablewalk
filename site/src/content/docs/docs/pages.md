@@ -24,13 +24,13 @@ A view in a config file is one line of the query language:
 
 A layout is how the record view arranges every row of one table. On a record, click **Layout**: tick the sections to show and move them up or down, choose the fields or columns inside each (**All**, **None**, or drag to arrange), set how many rows a related list holds, then **Save layout**. **Reset to default** returns to the layout tablewalk drew.
 
-![The Record layout panel beside a customer record: sections with checkboxes and arrows, and the fields inside each to drag into order](/shots/layout.webp)
+![The Record layout panel beside a customer record: sections with checkboxes and arrows, and the fields inside each to drag into order](/shots/layout.webp?v=2)
 
 ## Pages
 
 A page gathers one record with what surrounds it: its fields, figures and related lists as tabs. Open one with **As a page →** on a record, or **Page →** on a table. Its address is `/{connection}/@{page}~{id}`, such as `/demo/@customer~1`.
 
-![The customer page for Harbour Freight: its fields, then its invoices](/shots/page.webp)
+![The customer page for Harbour Freight: its fields, then its invoices](/shots/page.webp?v=2)
 
 tablewalk suggests a page for any table. **Copy layout** starts your own copy of it, and on a saved page **Layout** changes it. The star pins a page to the home screen.
 

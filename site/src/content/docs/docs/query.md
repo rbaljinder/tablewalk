@@ -11,7 +11,7 @@ invoice total > 500 and customer_id.country_code.name = Australia sort total des
 
 Every query compiles to one SQL statement, which runs read-only and with a row limit. **SQL** in the top bar shows the statement it compiled to. Press `?` in the app for this grammar with examples built from your own tables, and `Tab` or `Ctrl+Space` in the bar to complete a table, column or keyword.
 
-![The query bar with a filter on invoices, and the SQL panel showing the statement it compiled to](/shots/sql.webp)
+![The query bar with a filter on invoices, and the SQL panel showing the statement it compiled to](/shots/sql.webp?v=2)
 
 ## Filters
 
