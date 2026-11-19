@@ -31,6 +31,7 @@ Connections appear in the picker at the top of the page, and each opens when it 
 | `hidden` | Columns to leave out everywhere, by table: `{ "account": ["password_hash"], "*": ["*_token"] }`. A query naming one is refused, and so is raw SQL on that connection. |
 | `pool` | PostgreSQL only: `{ "read": 8 }` connections that may read at once (default 4, at most 64). |
 | `replicas` | PostgreSQL only: read replica URLs. Lists and counts read from them in turn; a record, every write and the catalog stay on the primary. |
+| `backstop` | Leave it out. `"rls"` marks a connection that signs in as a tenant App's restricted role, which sees no tenant row, so tablewalk refuses it at start (and `tablewalk journal` and `--mcp` with it), by name. Use the owner's URL instead. |
 | `migrations` | Where `tablewalk migrate` finds its files: `{ "dir": "db/migrations", "table": "flyway_schema_history" }`. |
 
 `rows` and `hidden` are enforced at the adapter, so the page, the export and every [MCP](/docs/mcp/) tool obey them at once. A database role without `SELECT` on a column is stronger still.

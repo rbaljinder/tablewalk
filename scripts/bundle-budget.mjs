@@ -37,9 +37,11 @@ export const CLIENT = join(ROOT, 'dist/client');
    They rose again for 1.0.0-rc.15, on kit rc.60 (script raw 1_318_000 to 1_390_000, brotli 361_400 to 380_000; style
    raw 440_000 to 545_000, brotli 58_000 to 70_000). rc.59 redrew @mistriwork/ui over UI SDK with one controls sheet and
    eight built-in looks: the kit's stylesheet grew by about 85 KB raw and its script by about 56 KB. This package's own
-   Workbench sheet grew by about 10 KB, for Graphite as the browser's default look with its contrast fixed. */
+   Workbench sheet grew by about 10 KB, for Graphite as the browser's default look with its contrast fixed.
+   The style ceiling rose again for 1.0.0-rc.16, on kit rc.65 (raw 545_000 to 550_000): the sheet measured 532.3 KB,
+   a tenth of a KB past the rc.15 ceiling, and the ceiling keeps its few KB of headroom. */
 export const BUDGET = {
-  workbench: { script: { raw: 1_390_000, br: 380_000 }, style: { raw: 545_000, br: 70_000 } },
+  workbench: { script: { raw: 1_390_000, br: 380_000 }, style: { raw: 550_000, br: 70_000 } },
 };
 
 /* The chrome's words in a language besides English (src/client/copy/<lang>.ts), one chunk each, which only a reader of
