@@ -1,0 +1,4 @@
+# Screenshots keep their names when they are re-taken, so a browser that kept one for the default four hours went on
+# showing the old look after a deploy. They revalidate on every visit instead; the ETag makes that a 304 when unchanged.
+/shots/*
+  Cache-Control: public, max-age=0, must-revalidate
