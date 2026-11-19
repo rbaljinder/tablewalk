@@ -36,7 +36,7 @@ Every answer carries a `link` the person beside the agent can open in the page, 
 
 ## The tools
 
-Twenty-three tools: seventeen read-only, and six writes that are listed only when a connection is `"writable": true`. Every tool also takes `connection` when there is more than one.
+Twenty-four tools: eighteen read-only, and six writes that are listed only when a connection is `"writable": true`. Every tool also takes `connection` when there is more than one.
 
 ### Reading
 
@@ -52,6 +52,7 @@ Twenty-three tools: seventeen read-only, and six writes that are listed only whe
 | `breakdown` | Counts and sums grouped by something. | `{"q": "invoice count by status"}` |
 | `record` | One row, its human name, and everything that points at it. | `{"table": "customer", "key": {"id": 1}}` |
 | `sql` | A read-only `SELECT` for what the language cannot say. | `{"statement": "select status, count(*) from invoice group by 1", "timeout_ms": 2000}` |
+| `export` | A result written to a file instead of returned: csv, ndjson or json, optionally gzipped. | `{"query": "invoice status = open", "format": "ndjson"}` |
 | `explain` | The planner's account of a statement, without running it. | `{"statement": "select * from invoice where customer_id = 1"}` |
 | `profile` | What a table's columns hold: null share, distinct count, range, common values. | `{"table": "invoice"}` |
 | `diff` | How two connections' shapes differ: tables, columns, types, keys, delete rules. | `{"from": "staging", "to": "production"}` |
@@ -75,13 +76,26 @@ Listed only when a connection is `"writable": true`, and refused on any other co
 
 `delete` and `delete_graph` ask the person directly when the client supports it (MCP elicitation), and then ignore a `confirm` the model supplies. `insert_graph` and `delete_graph` are not journaled, so `revert` cannot undo them; `delete_graph` with the `teardown` an insert returned is the way back. A raw SQL write has no undo.
 
+## Exporting data
+
+`export` is for more rows than fit in a reply. It streams the result to a file and answers with the file's absolute path, row and byte counts, the columns, five sample rows, and a line on how to load it, so the rows never pass through the agent's context. The agent then reads the file with its own tools: DuckDB, Python, `head`.
+
+- Files land in `tablewalk-exports` under the system temp directory, named `<connection>-<name or table>-<yyyyMMdd-HHmmss>.<ext>` (UTC). An existing file is never overwritten, and a caller cannot choose the directory.
+- Give exactly one of `query` (the [query language](/docs/query/)) or `sql` (a read-only `SELECT`). `format` is `csv` (default), `ndjson` or `json`; `limit` caps the rows; `name` sets the file stem; `compress: "gzip"` writes `.csv.gz` or `.ndjson.gz`, which Databricks and DuckDB read directly.
+- A `query` export pages through the whole result by key in batches of 5,000 rows, with no ceiling beyond `limit`. A query that cannot page by key (a view over references, a union) reads by position and stops at 100,000 rows, and says so. A `sql` export is one read capped at 100,000 rows; the answer says when it stopped short.
+- Ids past 2^53 stay strings, dates are ISO, and an empty CSV field is `null`. At most two exports run at once.
+
+```json
+{ "query": "invoice total > 500 sort total desc", "format": "csv", "name": "big-invoices" }
+```
+
 ## Fewer tools for one job
 
 `--tools` lists one job's worth of tools, which makes the listing an agent pays for on connect smaller. A profile only removes tools, and is enforced on every call, not only in the listing.
 
 | Profile | Tools |
 | --- | --- |
-| `explore` | connections, refresh, schema_summary, tables, table, find, query, breakdown, sql, record, explain, profile |
+| `explore` | connections, refresh, schema_summary, tables, table, find, query, breakdown, sql, export, record, explain, profile |
 | `migrate` | connections, refresh, schema_summary, tables, table, change_impact, lint, order, diff, profile, explain |
 | `seed` | connections, refresh, schema_summary, tables, table, order, fixture, record, query, insert, insert_graph, delete_graph, revert |
 | `full` | all of them (the default) |

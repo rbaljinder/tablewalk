@@ -204,8 +204,8 @@ npx tablewalk --mcp --config ./tablewalk.json   # speaks MCP on stdio
 ```
 
 Or point it at a database instead of a config file: `"args": ["tablewalk",
-"--mcp", "--db", "postgres://localhost/app"]`. **Twenty-three tools** —
-seventeen read-only, and six writes offered only when a connection is
+"--mcp", "--db", "postgres://localhost/app"]`. **Twenty-four tools** —
+eighteen read-only, and six writes offered only when a connection is
 `"writable": true`. Every answer carries a deep link the human beside the
 agent can open in the UI, and says what it cost in rows and milliseconds.
 
@@ -220,6 +220,7 @@ agent can open in the UI, and says what it cost in rows and milliseconds.
 | `breakdown` | counts and sums grouped by something — `invoice count by month invoice_date` |
 | `record` | one row, its human name, and everything that points at it |
 | `sql` | read-only, for whatever the language cannot say; never over tablewalk's own tables |
+| `export` | a result written to a file (csv, ndjson, json; optionally gzip) in the temp directory, not into the reply — for more rows than fit in context; `query` exports are unbounded, `sql` exports stop at 100,000 |
 | `explain` | the planner's account of a statement without running it — feed a `query` answer's `sql` back |
 | `profile` | what a column actually holds: null share, distinct count, range, the values that repeat |
 | `lint` | what the shape will cost: keyless tables, unindexed references, naive timestamps |
@@ -675,7 +676,7 @@ as given, from the current directory.
 An option it does not recognize is an error, not a shrug: `tablewalk --prot
 4111` says so rather than quietly serving the default port.
 
-`--tools` offers one job's worth of tools instead of all twenty-three. Most
+`--tools` offers one job's worth of tools instead of all twenty-four. Most
 sessions are one job — an agent reading a schema does not need the graph
 writers, one seeding a fixture does not need `explain` — and the listing is a
 fixed cost paid on connect, before anything is asked. `connections` and
@@ -684,7 +685,7 @@ is how an agent recovers from a schema that changed underneath it. A profile
 only ever *removes*, so a read-only connection given `seed` still lists no
 write tools.
 
-    full 5,579 · explore 2,737 · migrate 2,210 · seed 2,909 tokens
+    full 6,049 · explore 3,207 · migrate 2,210 · seed 2,929 tokens
 
 `--output-schema` is off by default, and that default is a measurement. The
 tool listing is what every agent pays for on connect, before it has asked
