@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0-rc.16
+
+Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.65`.
+
+- A tablet is its own width (761 to 1100 px), between the phone and the desk. The sidebar folds to its icon rail there
+  instead of the phone's drawer, and a record keeps its side column instead of stacking it under the page.
+- On a touch screen every control in a list and a record is a 44 px target at any width: a row, a column's sort and
+  filter buttons, a removable chip's ×, and the search row.
+
 ## 1.0.0-rc.15
 
 Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.60`. `@mistriwork/ui` is now

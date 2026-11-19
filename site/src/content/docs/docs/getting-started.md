@@ -46,6 +46,7 @@ From here:
 - Click a table to see its rows, then a row to see [the record and everything related to it](/docs/browsing/).
 - Press `⌘K` to jump to any table, page or recent query.
 - Press `?` for the query language, with examples that run against your own tables.
+- Choose **Preferences** in the `···` menu for the look: Graphite and cobalt by default, with Fog and moss and other palettes, light or dark.
 - Choose **Take the tour** in the `···` menu for a short walk through the screen.
 
 ## Next
