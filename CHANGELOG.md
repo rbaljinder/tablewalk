@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-rc.17
+
+- A new MCP tool, `export`, writes a query or a read-only `SELECT` to a file (csv, ndjson or json, optionally gzipped)
+  in `tablewalk-exports` under the temp directory, and answers with its path, counts and a sample, so an agent can
+  pull data out without the rows passing through its context. `query` exports page by key with no row ceiling beyond
+  `limit`; `sql` exports stop at 100,000 rows and say so. The server now offers twenty-four tools.
+
 ## 1.0.0-rc.16
 
 Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.65`.

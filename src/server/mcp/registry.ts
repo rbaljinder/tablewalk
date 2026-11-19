@@ -19,6 +19,7 @@ import { openFor, sessionEgress, type Handler, ToolError, errorCodeOf, type Erro
 import * as schemaTools from './tools/schema.js';
 import * as queryTools from './tools/query.js';
 import * as sqlTools from './tools/sql.js';
+import * as exportTools from './tools/export.js';
 import * as analysisTools from './tools/analysis.js';
 import * as recordTools from './tools/record.js';
 import * as writeTools from './tools/write.js';
@@ -37,6 +38,7 @@ const TOOLS = [
   ...schemaTools.definitions,
   ...queryTools.definitions,
   ...sqlTools.definitions,
+  ...exportTools.definitions,
   ...analysisTools.definitions,
   ...recordTools.definitions,
 ];
@@ -50,6 +52,7 @@ const HANDLERS = new Map<string, Handler>(
     ...schemaTools.handlers,
     ...queryTools.handlers,
     ...sqlTools.handlers,
+    ...exportTools.handlers,
     ...analysisTools.handlers,
     ...recordTools.handlers,
     ...writeTools.handlers,
@@ -90,7 +93,7 @@ const TOOL_PROFILES: Record<string, string[] | null> = {
   full: null,
   /* Reading a database you did not write: what is here, what points at what,
      what the columns actually hold. */
-  explore: [...ALWAYS, 'schema_summary', 'tables', 'table', 'find', 'query', 'breakdown', 'sql', 'record', 'explain', 'profile'],
+  explore: [...ALWAYS, 'schema_summary', 'tables', 'table', 'find', 'query', 'breakdown', 'sql', 'export', 'record', 'explain', 'profile'],
   /* Changing a shape safely: what breaks, what it costs, what order it has to
      happen in, and whether it matches somewhere else afterwards. */
   migrate: [...ALWAYS, 'schema_summary', 'tables', 'table', 'change_impact', 'lint', 'order', 'diff', 'profile', 'explain'],
@@ -181,7 +184,7 @@ export function agentTools(registry: Registry) {
 }
 
 /** Tools whose whole answer is row data. */
-const ROW_ONLY_TOOLS = new Set(['query', 'sql', 'record', 'breakdown']);
+const ROW_ONLY_TOOLS = new Set(['query', 'sql', 'record', 'breakdown', 'export']);
 /** Tools that hand the database a statement it did not build. */
 const SQL_TOOLS = new Set(['sql', 'explain']);
 

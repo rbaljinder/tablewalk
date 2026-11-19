@@ -17,7 +17,7 @@ export const definitions = [
       'CTEs, self-joins. Ordinary grouping is `breakdown` now, and that is the one to reach ' +
       'for first: it binds every value and checks every path against the catalog, where this ' +
       'hands the database text it did not build. The connection is read-only: writes fail at the database. ' +
-      'Results are row-limited; say LIMIT yourself for anything else. ' +
+      'Results are row-limited; say LIMIT yourself for anything else. For more rows than fit in a reply, use `export`, which writes them to a file. ' +
       `Every statement runs under a ${STATEMENT_TIMEOUT_MS / 1000}-second cap, and \`timeout_ms\` lowers it for this ` +
       'one — probing five query shapes wants fast failure. A statement that touches tablewalk’s own ' +
       'runtime or sign-in tables (the `__mistri_` prefix, the `mistri` schema, and their `__tablewalk_` and `tablewalk_auth` names before mistri) is refused, and so is ' +

@@ -36,7 +36,7 @@ export const definitions = [
       'Errors come back with suggestions — a misspelled column names its nearest match, and ' +
       'an unknown column answers with the table\u2019s real columns — so fix and retry. Prefer ' +
       '`show` on wide tables: sixteen columns of every row is tokens spent on nothing. ' +
-      'Prefer this over `sql`: every value is bound, never spliced.',
+      'Prefer this over `sql`: every value is bound, never spliced. For more rows than fit in a reply, use `export`, which writes them to a file.',
     inputSchema: {
       type: 'object',
       properties: {

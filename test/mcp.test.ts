@@ -174,6 +174,7 @@ describe('the MCP server', () => {
       'breakdown',
       'sql',
       'explain',
+      'export',
       'profile',
       'diff',
       'order',
@@ -211,7 +212,8 @@ describe('the MCP server', () => {
       /* insert writes without destroying: it adds. The split is the point of
          having two hints instead of one "dangerous" bit. */
       const destroys = ['update', 'delete', 'delete_graph', 'revert'].includes(t.name);
-      assert.equal(t.annotations?.readOnlyHint, !writes, `${t.name} says whether it only reads`);
+      /* export changes no database but writes a file, so it is neither: not read-only, not destructive. */
+      assert.equal(t.annotations?.readOnlyHint, !writes && t.name !== 'export', `${t.name} says whether it only reads`);
       assert.equal(t.annotations?.destructiveHint, destroys, `${t.name} says whether it destroys`);
       assert.equal(t.annotations?.openWorldHint, false, `${t.name} touches the database, not the world`);
       /* And no `outputSchema`, which is off by default. It was half of an
