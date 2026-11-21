@@ -98,6 +98,9 @@ export const handlers = {
     const expand = Math.max(0, Math.min(10, Number(args.expand ?? 0) || 0));
 
     const wanted = primaryKey(table);
+    if (!wanted.length) {
+      throw new ToolError('invalid_argument', `"${table.name}" has no primary key, so no single row can be addressed by key.`);
+    }
     for (const key of keys) {
       const missing = wanted.filter((c) => key[c] === undefined);
       if (missing.length) {

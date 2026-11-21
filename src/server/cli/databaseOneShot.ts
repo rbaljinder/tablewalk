@@ -27,48 +27,59 @@ export async function exportSchemaText(given: string, registry: Registry): Promi
 
 export async function diffConnections(other: string, registry: Registry): Promise<void> {
   const { diffSchemas, diffReport } = await import('../../shared/diff.js');
-  const mine = await registry.open(registry.active!);
-  let theirs;
   try {
-    theirs = await registry.open(other);
-  } catch (err) {
-    console.error((err as Error).message);
-    process.exit(1);
+    const mine = await registry.open(registry.active!);
+    let theirs;
+    try {
+      theirs = await registry.open(other);
+    } catch (err) {
+      console.error((err as Error).message);
+      process.exitCode = 1;
+      return;
+    }
+    const diff = diffSchemas(mine.schema, theirs.schema);
+    process.stdout.write(`${diffReport(diff)}\n`);
+    /* diff(1)'s convention, and the one a CI step wants: zero means the same,
+       one means different. Anything else here would need a flag to mean what
+       every other diff already means without one. */
+    if (!diff.same) process.exitCode = 1;
+  } finally {
+    await registry.closeAll();
   }
-  const diff = diffSchemas(mine.schema, theirs.schema);
-  process.stdout.write(`${diffReport(diff)}\n`);
-  /* diff(1)'s convention, and the one a CI step wants: zero means the same,
-     one means different. Anything else here would need a flag to mean what
-     every other diff already means without one. */
-  if (!diff.same) process.exit(1);
 }
 
 /* Print and exit, like --export: this is a build step, and a build step
    that starts a web server is one nobody wires into CI. */
 export async function lintConnection(given: string, failOn: string | undefined, registry: Registry): Promise<void> {
   const { lintSchema, lintReport, lintCounts } = await import('../../shared/lint.js');
-  const { schema } = await registry.open(registry.active!);
-  const findings = lintSchema(schema);
-  const format = given.toLowerCase();
-  if (format !== 'text' && format !== 'json') {
-    console.error(`--lint takes text or json — not "${given}".`);
-    process.exit(1);
-  }
-  process.stdout.write(
-    format === 'json'
-      ? `${JSON.stringify({ connection: registry.active, counts: lintCounts(findings), findings }, null, 2)}\n`
-      : `${lintReport(findings)}\n`,
-  );
-  if (failOn) {
-    const levels = ['high', 'medium', 'low'];
-    const at = levels.indexOf(failOn.toLowerCase());
-    if (at === -1) {
-      console.error(`--fail-on takes high, medium or low — not "${failOn}".`);
-      process.exit(1);
+  try {
+    const { schema } = await registry.open(registry.active!);
+    const findings = lintSchema(schema);
+    const format = given.toLowerCase();
+    if (format !== 'text' && format !== 'json') {
+      console.error(`--lint takes text or json — not "${given}".`);
+      process.exitCode = 1;
+      return;
     }
-    /* At least this severe: `--fail-on medium` fails on medium *and* high,
-       which is the reading that makes a threshold useful. */
-    const worst = levels.slice(0, at + 1);
-    if (findings.some((f) => worst.includes(f.severity))) process.exit(1);
+    if (failOn) {
+      const levels = ['high', 'medium', 'low'];
+      const at = levels.indexOf(failOn.toLowerCase());
+      if (at === -1) {
+        console.error(`--fail-on takes high, medium or low — not "${failOn}".`);
+        process.exitCode = 1;
+        return;
+      }
+      /* At least this severe: `--fail-on medium` fails on medium *and* high,
+         which is the reading that makes a threshold useful. */
+      const worst = levels.slice(0, at + 1);
+      if (findings.some((f) => worst.includes(f.severity))) process.exitCode = 1;
+    }
+    process.stdout.write(
+      format === 'json'
+        ? `${JSON.stringify({ connection: registry.active, counts: lintCounts(findings), findings }, null, 2)}\n`
+        : `${lintReport(findings)}\n`,
+    );
+  } finally {
+    await registry.closeAll();
   }
 }

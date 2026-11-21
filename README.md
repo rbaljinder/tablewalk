@@ -272,8 +272,8 @@ databases. Where you want that enforced rather than remembered, mark a
 connection `"rows": false`: the catalog, row counts, null fractions, plans and
 `lint` still answer, and everything that would return a value out of a row
 refuses — at the adapter, so every endpoint and every tool at once. A server
-whose connections are all shape-only does not list `query`, `sql` or `record`
-at all.
+whose connections are all shape-only does not list `query`, `sql`, `record`,
+`breakdown` or `export` at all.
 
 Where only some columns must stay behind (a password hash, an API token), give
 the connection `"hidden": { "account": ["password_hash"], "*": ["*_token"] }`
@@ -326,8 +326,10 @@ on should live in version control rather than in one person's browser.
 }
 ```
 
-A PostgreSQL entry can size its read pool, `"pool": { "read": 16 }` (1 to 64;
-the default is 4, or `--read-pool`). The database browser writes through one
+A PostgreSQL entry can size its read pool and idle window,
+`"pool": { "read": 16, "idleSeconds": 300, "minIdle": 2 }` (`read` 1 to 64, default
+4 or `--read-pool`; `idleSeconds` 1 to 86400, default 300 or `TABLEWALK_POOL_IDLE`;
+`minIdle` 0 to 64, default 2 warm readers). The database browser writes through one
 connection, one write at a time, which its Undo needs. A write waits at most
 `--lock-timeout` (5 s) for a row another transaction holds, and is then
 refused with a retry. `--pooler transaction` is for a deployment behind
@@ -576,9 +578,10 @@ mistri --app <dir>            an App, served: the App framework's, npx @mistriwo
       --auth-proxy-header <name>
                               behind a proxy that signs people in: the header
                               it sets with the user (X-Forwarded-User). Requests
-                              from beyond loopback must carry it; it is
-                              believed only from loopback and --auth-proxy-from
-                              peers. Every write is journaled with it
+                              from beyond loopback (or proxied on loopback) must
+                              carry it; it is believed only from loopback and
+                              --auth-proxy-from peers. Every write is journaled
+                              with it
       --auth-proxy-from <address|CIDR>
                               a peer, beside loopback, whose
                               --auth-proxy-header value is believed: the
@@ -727,9 +730,11 @@ private network belongs behind a proxy that authenticates.
 
 When the database browser is behind one — Cloudflare Access, oauth2-proxy, Tailscale's identity
 headers — say so: `--auth-proxy-header X-Forwarded-User` (or the header your
-proxy sets). Every request from beyond loopback must then carry it, so a
-request that skipped the proxy is refused at the door, and every write in the
-journal says who made it. That is the proxy's decision carried into this
+proxy sets). Every request from beyond loopback — or on loopback when forwarded
+headers, a non-loopback `Host`, or `--trust-proxy` show a proxy is in front —
+must then carry it, so a request that skipped the proxy is refused at the door,
+and every write in the journal says who made it (`/healthz` and `/readyz`
+answer ahead of the door). That is the proxy's decision carried into this
 process, not a login of tablewalk's own; per-user tabs, pins and history are
 still the browser's. The header is believed only from loopback and from the
 peers `--auth-proxy-from` names: give it the proxy's own address
@@ -755,7 +760,7 @@ loopback, and `--allowed-host` for reaching it by a name other than
 
 **Desktop** — a native app (macOS, Windows, Linux) is built with every
 release; its downloads open to the public with the source repository.
-macOS is signed and notarised, so it opens normally; Windows is not signed
+macOS is signed and notarized, so it opens normally; Windows is not signed
 yet, so its first open needs an "open anyway" past SmartScreen; `npx tablewalk`
 and the container need no such thing.
 
@@ -781,8 +786,8 @@ cannot drift out of reach of the person who needs it.
 Single keys work when the caret is not in a text field, and never through a
 dialog: the page under a modal is not taking keys.
 
-The `···` menu carries **Theme** — match the system, always light, always
-dark — and the rows-per-page control lives with the pager.
+The `···` menu carries **Preferences** and **Dark mode** — visual theme, color
+mode, density — and the rows-per-page control lives with the pager.
 
 In a result grid: arrows move a cell cursor, `Enter` opens that row's record,
 `Space` glances at it without leaving the list, `⌘C` copies the cell,
@@ -794,7 +799,9 @@ name, and `j`/`k` or the arrows there step through that list, past its page too.
 
 ```bash
 npm install
-npm test          # typecheck, lint, client checks, the unit suite, the component tests
+npm run check     # typecheck, lint, client checks, boundary, formatting
+npm test          # the Node test suite
+npm run test:components  # Vitest component tests
 npm run demo      # build a demo database and open it
 npm run build     # emit dist/, runnable by plain node
 ```

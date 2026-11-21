@@ -29,7 +29,7 @@ Connections appear in the picker at the top of the page, and each opens when it 
 | `writable` | `true` allows [writes](/docs/writing/) on this connection. Off by default, and enforced by the server. |
 | `rows` | `false` makes the connection shape-only: the catalog, counts, plans and lint answer, and anything that would return a value from a row is refused. |
 | `hidden` | Columns to leave out everywhere, by table: `{ "account": ["password_hash"], "*": ["*_token"] }`. A query naming one is refused, and so is raw SQL on that connection. |
-| `pool` | PostgreSQL only: `{ "read": 8 }` connections that may read at once (default 4, at most 64). |
+| `pool` | PostgreSQL only: `{ "read": 8, "idleSeconds": 300, "minIdle": 2 }` (`read` 1 to 64, default 4; `idleSeconds` 1 to 86400, default 300 or `TABLEWALK_POOL_IDLE`; `minIdle` 0 to 64, default 2 warm readers). |
 | `replicas` | PostgreSQL only: read replica URLs. Lists and counts read from them in turn; a record, every write and the catalog stay on the primary. |
 | `backstop` | Leave it out. `"rls"` marks a connection that signs in as a tenant App's restricted role, which sees no tenant row, so tablewalk refuses it at start (and `tablewalk journal` and `--mcp` with it), by name. Use the owner's URL instead. |
 | `migrations` | Where `tablewalk migrate` finds its files: `{ "dir": "db/migrations", "table": "flyway_schema_history" }`. |

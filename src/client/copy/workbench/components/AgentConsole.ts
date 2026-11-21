@@ -4,6 +4,7 @@ import { defineMessages } from '@mistriwork/kit/client/messages.js';
 export const say = defineMessages({
   charsTokens: '{chars} chars · ~{tokens} tokens',
   readOnly: 'read-only',
+  writesFile: 'writes file',
   writes: 'writes',
   destructive: 'destructive',
   readingTheTools: 'Reading the tools…',

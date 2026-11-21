@@ -315,20 +315,19 @@ export const definitions = [
     name: 'revert',
     description:
       'Undo the last write, or see what there is to undo. Without `confirm: true` it lists ' +
-      'this session\u2019s writes, newest first, and changes nothing. A transaction protects a ' +
+      'recent writes, newest first, and changes nothing. A transaction protects a ' +
       'call from failing halfway; nothing protected you from a call that succeeded and ' +
       'should not have, which is the one that actually happens. Every step is re-read ' +
       'before anything is written and the whole revert is refused if a row has moved on ' +
-      'since — putting an old value back over a newer one is not an undo. In-session ' +
-      'only: a stack that outlives the process invites undoing something from an hour ago, ' +
-      'by which time the row has moved on and the undo is an overwrite with a friendly ' +
-      'name. Raw SQL writes are listed and cannot be undone — arbitrary SQL has no general ' +
+      'since — putting an old value back over a newer one is not an undo. Lasts as long ' +
+      'as the process by default, or across restarts (the last 50 writes, for 7 days) where ' +
+      '`tablewalk journal` provisioned the connection\u2019s store. Raw SQL writes are listed and cannot be undone — arbitrary SQL has no general ' +
       'inverse. An unknown outcome means the Undo may have committed: inspect the stored ' +
       'values and history, and do not retry it. Pending or uncertain Undo blocks older writes. ' +
       'First list without confirm, then pass that next.id as expectedId with confirm: true. ' +
       'Confirmation requires an exact positive safe-integer ID matching the current next write. ' +
       'After a lost response, never replace the submitted ID with an older entry to retry. ' +
-      'This is an in-memory precondition, not a durable recovery receipt.',
+      'This is a precondition on the next entry, not a durable recovery receipt.',
     inputSchema: {
       type: 'object',
       properties: {

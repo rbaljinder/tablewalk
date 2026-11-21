@@ -68,7 +68,7 @@ tablewalk --host 0.0.0.0 --allowed-host data.example.com \
   --auth-proxy-header X-Forwarded-User --auth-proxy-from 10.0.0.7
 ```
 
-A request from beyond loopback without that header is refused, and every write in the journal carries its value. The header is believed only from loopback and the peers `--auth-proxy-from` names, so give it the proxy's own address. Loopback stays exempt, so the container's health check keeps working.
+A request from beyond loopback — or on loopback when forwarded headers, a non-loopback `Host` or `--trust-proxy` show a proxy is in front — is refused without that header, and every write in the journal carries its value. The header is believed only from loopback and the peers `--auth-proxy-from` names, so give it the proxy's own address. Direct loopback stays exempt, and `/healthz` and `/readyz` answer ahead of the door, so the container's health check keeps working.
 
 ## Health and shutdown
 

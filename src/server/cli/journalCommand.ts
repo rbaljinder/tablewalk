@@ -86,16 +86,35 @@ export async function runJournal(
           'a database named on the command line is always read-only.',
         EXIT.refused,
       );
-    const url = target.url;
-    const done = /^postgres(ql)?:\/\//i.test(url)
-      ? await host.provisionPostgresWriteJournal(url)
-      : host.provisionSqliteWriteJournal(await sqliteFile(url));
-    write(
-      done.provisioned
-        ? `${target.name}: Undo journal made. A restart now keeps its last 50 writes, for 7 days.`
-        : `${target.name}: Undo journal already in place.`,
-    );
-    return EXIT.ok;
+    let resolved = target.url;
+    try {
+      resolved = (await host.resolveConnection(target.name, target.url)).url;
+      if (/^(mysql|mariadb):\/\//i.test(resolved)) {
+        return fail('MySQL is not supported; use PostgreSQL or SQLite.', EXIT.refused);
+      }
+      if (/^(?:sqlite:(?:\/\/)?)?(?::memory:|file::memory:)/i.test(resolved)) {
+        return fail(`"${target.name}" is an in-memory SQLite database; its Undo history cannot outlive the process.`, EXIT.refused);
+      }
+      if (/^[a-z][\w+.-]*:\/\//i.test(resolved) && !/^postgres(ql)?:\/\//i.test(resolved) && !/^sqlite:\/\//i.test(resolved)) {
+        const scheme = resolved.match(/^([a-z][\w+.-]*):\/\//i)?.[1];
+        return fail(
+          `Don't know how to open ${scheme ? `a "${scheme}://" connection` : 'that connection'}. ` +
+            'Supported: a SQLite file path, sqlite:<path>, or postgres://…',
+          EXIT.refused,
+        );
+      }
+      const done = /^postgres(ql)?:\/\//i.test(resolved)
+        ? await host.provisionPostgresWriteJournal(resolved)
+        : host.provisionSqliteWriteJournal(await sqliteFile(resolved));
+      write(
+        done.provisioned
+          ? `${target.name}: Undo journal made. A restart now keeps its last 50 writes, for 7 days.`
+          : `${target.name}: Undo journal already in place.`,
+      );
+      return EXIT.ok;
+    } catch (error) {
+      return fail(host.scrubSecrets((error as Error).message, resolved));
+    }
   } catch (error) {
     return fail((error as Error).message);
   } finally {

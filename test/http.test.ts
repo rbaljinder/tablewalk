@@ -710,11 +710,51 @@ describe('connections, over HTTP', () => {
   });
 
   test('selecting, refreshing, updating or removing a name nobody has is a 404', async () => {
-    for (const path of ['select', 'update', 'remove']) {
+    for (const path of ['select', 'refresh', 'update', 'remove']) {
       const res = await post(`/api/connections/${path}`, { id: 'nonesuch' });
       assert.equal(res.status, 404, path);
       assert.equal(res.json.error, 'No connection called "nonesuch".');
     }
+  });
+
+  test('selecting or refreshing a connection that cannot open is a 400 with secrets scrubbed, not a 500', async () => {
+    for (const path of ['select', 'refresh']) {
+      const res = await post(`/api/connections/${path}`, { id: 'remote' });
+      assert.equal(res.status, 400, path);
+      assert.ok(typeof res.json.error === 'string' && res.json.error.length > 0);
+      assert.ok(!res.text.includes(SECRET), 'secret leaked');
+    }
+    assert.equal((await get('/api/connections')).json.active, 'readonly');
+  });
+
+  test('/api/agent/call defaults to the tab connection (conn) rather than process-global registry.active', async () => {
+    assert.equal((await get('/api/connections')).json.active, 'readonly');
+    const scoped = await post('/api/agent/call', {
+      conn: 'writable',
+      name: 'tables',
+      arguments: {},
+    });
+    assert.equal(scoped.status, 200);
+    assert.equal(scoped.json.isError, false);
+    assert.equal(scoped.json.structuredContent.connection, 'writable');
+
+    // Explicit arguments.connection still wins when typed in the console.
+    const explicit = await post('/api/agent/call', {
+      conn: 'writable',
+      name: 'tables',
+      arguments: { connection: 'readonly' },
+    });
+    assert.equal(explicit.json.structuredContent.connection, 'readonly');
+
+    // And diff defaults `from` to the tab's connection when `from` is omitted.
+    const diffed = await post('/api/agent/call', {
+      conn: 'writable',
+      name: 'diff',
+      arguments: { to: 'readonly' },
+    });
+    assert.equal(diffed.json.isError, false);
+    assert.equal(diffed.json.structuredContent.from, 'writable');
+    assert.equal(diffed.json.structuredContent.to, 'readonly');
   });
 
   test('refreshing re-reads the catalog', async () => {
@@ -933,11 +973,11 @@ describe('the connection manager trusts the browser only on loopback', () => {
     assert.ok(!(await get('/api/connections')).json.connections.some((c: { name: string }) => c.name === 'leak'));
   });
 
-  test('a SQLite file path is refused, in every spelling', async () => {
-    for (const url of [RO_DB, `sqlite:${RO_DB}`, '/etc/passwd', 'thing.db']) {
+  test('a SQLite file path or other non-PostgreSQL target is refused, in every spelling', async () => {
+    for (const url of [RO_DB, `sqlite:${RO_DB}`, '/etc/passwd', 'thing.db', 'file:///etc/passwd', 'mysql://u@host/db']) {
       const res = await exposed('/api/connections', { name: 'file', url });
       assert.equal(res.status, 403, url);
-      assert.match(res.json.error, /cannot open a SQLite file by path/);
+      assert.match(res.json.error, /only add a PostgreSQL connection.*never a SQLite file or other scheme/);
     }
   });
 
@@ -999,6 +1039,24 @@ describe('the connection manager trusts the browser only on loopback', () => {
     assert.ok((await get('/api/connections')).json.connections.some((c: { id: string }) => c.id === 'remote'));
 
     assert.equal(readFileSync(configPath, 'utf8'), before);
+  });
+
+  test('an exposed listener refuses sample database creation and file exports over HTTP', async () => {
+    const demo = await exposed('/api/connections/demo', {});
+    assert.equal(demo.status, 403);
+    assert.match(demo.json.error, /sample database/);
+    assert.ok(!(await get('/api/connections')).json.connections.some((c: { name: string }) => c.name === 'demo'));
+
+    const listed = await getFrom(proxied, '/api/agent/tools', { host: 'tablewalk.internal' });
+    assert.equal(listed.status, 200);
+    assert.ok(!listed.json.tools.some((t: { name: string }) => t.name === 'export'));
+    assert.ok((await get('/api/agent/tools')).json.tools.some((t: { name: string }) => t.name === 'export'));
+
+    const exported = await exposed('/api/agent/call', { name: 'export', arguments: { query: 'customer' } });
+    assert.equal(exported.status, 200);
+    assert.equal(exported.json.isError, true);
+    assert.equal(exported.json._meta?.['tablewalk/code'], 'forbidden');
+    assert.match(exported.json.content[0].text, /reachable beyond this machine/);
   });
 
   test("on loopback, the same forms are still the operator's to use", async () => {

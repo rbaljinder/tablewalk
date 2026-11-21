@@ -100,6 +100,9 @@ export const COUNT_LIMIT_WORDS = String(COUNT_LIMIT).replace(/\B(?=(\d{3})+(?!\d
 /** A key that names every primary-key column, or the error that says which are missing. */
 export function wholeKeyOrThrow(schema: DatabaseSchema, table: { name: string; id: string }, key: Record<string, string | number>): void {
   const wanted = primaryKey(findTable(schema, table.id)!);
+  if (!wanted.length) {
+    throw new ToolError('invalid_argument', `"${table.name}" has no primary key, so no single row can be addressed by key.`);
+  }
   const missing = wanted.filter((c) => key[c] === undefined);
   if (missing.length) {
     throw new ToolError(

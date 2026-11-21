@@ -10,6 +10,9 @@ import { readJson, send } from '@mistriwork/engine/server/http/reply.js';
 import type { RequestContext } from '@mistriwork/engine/server/http/context.js';
 import { agentTools } from '../mcp.js';
 
+/** Session connections added from the page: enough for any real session, bounded so an exposed listener cannot grow the registry forever. */
+const MAX_SESSION_CONNECTIONS = 32;
+
 export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
   const { req, res, path, registry, configPath, bound, identity, trusted } = ctx;
 
@@ -22,7 +25,7 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
    * only where some connection's config allows any.
    */
   if (path === '/api/agent/tools' && (req.method === 'GET' || req.method === 'HEAD')) {
-    send(res, 200, { tools: agentTools(registry) });
+    send(res, 200, { tools: agentTools(registry, { trusted }) });
     return true;
   }
   if (path === '/api/runtime') {
@@ -123,6 +126,14 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
    * already open rather than stacking another onto the list.
    */
   if (path === '/api/connections/demo' && req.method === 'POST') {
+    if (!trusted) {
+      send(res, 403, {
+        error:
+          'This server is reachable beyond this machine, so the sample database can only be built from the machine ' +
+          'running tablewalk (or start with --demo).',
+      });
+      return true;
+    }
     const existing = registry.list().find((c) => c.name === 'demo');
     if (existing) {
       registry.setActive(existing.id);
@@ -167,6 +178,12 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
         send(res, 403, { error: why });
         return true;
       }
+    }
+    if (registry.configs().filter((c) => c.source === 'session').length >= MAX_SESSION_CONNECTIONS) {
+      send(res, 429, {
+        error: `At most ${MAX_SESSION_CONNECTIONS} session connections can be kept at once. Remove one before adding another.`,
+      });
+      return true;
     }
     /* Kept so a failed add can put it back. `add` makes the first connection
        active before anything has tried to dial it, so an add that then failed
@@ -372,17 +389,29 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
     }
     /* Not gated on `trusted`: anyone who can reach an exposed server already reads every connection, so choosing which
        one the page shows exposes nothing new, and refusing it would break a container with several. */
-    const { schema } = await registry.open(id);
-    registry.setActive(id);
-    send(res, 200, { active: id, schema });
+    try {
+      const { schema } = await registry.open(id);
+      registry.setActive(id);
+      send(res, 200, { active: id, schema });
+    } catch (err) {
+      send(res, 400, { error: (err as Error).message });
+    }
     return true;
   }
 
   if (path === '/api/connections/refresh' && req.method === 'POST') {
     const body = await readJson(req);
     const id = String(body.id ?? registry.active ?? '');
-    const { schema } = await registry.refresh(id);
-    send(res, 200, { schema });
+    if (!registry.has(id)) {
+      send(res, 404, { error: `No connection called "${id}".` });
+      return true;
+    }
+    try {
+      const { schema } = await registry.refresh(id);
+      send(res, 200, { schema });
+    } catch (err) {
+      send(res, 400, { error: (err as Error).message });
+    }
     return true;
   }
 

@@ -132,7 +132,7 @@ A failed call is a normal result with `isError: true` and a sentence a model can
 
 ## Limits
 
-- Rows that enter an agent's context leave your machine. Point agents at development databases, or mark a connection `"rows": false` so only the shape answers. When every connection is shape-only, `query`, `sql`, `record` and `breakdown` are not listed at all. When every connection [hides columns](/docs/connections/#a-connections-fields), `sql` and `explain` are not listed.
+- Rows that enter an agent's context leave your machine. Point agents at development databases, or mark a connection `"rows": false` so only the shape answers. When every connection is shape-only, `query`, `sql`, `record`, `breakdown` and `export` are not listed at all. When every connection [hides columns](/docs/connections/#a-connections-fields), `sql` and `explain` are not listed.
 - A statement runs under a 30-second cap; `sql` takes `timeout_ms` to lower it (at least 100). A client that cancels a call stops its statement.
 - Totals from `query` and `breakdown`, and counts on `record`, stop at 10,000 and say so.
 - `sql` and `explain` refuse statements that touch tablewalk's own tables (`__mistri_*`, the `mistri` schema, `__tablewalk_*`, `tablewalk_auth`).

@@ -54,7 +54,7 @@ The query language checks every name before anything runs. Take the suggestion, 
 **The agent has no `update` or `insert` tool.**
 Write tools are listed only when a connection is `"writable": true`, and a `--tools` profile can remove them. See [MCP](/docs/mcp/#the-tools).
 
-**The agent has no `query`, `sql` or `record` tool.**
+**The agent has no `query`, `sql`, `record`, `breakdown` or `export` tool.**
 Every connection is `"rows": false`, so the tools that return row values are not listed.
 
 **Node.js says `node:sqlite` is not found, or the install refuses.**

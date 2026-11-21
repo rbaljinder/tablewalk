@@ -59,16 +59,17 @@ export function parseConnectionUrl(url) {
     return { ...EMPTY };
   }
 
-  const driver = parsed.protocol.replace(/:$/, '').toLowerCase();
-  if (driver === 'sqlite') return { ...EMPTY, driver: 'sqlite', file: parsed.pathname };
+  const rawDriver = parsed.protocol.replace(/:$/, '').toLowerCase();
+  if (rawDriver === 'sqlite') return { ...EMPTY, driver: 'sqlite', file: parsed.pathname };
+  const driver = rawDriver === 'postgresql' ? 'postgres' : DRIVERS.includes(rawDriver) ? rawDriver : 'postgres';
 
   return {
-    driver: DRIVERS.includes(driver) ? driver : 'postgres',
+    driver,
     host: parsed.hostname,
     /* Blank when it is the driver's own default: a port box reading 5432 on
        every Postgres connection is a box nobody reads, and one that has to be
        cleared to mean "whatever the default is". */
-    port: parsed.port && Number(parsed.port) !== DEFAULT_PORTS[driver] ? parsed.port : '',
+    port: parsed.port && Number(parsed.port) !== DEFAULT_PORTS[/** @type {keyof typeof DEFAULT_PORTS} */ (driver)] ? parsed.port : '',
     database: decodeURIComponent(parsed.pathname.replace(/^\//, '')),
     user: decodeURIComponent(parsed.username),
     password: decodeURIComponent(parsed.password),
@@ -162,7 +163,7 @@ export function buildConnectionUrl(parts) {
     .trim()
     .replace(/^\?/, '');
 
-  return `${p.driver}://${auth}${host}${port ? `:${port}` : ''}` + `/${encodeURIComponent(database)}` + `${params ? `?${params}` : ''}`;
+  return `${p.driver}://${auth}${host}${port ? `:${port}` : ''}` + `/${encodePart(database)}` + `${params ? `?${params}` : ''}`;
 }
 
 /**
@@ -175,19 +176,31 @@ export function buildConnectionUrl(parts) {
  */
 export function redactConnectionUrl(url) {
   const text = String(url ?? '');
+  /* Read the authority directly rather than through `new URL(text)`, which
+     throws when host or port holds `${DB_HOST}` and would otherwise return
+     the literal password unmasked. */
+  const matched = /^([a-z][\w+.-]*:\/\/)([^/?#]*)(.*)$/i.exec(text);
+  if (!matched) return text;
+  const [, scheme, authority, tail] = matched;
+  const at = authority.lastIndexOf('@');
+  if (at < 0) return text;
+  const userinfo = authority.slice(0, at);
+  const hostPort = authority.slice(at + 1);
+  const colon = userinfo.indexOf(':');
+  if (colon < 0) return text;
+  const user = userinfo.slice(0, colon);
+  const password = userinfo.slice(colon + 1);
+  if (!password) return text;
+  let decoded = password;
   try {
-    const parsed = new URL(text);
-    if (!parsed.password) return text;
-    /* A reference is not a secret. `${PROD_PASSWORD}` names a variable and
-       reveals nothing, and it is the one part of the URL worth reading back
-       carefully — hiding it would take away the only way to notice the
-       variable name is misspelled. */
-    if (isEnvReference(decodeURIComponent(parsed.password))) return text;
-    parsed.password = '';
-    /* Rebuilt by hand rather than by assigning a mask to `parsed.password`,
-       which would percent-encode the dots into `%E2%80%A2` and show that. */
-    return parsed.toString().replace(`${parsed.username}@`, `${parsed.username}:••••••@`);
+    decoded = decodeURIComponent(password);
   } catch {
-    return text;
+    /* Keep raw text if partially percent-encoded while typing. */
   }
+  /* A reference is not a secret. `${PROD_PASSWORD}` names a variable and
+     reveals nothing, and it is the one part of the URL worth reading back
+     carefully — hiding it would take away the only way to notice the
+     variable name is misspelled. */
+  if (isEnvReference(decoded)) return text;
+  return `${scheme}${user}:••••••@${hostPort}${tail}`;
 }

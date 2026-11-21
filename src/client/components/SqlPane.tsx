@@ -9,13 +9,16 @@
  * is pressed rather than mirrored keystroke by keystroke.
  */
 import { useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@mistriwork/ui/Button.js';
 import { Modal, type ModalHandle } from '@mistriwork/ui/Modal.js';
 import { api, go, render, state, toast } from '@mistriwork/kit/client/core.js';
+import { advanceRecordSource } from '@mistriwork/kit/client/recordSource.js';
 import { attachComplete } from '../complete.js';
 import { sqlSuggestions, tokenAt } from '../sqlcomplete.js';
 import { promptFor } from '@mistriwork/kit/client/prompt.js';
 import { removeStatement, saveStatement, savedStatements } from '../sqlsaved.js';
+import { refreshUndo } from '../undo.js';
 import type { TableMeta } from '@mistriwork/engine/shared/schema.js';
 import { Grid } from '@mistriwork/kit/client/components/Grid.js';
 import { say } from '../copy/workbench/components/SqlPane.js';
@@ -56,6 +59,7 @@ function autoGrow(input: HTMLTextAreaElement) {
 }
 
 export function SqlPane({ draft, onDraft, onClose }: SqlPaneProps) {
+  const queryClient = useQueryClient();
   const input = useRef<HTMLTextAreaElement>(null);
   const [outcome, setOutcome] = useState<Outcome>({ kind: 'idle' });
   const [savedVersion, bump] = useState(0);
@@ -122,7 +126,10 @@ export function SqlPane({ draft, onDraft, onClose }: SqlPaneProps) {
       const affected = data.affected ?? 0;
       toast(`${say('rows', { count: affected })} changed.`, 'ok');
       setOutcome({ kind: 'written', affected });
-      // The schema and every open page may now be stale.
+      // The schema, cached lists/records, and the Undo barrier entry may all have moved.
+      advanceRecordSource();
+      void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] !== 'command-prepare' });
+      void refreshUndo();
       render();
       return;
     }

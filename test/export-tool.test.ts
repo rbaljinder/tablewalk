@@ -287,7 +287,7 @@ test('a third concurrent export is refused, and the slot comes back when one fin
   written.push(again.path as string);
 });
 
-test('a read-only connection lists export with the reading tools, and the explore profile keeps it', () => {
+test('a read-only connection lists export with the reading tools, and the explore profile keeps it', async () => {
   const names = agentTools(registry).map((t) => t.name);
   assert.ok(names.includes('export'));
   assert.ok(names.indexOf('export') < names.indexOf('record'), 'listed among the reads');
@@ -299,4 +299,21 @@ test('a read-only connection lists export with the reading tools, and the explor
     idempotentHint: false,
     openWorldHint: false,
   });
+
+  // Untrusted HTTP listeners neither list nor run export.
+  assert.ok(!agentTools(registry, { trusted: false }).some((t) => t.name === 'export'));
+  const denied = await runTool(registry, 'export', { connection: 'bulk', query: 'wide' }, { trusted: false });
+  assert.equal(denied.isError, true);
+  assert.equal(denied._meta?.['tablewalk/code'], 'forbidden');
+
+  // Every exported row is counted in stats.rowsRead and in rowsReadThisSession.
+  const before = (
+    (await runTool(registry, 'connections', {})).structuredContent!.connections as Array<{ id: string; rowsReadThisSession: number }>
+  ).find((c) => c.id === 'bulk')!.rowsReadThisSession;
+  const exported = await exportOf({ query: 'wide', name: 'counted' });
+  assert.equal((exported as unknown as { stats: { rowsRead: number } }).stats.rowsRead, 2);
+  const after = (
+    (await runTool(registry, 'connections', {})).structuredContent!.connections as Array<{ id: string; rowsReadThisSession: number }>
+  ).find((c) => c.id === 'bulk')!.rowsReadThisSession;
+  assert.equal(after, before + 2);
 });

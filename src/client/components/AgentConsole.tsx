@@ -14,6 +14,7 @@ import { addHostListener, navFollow, removeHostListener } from '@mistriwork/kit/
 interface Spec {
   type?: string | string[];
   description?: string;
+  items?: { type?: string };
 }
 export interface Tool {
   name: string;
@@ -39,6 +40,7 @@ const typesOf = (spec: Spec) => (Array.isArray(spec.type) ? spec.type : [spec.ty
 function Badges({ tool }: { tool: Tool }) {
   const a = tool.annotations ?? {};
   if (a.readOnlyHint) return <span className="agent-badge tone-ok">{say('readOnly')}</span>;
+  if (tool.name === 'export') return <span className="agent-badge">{say('writesFile')}</span>;
   return (
     <>
       <span className="agent-badge tone-warn">{say('writes')}</span>
@@ -191,14 +193,32 @@ function ToolForm({
       if (types.includes('object')) {
         /* Objects arrive as JSON, because a key or a set of values is a shape the caller composes. */
         try {
-          args[name] = JSON.parse(raw);
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+          args[name] = parsed;
         } catch {
           onBadJson(say('isNotJson', { name, raw: raw.slice(0, 60) }));
           return;
         }
-      } else if (types.includes('number') && !Number.isNaN(Number(raw))) {
+      } else if (types.includes('array')) {
+        if (spec.items?.type === 'string' && !raw.startsWith('[')) {
+          args[name] = raw
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean);
+        } else {
+          try {
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) throw new Error();
+            args[name] = parsed;
+          } catch {
+            onBadJson(say('isNotJson', { name, raw: raw.slice(0, 60) }));
+            return;
+          }
+        }
+      } else if ((types.includes('number') || types.includes('integer')) && !Number.isNaN(Number(raw))) {
         args[name] = Number(raw);
-      } else if (spec.type === 'boolean') {
+      } else if (types.includes('boolean')) {
         args[name] = raw === 'true' || raw === '1' || raw === 'yes';
       } else {
         args[name] = raw;
@@ -215,7 +235,8 @@ function ToolForm({
       {/* The description, shown whole: this text is the tool's entire pitch to a model deciding whether to call it. */}
       <p className="agent-desc">{tool.description}</p>
       {Object.entries(properties).map(([name, spec]) => {
-        const isObject = typesOf(spec).includes('object');
+        const types = typesOf(spec);
+        const isJson = types.includes('object') || types.includes('array');
         const set = (v: string) => setValues((was) => ({ ...was, [name]: v }));
         return (
           <div key={name} className="agent-field">
@@ -223,12 +244,12 @@ function ToolForm({
               {name}
               {required.has(name) ? <span className="req">{say('required')}</span> : null}
             </label>
-            {isObject ? (
+            {isJson ? (
               <textarea
                 className="agent-input agent-json"
                 rows={2}
                 spellCheck={false}
-                placeholder={spec.description ?? '{ }'}
+                placeholder={spec.description ?? (types.includes('array') ? '[ ]' : '{ }')}
                 aria-label={`${name} (json)`}
                 value={values[name] ?? ''}
                 onChange={(e) => set(e.currentTarget.value)}
@@ -264,12 +285,12 @@ function ToolForm({
 function AnswerView({ answer, onClose }: { answer: Answer; onClose: () => void }) {
   const text = answer.structuredContent ? JSON.stringify(answer.structuredContent, null, 2) : (answer.content?.[0]?.text ?? '');
   const stats = answer.structuredContent?.stats ?? {};
-  /* Every deep link in the answer, surfaced as a real door: "see that row" should cost one click. */
+  /* Every deep link in the answer (`link` fields from `linkTo`), surfaced as a real door: "see that row" should cost one click. */
   const links: string[] = [];
-  const walk = (value: unknown) => {
-    if (typeof value === 'string' && /^[#/]\/?\w/.test(value) && !value.startsWith('//')) links.push(value);
-    else if (Array.isArray(value)) value.forEach(walk);
-    else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+  const walk = (value: unknown, key?: string) => {
+    if (key === 'link' && typeof value === 'string' && /^[#/]\/?\w/.test(value) && !value.startsWith('//')) links.push(value);
+    else if (Array.isArray(value)) value.forEach((item) => walk(item));
+    else if (value && typeof value === 'object') Object.entries(value).forEach(([k, v]) => walk(v, k));
   };
   walk(answer.structuredContent ?? {});
   return (

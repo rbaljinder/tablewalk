@@ -62,7 +62,7 @@ const HANDLERS = new Map<string, Handler>(
 /** One tool's answer, before stats: the connection it names is opened first. */
 async function callTool(registry: Registry, name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
   if (name === 'connections') return schemaTools.connections(registry);
-  const opened = await openFor(registry, args.connection);
+  const opened = await openFor(registry, name === 'diff' ? (args.from ?? args.connection) : args.connection);
   const handler = HANDLERS.get(name);
   if (!handler) throw new ToolError('not_found', `No tool called "${name}".`);
   return handler({ registry, args, ...opened });
@@ -160,16 +160,19 @@ export const toolNames = () => [...TOOLS, ...WRITE_TOOLS].map((t) => t.name);
  * connection's config allows any. Exported for the agent console, which
  * shows exactly this list — a second list would be a second truth.
  */
-export function agentTools(registry: Registry) {
+export function agentTools(registry: Registry, options: { trusted?: boolean } = {}) {
   const connections = registry.list();
   const anyWritable = connections.some((c) => c.writable);
   const listed = anyWritable ? [...TOOLS, ...WRITE_TOOLS] : [...TOOLS];
+  /* Writing files into this machine's temp directory is for stdio and loopback,
+     not a browser reaching an exposed HTTP listener from elsewhere. */
+  const byTrust = options.trusted === false ? listed.filter((t) => t.name !== 'export') : listed;
   /* If no connection will return a row, the tools that only return rows are
      not a capability this server has — and a tool an agent can see is a tool
      it will spend a call discovering. The same reasoning as the write tools,
      one boundary further out. `find` stays: its name mode is shape. */
   const anyRows = connections.some((c) => c.rows !== false);
-  const byRows = anyRows ? listed : listed.filter((t) => !ROW_ONLY_TOOLS.has(t.name));
+  const byRows = anyRows ? byTrust : byTrust.filter((t) => !ROW_ONLY_TOOLS.has(t.name));
   /* Raw SQL is refused on a connection that hides columns: where every one
      does, the statement tools are not a capability either. */
   const anySql = connections.some((c) => !c.hidesColumns);
@@ -248,7 +251,7 @@ export async function runTool(
   registry: Registry,
   name: string,
   args: Record<string, unknown>,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; trusted?: boolean } = {},
 ): Promise<{
   content: Array<{ type: 'text'; text: string }>;
   structuredContent?: Record<string, unknown>;
@@ -257,6 +260,13 @@ export async function runTool(
 }> {
   const signal = options.signal ?? new AbortController().signal;
   try {
+    if (options.trusted === false && name === 'export') {
+      throw new ToolError(
+        'forbidden',
+        'This server is reachable beyond this machine, so export cannot write files to its temp directory over HTTP. ' +
+          'Run export over stdio (--mcp) or from loopback.',
+      );
+    }
     /* The profile is enforced here, not only in the listing. `--tools explore`
        used to hide `delete` from tools/list and then run it for any client
        that knew the name — a filter on the menu, not on the kitchen. A profile
@@ -304,15 +314,17 @@ export async function runTool(
          rather than being one list — and every one of them left the
          machine. */
           answered.rowsRead
-        : Array.isArray(answered.rows)
-          ? (answered.rows as unknown[]).length
-          : Array.isArray(answered.matches)
-            ? (answered.matches as unknown[]).length
-            : Array.isArray(answered.records)
-              ? (answered.records as Array<Record<string, unknown>>).reduce((n, r) => n + delivered(r), 0)
-              : answered.found === true || answered.found === false
-                ? delivered(answered)
-                : undefined;
+        : name === 'export' && typeof answered.rows === 'number'
+          ? answered.rows
+          : Array.isArray(answered.rows)
+            ? (answered.rows as unknown[]).length
+            : Array.isArray(answered.matches)
+              ? (answered.matches as unknown[]).length
+              : Array.isArray(answered.records)
+                ? (answered.records as Array<Record<string, unknown>>).reduce((n, r) => n + delivered(r), 0)
+                : answered.found === true || answered.found === false
+                  ? delivered(answered)
+                  : undefined;
     const affected = typeof answered.affected === 'number' ? answered.affected : undefined;
     /* A graph counts its own list rather than an `affected` it never has —
        and `inserted` is a boolean for `insert` and a list for `insert_graph`,

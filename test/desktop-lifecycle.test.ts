@@ -79,6 +79,37 @@ test('an old child exiting late cannot affect its successor', async () => {
   assert.deepEqual(unexpected, [['boom', 2]]);
 });
 
+test('a failed database switch leaves the running server alive on its port', async () => {
+  let activeOk = true;
+  const { lifecycle, children, unexpected } = harness({
+    fetch: async () => {
+      if (!activeOk) throw new Error('ECONNREFUSED');
+      return { ok: true };
+    },
+  });
+  const initialPort = await lifecycle.start('good.db');
+  assert.equal(initialPort, 4100);
+
+  activeOk = false;
+  const bad = lifecycle.start('corrupt.db');
+  await tick(5);
+  children[1].stderr.emit('data', 'file is not a database');
+  children[1].die(1);
+  await assert.rejects(bad, /file is not a database/);
+
+  assert.deepEqual(children[0].kills, [], 'the working server was never killed');
+  assert.equal(lifecycle.port, 4100, 'its port stands');
+  assert.deepEqual(unexpected, []);
+
+  // A subsequent valid switch retires the first server once the replacement answers.
+  activeOk = true;
+  const nextPort = await lifecycle.start('next.db');
+  assert.equal(nextPort, 4102);
+  await tick();
+  assert.deepEqual(children[0].kills, ['SIGTERM']);
+  assert.deepEqual(unexpected, []);
+});
+
 test('the current server dying after it was ready is reported', async () => {
   const { lifecycle, children, unexpected } = harness();
   await lifecycle.start();

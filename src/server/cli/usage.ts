@@ -65,9 +65,10 @@ Options:
       --auth-proxy-header <name>
                       Behind a proxy that signs people in: the header it sets
                       with the user (X-Forwarded-User). Requests from beyond
-                      loopback must carry it; it is believed only from
-                      loopback and --auth-proxy-from peers. Every write is
-                      journaled with it. Or set TABLEWALK_AUTH_PROXY_HEADER.
+                      loopback (or proxied on loopback) must carry it; it is
+                      believed only from loopback and --auth-proxy-from peers.
+                      Every write is journaled with it. Or set
+                      TABLEWALK_AUTH_PROXY_HEADER.
       --auth-proxy-from <address|CIDR>
                       A peer, beside loopback, whose --auth-proxy-header value
                       is believed: the proxy's own address (10.0.0.7). Same
@@ -77,8 +78,9 @@ Options:
       --schema <name> Postgres only; repeatable. Defaults to all user schemas.
       --read-pool <n> PostgreSQL connections that may read at once, per
                       database (default 4, at most 64). A connection's
-                      "pool": { "read": n } in tablewalk.json wins.
-                      Or set TABLEWALK_READ_POOL.
+                      "pool": { "read": n, "idleSeconds": s, "minIdle": k } in
+                      tablewalk.json wins. Or set TABLEWALK_READ_POOL (and
+                      TABLEWALK_POOL_IDLE for idle seconds).
       --lock-timeout <s>
                       Seconds a write waits for a row or table another
                       transaction holds before it is refused (default 5,

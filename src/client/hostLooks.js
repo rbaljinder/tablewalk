@@ -18,7 +18,7 @@
  * structure is native.css's, keyed to include them): the kit offers a Palette choice only for its own looks
  * (visualTheme.ts `visualPaletteOptions`), so here they stand beside Instrument in the picker, each named for it.
  */
-import { registerHostLooks, setVisualTheme } from '@mistriwork/kit/client/visualTheme.js';
+import { registerHostLooks, setVisualPalette, setVisualTheme, visualThemeOptions } from '@mistriwork/kit/client/visualTheme.js';
 
 const instrument = () => import('./looks/instrument.css');
 
@@ -59,11 +59,14 @@ export function declareHostLooks() {
   registerHostLooks(LOOKS);
   const here = new URL(window.location.href);
   if (!here.searchParams.has('look')) return;
+  const look = here.searchParams.get('look');
   const palette = here.searchParams.get('palette');
   /* A palette names Instrument's variant; Graphite, Instrument's own, is the default, so `instrument` alone is too. */
-  const asked = [here.searchParams.get('look'), palette && palette !== 'graphite' ? palette : null].filter(Boolean).join('-');
-  /* Stored as the Preferences picker stores it (an unknown name is the native default, which is how `instrument` lands on Graphite). */
-  setVisualTheme(asked && LOOKS.some((look) => look.id === asked) ? asked : 'default');
+  const asked = look === 'instrument' ? (palette && palette !== 'graphite' ? `instrument-${palette}` : 'default') : look;
+  /* Stored as the Preferences picker stores it (any host look or built-in kit look this screen offers; an unknown name lands on the native default). */
+  const known = Boolean(asked && visualThemeOptions().some((option) => option.value === asked));
+  setVisualTheme(known && asked ? asked : 'default');
+  if (palette && look !== 'instrument' && known) setVisualPalette(palette);
   here.searchParams.delete('look');
   here.searchParams.delete('palette');
   // host-global: the address bar loses ?look= before the shell mounts; no walk exists yet to push into.

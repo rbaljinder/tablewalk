@@ -17,7 +17,7 @@
  * connection — which is why it was worth finding before shipping rather than after.
  */
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, globSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -71,6 +71,7 @@ run('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], STAGE);
 const own = join(STAGE, 'node_modules', 'tablewalk');
 mkdirSync(own, { recursive: true });
 run('tar', ['-xzf', join(packed, tarball), '-C', own, '--strip-components=1'], STAGE);
+for (const map of globSync('node_modules/**/*.map', { cwd: STAGE })) rmSync(join(STAGE, map), { force: true });
 rmSync(packed, { recursive: true, force: true });
 
 console.log('stage: done');

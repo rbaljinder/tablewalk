@@ -69,6 +69,7 @@ describe('a connection string and its parts', () => {
        reads, and one that has to be cleared to mean "the default". */
     assert.equal(parseConnectionUrl('postgres://app@db/appdb').port, '');
     assert.equal(parseConnectionUrl(`postgres://app@db:${DEFAULT_PORTS.postgres}/appdb`).port, '');
+    assert.equal(parseConnectionUrl(`postgresql://app@db:${DEFAULT_PORTS.postgres}/appdb`).port, '');
     assert.equal(parseConnectionUrl('postgres://app@db:6543/appdb').port, '6543');
     assert.equal(buildConnectionUrl({ driver: 'postgres', host: 'db', database: 'appdb' }), 'postgres://db/appdb');
   });
@@ -110,6 +111,8 @@ describe('a connection string and its parts', () => {
       assert.ok(url.includes(password), url);
       assert.ok(!url.includes('%24'), url);
     }
+    const dbEnv = buildConnectionUrl({ driver: 'postgres', host: '${DB_HOST}', database: '${POSTGRES_DB}', user: 'app' });
+    assert.equal(dbEnv, 'postgres://app@${DB_HOST}/${POSTGRES_DB}');
 
     /* Part literal, part reference — which people write — encodes the half
        that needs it and leaves the half that must not be touched. */
@@ -129,6 +132,10 @@ describe('a connection string and its parts', () => {
        to notice the variable name is misspelled. */
     assert.equal(redactConnectionUrl('postgres://app:${PROD_PASSWORD}@db/appdb'), 'postgres://app:${PROD_PASSWORD}@db/appdb');
     assert.ok(!redactConnectionUrl('postgres://app:hunter2@db/appdb').includes('hunter2'));
+    const envHost = redactConnectionUrl('postgres://app:hunter2@${DB_HOST}:${DB_PORT}/appdb');
+    assert.equal(envHost, 'postgres://app:••••••@${DB_HOST}:${DB_PORT}/appdb');
+    const emptyUser = redactConnectionUrl('postgres://:hunter2@db/appdb?note=a@b');
+    assert.equal(emptyUser, 'postgres://:••••••@db/appdb?note=a@b');
   });
 
   test('the preview hides the password without hiding the rest', () => {

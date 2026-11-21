@@ -19,7 +19,7 @@ import type { PostContext } from '@mistriwork/engine/server/http/context.js';
 /** The page routes in the database browser: a table's suggested page is the schema's, and its rules are the connection's. */
 export const BROWSER_PAGES: PageHooks = { suggested: (post, table) => suggestPage(post.schema, table) };
 
-export async function authoringRoutes(post: PostContext): Promise<boolean> {
+export async function authoringRoutes(post: PostContext, trusted = true): Promise<boolean> {
   const { res, path, body, schema, registry, connection } = post;
 
   /* Not refused for an untrusted client, though it writes a file under this machine's config directory: the client has no
@@ -83,15 +83,20 @@ export async function authoringRoutes(post: PostContext): Promise<boolean> {
    *
    * Deliberately the same runTool the stdio loop uses, so the console's
    * whole claim — "this is what the agent sees" — is structural rather than
-   * aspirational. Tool errors are results here as there; the connection is
-   * whatever the arguments name, defaulting to the active one, exactly as
-   * an agent's call would.
+   * aspirational. Tool errors are results here as there; when `arguments`
+   * omits `connection`, it defaults to the tab's resolved `connection` rather
+   * than process-wide `registry.active`, so Find, Shape Check and a console
+   * form left blank act on the database in front of the reader.
    */
   if (path === '/api/agent/call') {
     const name = String(body.name ?? '');
-    const args = (body.arguments ?? {}) as Record<string, unknown>;
+    const raw = (body.arguments ?? {}) as Record<string, unknown>;
+    const args =
+      connection && raw.connection === undefined && (name !== 'diff' || raw.from === undefined) && name !== 'connections'
+        ? { ...raw, connection }
+        : raw;
     // The console's writes are an agent's, made in the operator's name.
-    send(res, 200, await attributeWrites({ via: 'agent' }, () => runTool(registry, name, args)));
+    send(res, 200, await attributeWrites({ via: 'agent' }, () => runTool(registry, name, args, { trusted })));
     return true;
   }
 

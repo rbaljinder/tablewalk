@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.0.0-rc.18
+
+Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.77`.
+
+- PostgreSQL pools keep two warm reader connections by default (`"pool": { "minIdle": 2, "idleSeconds": 300 }` or
+  `TABLEWALK_POOL_IDLE`), and `--auth-proxy-header` refuses proxied loopback requests that carry no user header while
+  keeping `/healthz` and `/readyz` open ahead of the door.
+- `POST /api/agent/call` defaults `connection` to the tab's resolved connection instead of `registry.active`, so Find a
+  value, Check the shape and Agent console calls act on the database open in that tab, and `diff` honors `from`.
+- On an HTTP listener reachable beyond loopback, `export` is withheld from `/api/agent/tools` and refused over
+  `/api/agent/call`, `/api/connections/demo` is refused, and session connections are bounded.
+- `export` reports `stats.rowsRead` and advances `rowsReadThisSession`; `fixture` and `record` refuse keyless tables,
+  and `fixture` SQL qualifies non-default schemas and formats dates, byte arrays and JSON documents cleanly.
+- The connection dialog's URL preview masks literal passwords even when host or port uses `${ENV}` or the user is empty,
+  and preserves `${ENV}` in database names; the Agent console coerces integer and array arguments (`revert`,
+  `insert_graph`, `delete_graph`, `record.keys`, `explain.params`) and links only `link` fields; raw SQL writes refresh
+  cached views and Undo; `?look=` links can pick built-in kit looks as well as host looks.
+- `tablewalk journal` resolves credentials and refuses in-memory SQLite and unsupported schemes before touching the
+  filesystem; `--diff` and `--lint` close their connections and let stdout drain before exiting; the desktop app
+  replaces its server and updates `lastDatabase` only after the new database opens, falling back to Welcome if a
+  remembered file later fails.
+
 ## 1.0.0-rc.17
 
 - A new MCP tool, `export`, writes a query or a read-only `SELECT` to a file (csv, ndjson or json, optionally gzipped)

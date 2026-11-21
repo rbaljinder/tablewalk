@@ -175,7 +175,7 @@ Exit codes: 1 could not run, 2 refused (read-only, or an HTTP API).
 | `TABLEWALK_BASE_PATH` | The same as `--base-path`. |
 | `TABLEWALK_AUTH_PROXY_HEADER`, `TABLEWALK_AUTH_PROXY_FROM` | The same as their flags. |
 | `TABLEWALK_TRUST_PROXY`, `TABLEWALK_TRUST_PROXY_HOPS`, `TABLEWALK_TRUST_PROXY_CLOUDFLARE` | The same as their flags. |
-| `TABLEWALK_READ_POOL`, `TABLEWALK_LOCK_TIMEOUT`, `TABLEWALK_POOLER` | The same as their flags. |
+| `TABLEWALK_READ_POOL`, `TABLEWALK_POOL_IDLE`, `TABLEWALK_LOCK_TIMEOUT`, `TABLEWALK_POOLER` | Pool size, idle window (1 to 86400 seconds), lock timeout and pooler mode. |
 | `TABLEWALK_DRAIN_DELAY`, `TABLEWALK_SHUTDOWN_GRACE` | The same as their flags. |
 | `TABLEWALK_DIAGNOSTICS=1` | Request diagnostics as JSON lines on stderr, with `X-Request-ID` headers. No URLs, bodies, SQL or identities. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Turns on OpenTelemetry traces, metrics and logs over OTLP/HTTP, with the other standard `OTEL_*` variables. No row values or SQL parameters are sent. |

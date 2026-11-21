@@ -85,7 +85,10 @@ const ROUTES: readonly Route<RequestContext>[] = [
   /* Everything else that takes a body, on the source the body names (dataRoutes.ts). */
   async (ctx) => {
     if (ctx.req.method !== 'POST' || !ctx.path.startsWith('/api/')) return false;
-    await postData(ctx, BROWSER_DATA);
+    await postData(ctx, {
+      ...BROWSER_DATA,
+      routes: async (post) => (await httpOperationRoutes(post)) || (await authoringRoutes(post, ctx.trusted)),
+    });
     return true;
   },
   /* Only the API needs a database: the page itself is served with nothing open, so the one screen that can ask for a connection is not behind the requirement. */

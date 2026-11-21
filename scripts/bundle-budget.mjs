@@ -39,9 +39,12 @@ export const CLIENT = join(ROOT, 'dist/client');
    eight built-in looks: the kit's stylesheet grew by about 85 KB raw and its script by about 56 KB. This package's own
    Workbench sheet grew by about 10 KB, for Graphite as the browser's default look with its contrast fixed.
    The style ceiling rose again for 1.0.0-rc.16, on kit rc.65 (raw 545_000 to 550_000): the sheet measured 532.3 KB,
-   a tenth of a KB past the rc.15 ceiling, and the ceiling keeps its few KB of headroom. */
+   a tenth of a KB past the rc.15 ceiling, and the ceiling keeps its few KB of headroom.
+   They rose again on kit rc.77 (style raw 550_000 to 558_000, brotli 70_000 to 72_000): between rc.65 and rc.77 the
+   kit's sheet grew by about 6.5 KB raw (1.8 KB brotli) for rc.66's controls and popup corners and rc.75–rc.76's
+   designed-page parts and touch targets, measuring 538.8 KB raw and 68.7 KB brotli; this package added no CSS. */
 export const BUDGET = {
-  workbench: { script: { raw: 1_390_000, br: 380_000 }, style: { raw: 550_000, br: 70_000 } },
+  workbench: { script: { raw: 1_390_000, br: 380_000 }, style: { raw: 558_000, br: 72_000 } },
 };
 
 /* The chrome's words in a language besides English (src/client/copy/<lang>.ts), one chunk each, which only a reader of
