@@ -227,23 +227,23 @@ export function ShapeCheckDialog({ onClose }: { onClose: () => void }) {
                   return (
                     <div key={table} className="shape-check-group">
                       {/* Every finding is about a table, and the useful next move is looking at it. */}
-                      <button
-                        type="button"
-                        className="shape-check-table"
-                        title={say('openTable', { table })}
-                        onClick={() => {
-                          close();
-                          go(tableView(meta?.id ?? table), 'reset');
-                        }}
-                      >
-                        <span>
-                          {meta?.name ?? table}
-                          {meta?.approxRows !== undefined ? (
-                            <span className="shape-check-approx">{say('approxRowsTag', { rows: formatNumber(meta.approxRows) })}</span>
-                          ) : null}
-                        </span>
-                        <span className="shape-check-count">{`${list.length}`}</span>
-                      </button>
+                      <div className="shape-check-group-head">
+                        <button
+                          type="button"
+                          className="shape-check-table"
+                          title={say('openTable', { table })}
+                          onClick={() => {
+                            close();
+                            go(tableView(meta?.id ?? table), 'reset');
+                          }}
+                        >
+                          <span>{meta?.name ?? table}</span>
+                          <span className="shape-check-count">{`${list.length}`}</span>
+                        </button>
+                        {meta?.approxRows !== undefined ? (
+                          <span className="shape-check-approx">{say('approxRowsTag', { rows: formatNumber(meta.approxRows) })}</span>
+                        ) : null}
+                      </div>
                       {byRule(list).map(([rule, found]) => (
                         <div key={rule} className={`shape-check-rule-group tone-${found[0].severity ?? 'low'}`}>
                           <p className="shape-check-why">
