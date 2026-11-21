@@ -472,26 +472,8 @@
     color: var(--status-critical); font: 600 var(--text-sm) var(--face-ui, var(--sans));
   }
 
-  .agent-target-bar {
-    display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2h);
-    padding: var(--space-2h) var(--space-3h); margin-block-end: var(--space-3h);
-    border: 1px solid var(--line); border-radius: var(--radius-panel, var(--radius)); background: var(--ground);
-  }
-  .agent-target-label { font: 600 var(--text-xs) var(--face-ui, var(--sans)); color: var(--ink-subtle); }
-  .agent-target-list { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
-  .agent-target-pill {
-    display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2h);
-    border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
-    color: var(--ink-muted); font: 500 var(--text-xs) var(--face-ui, var(--sans)); cursor: pointer;
-  }
-  .agent-target-pill.active { color: var(--ink); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-  .agent-target-pill.active.tone-prod { border-color: var(--status-critical); box-shadow: 0 0 0 1px var(--status-critical); }
-  .agent-target-pill.active.tone-staging { border-color: var(--status-warning); box-shadow: 0 0 0 1px var(--status-warning); }
-  .agent-target-posture { color: var(--ink-subtle); font: var(--text-xs) var(--figures, var(--code)); }
-
   @media (hover: hover) {
     button.env-pill:not(.active):hover { color: var(--ink); background: var(--raised); }
-    .agent-target-pill:not(.active):hover { color: var(--ink); border-color: var(--line-strong); background: var(--raised); }
     #query:hover:not(:focus) { border-color: var(--line-strong); }
   }
 

@@ -37,4 +37,10 @@ export const say = defineMessages({
   cloneEnv: '+ Env',
   cloneEnvTitle: 'Add another environment for {database}',
   countEnvironments: { one: '{count} env', other: '{count} envs' },
+  masked: 'masked',
+  maskedRowsTitle: 'Sensitive columns are deterministically masked on every row read.',
+  restricted: 'restricted',
+  restrictedColumnsTitle: 'Blocked or hidden tables and columns are withheld from this connection.',
+  maxRowsBadge: '≤ {max} rows',
+  maxRowsTitle: 'Session row budget: at most {max} rows per session.',
 });

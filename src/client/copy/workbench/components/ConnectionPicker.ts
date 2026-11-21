@@ -12,4 +12,5 @@ export const say = defineMessages({
   postureRw: 'RW',
   postureRo: 'RO',
   postureShape: 'shape',
+  postureMasked: 'masked',
 });

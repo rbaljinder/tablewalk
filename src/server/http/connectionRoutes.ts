@@ -109,7 +109,7 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
   if (path === '/api/agent/activity' && (req.method === 'GET' || req.method === 'HEAD')) {
     res.setHeader('cache-control', 'no-store');
     if (!trusted) {
-      send(res, 200, { seq: 0, calls: [], egress: {}, mcpEndpoint: null });
+      send(res, 200, { seq: 0, calls: [], egress: {}, maxRows: {}, mcpEndpoint: null });
       return true;
     }
     const since = Number(url.searchParams.get('since') ?? '0');

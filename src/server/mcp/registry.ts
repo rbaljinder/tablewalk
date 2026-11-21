@@ -15,7 +15,16 @@ import {
   distance,
   type Registry,
 } from '@mistriwork/engine/host';
-import { openFor, recordAgentActivity, sessionEgress, type Handler, ToolError, errorCodeOf, type ErrorCode } from './toolkit.js';
+import {
+  getConnectionRuntimePolicy,
+  openFor,
+  recordAgentActivity,
+  sessionEgress,
+  type Handler,
+  ToolError,
+  errorCodeOf,
+  type ErrorCode,
+} from './toolkit.js';
 import * as schemaTools from './tools/schema.js';
 import * as queryTools from './tools/query.js';
 import * as sqlTools from './tools/sql.js';
@@ -75,7 +84,46 @@ async function callTool(
   });
   const handler = HANDLERS.get(name);
   if (!handler) throw new ToolError('not_found', `No tool called "${name}".`);
-  return handler({ registry, args, trusted, ...opened });
+
+  let effectiveArgs = args;
+  const policy = getConnectionRuntimePolicy(registry, opened.id);
+  const readsRows =
+    ROW_ONLY_TOOLS.has(name) ||
+    name === 'fixture' ||
+    (name === 'find' && args.value !== undefined && args.value !== null && String(args.value).trim() !== '');
+  if (readsRows && policy?.maxRows !== undefined) {
+    const already = sessionEgress.get(opened.id) ?? 0;
+    const remaining = policy.maxRows - already;
+    if (remaining <= 0) {
+      throw new ToolError(
+        'limit',
+        `Session row budget exhausted on "${opened.id}" (${already}/${policy.maxRows} rows read). Narrow your session or raise "maxRows".`,
+      );
+    }
+    if (name === 'export') {
+      const asked = args.limit === undefined || args.limit === null ? Infinity : Math.floor(Number(args.limit));
+      effectiveArgs = { ...args, limit: Math.min(asked, remaining) };
+    } else if (name === 'sql') {
+      const asked = args.limit === undefined || args.limit === null ? 100 : Math.floor(Number(args.limit));
+      effectiveArgs = { ...args, limit: Math.min(asked, remaining) };
+    } else if (name === 'fixture') {
+      const asked = args.max === undefined || args.max === null ? 200 : Math.floor(Number(args.max));
+      effectiveArgs = { ...args, max: Math.min(asked, remaining) };
+    } else if (name === 'record') {
+      const keyCount = Array.isArray(args.keys) ? args.keys.length : 1;
+      if (keyCount > remaining) {
+        throw new ToolError(
+          'limit',
+          `Reading ${keyCount} records would exceed the remaining session row budget on "${opened.id}" (${remaining} of ${policy.maxRows} left).`,
+        );
+      }
+      if (args.expand !== undefined && Number(args.expand) > 0 && remaining <= keyCount) {
+        effectiveArgs = { ...args, expand: 0 };
+      }
+    }
+  }
+
+  return handler({ registry, args: effectiveArgs, trusted, ...opened });
 }
 
 /**
@@ -108,6 +156,7 @@ const TOOL_PROFILES: Record<string, string[] | null> = {
     'schema_summary',
     'tables',
     'table',
+    'path',
     'find',
     'query',
     'breakdown',
@@ -125,6 +174,7 @@ const TOOL_PROFILES: Record<string, string[] | null> = {
     'schema_summary',
     'tables',
     'table',
+    'path',
     'change_impact',
     'lint',
     'anomalies',
@@ -140,6 +190,7 @@ const TOOL_PROFILES: Record<string, string[] | null> = {
     'schema_summary',
     'tables',
     'table',
+    'path',
     'order',
     'fixture',
     'record',

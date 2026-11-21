@@ -16,7 +16,18 @@ import {
   textToBreakdown,
 } from '@mistriwork/engine/host';
 import { resolveNamedView, shelfOf } from '../shelf.js';
-import { COUNT_LIMIT, COUNT_LIMIT_WORDS as bound, ENV_ARG, linkTo, READS, STATS, type Handler, ToolError } from '../toolkit.js';
+import {
+  COUNT_LIMIT,
+  COUNT_LIMIT_WORDS as bound,
+  ENV_ARG,
+  getConnectionRuntimePolicy,
+  linkTo,
+  READS,
+  sessionEgress,
+  STATS,
+  type Handler,
+  ToolError,
+} from '../toolkit.js';
 
 export const definitions = [
   {
@@ -147,8 +158,16 @@ export const definitions = [
 
 type Name = (typeof definitions)[number]['name'];
 
+function clampToSessionBudget(registry: Parameters<Handler>[0]['registry'], id: string, rawLimit: unknown): unknown {
+  const policy = getConnectionRuntimePolicy(registry, id);
+  if (policy?.maxRows === undefined) return rawLimit;
+  const remaining = Math.max(1, policy.maxRows - (sessionEgress.get(id) ?? 0));
+  const num = Number(rawLimit);
+  return Number.isFinite(num) && num >= 1 ? Math.min(Math.floor(num), remaining) : remaining;
+}
+
 export const handlers = {
-  breakdown: async ({ args, adapter, schema, id }) => {
+  breakdown: async ({ registry, args, adapter, schema, id }) => {
     if (!adapter.runBreakdown) {
       throw new ToolError('forbidden', `${schema.dialect} connections cannot group in this build.`);
     }
@@ -165,7 +184,7 @@ export const handlers = {
       schema,
       parsed.breakdown,
       {
-        limit: args.limit ?? parsed.breakdown.limit ?? 20,
+        limit: clampToSessionBudget(registry, id, args.limit ?? parsed.breakdown.limit ?? 20) as number,
         offset: args.offset,
       },
       COUNT_LIMIT,
@@ -204,7 +223,7 @@ export const handlers = {
         schema,
         viewDef,
         {
-          limit: args.limit ?? viewDef.limit ?? 20,
+          limit: clampToSessionBudget(registry, id, args.limit ?? viewDef.limit ?? 20) as number,
           offset: args.offset,
         },
         'exact',
@@ -226,7 +245,7 @@ export const handlers = {
     const parsed = parseQuery(text, { schema });
     /* The query's own `limit 3` wins over the tool's default, exactly as the
        query bar treats it — an explicit argument beats both. */
-    const limit = args.limit ?? parsed.query?.limit ?? 20;
+    const limit = clampToSessionBudget(registry, id, args.limit ?? parsed.query?.limit ?? 20) as number;
 
     /* A dotted path is not a legal single-table query and is a perfectly good
        view — the same one-way fall-through the query bar takes, so the
@@ -251,7 +270,7 @@ export const handlers = {
           schema,
           asView.view,
           {
-            limit: args.limit ?? asView.view.limit ?? 20,
+            limit: clampToSessionBudget(registry, id, args.limit ?? asView.view.limit ?? 20) as number,
             offset: args.offset,
           },
           'exact',

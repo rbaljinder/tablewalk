@@ -25,6 +25,8 @@ import {
   parseBlocklist,
   type BlocklistRules,
 } from '../blocklist.js';
+import { applyRedaction } from '../mask.js';
+import { classifyEnvTier, resolveConnectionEnvironment } from '../../shared/environments.js';
 import {
   getConnectionConfigExtras,
   getConnectionEnvMeta,
@@ -33,16 +35,35 @@ import {
   resolveConnectionEntry,
   setConnectionConfigExtras,
   setConnectionEnvMeta,
+  setRuntimePolicyResolver,
   setTopLevelConfigExtras,
+  type RuntimeConnectionPolicy,
 } from '../mcp/toolkit.js';
 import { bindShelf, runTool } from '../mcp.js';
 
 const MAX_PIPED_CONFIG_BYTES = 8 * 1024 * 1024;
+const idempotentAdapters = new WeakSet<Adapter>();
 
 export interface LeaseSpec {
   idleSeconds?: number;
   maxSeconds?: number;
   exitOnExpire?: boolean;
+}
+
+export interface EnvironmentPolicySpec {
+  writable?: boolean;
+  rows?: boolean;
+  lease?: LeaseSpec;
+  blocklist?: BlocklistRules;
+  redact?: boolean;
+  redactColumns?: string[];
+  maxRows?: number;
+}
+
+export interface CliPolicyOverrides {
+  lease?: string;
+  maxRows?: string;
+  redact?: boolean;
 }
 
 export interface LoadedVaultConfig {
@@ -376,12 +397,291 @@ function validateHiddenShape(raw: unknown, where: string): Record<string, string
   return raw as Record<string, string[]>;
 }
 
+function normalizeCliOverrides(cliOrLease?: string | CliPolicyOverrides): CliPolicyOverrides {
+  if (!cliOrLease) return {};
+  return typeof cliOrLease === 'string' ? { lease: cliOrLease } : cliOrLease;
+}
+
+export function parseMaxRows(raw: unknown, where: string): number | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const num = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw.trim()) : NaN;
+  if (!Number.isInteger(num) || num <= 0) {
+    throw new Error(`${where} must be a positive whole number of rows, not ${JSON.stringify(raw)}.`);
+  }
+  return num;
+}
+
+function parseRedactColumnsSpec(raw: unknown, where: string): string[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return undefined;
+    if (trimmed.startsWith('[')) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch (err) {
+        throw new Error(`${where} is not valid JSON: ${(err as Error).message}`);
+      }
+      return parseRedactColumnsSpec(parsed, where);
+    }
+    const cols = trimmed
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return cols.length ? cols : undefined;
+  }
+  if (!Array.isArray(raw)) {
+    throw new Error(`${where} must be an array of column names (e.g. ["internal_memo", "invoice.notes"]).`);
+  }
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string' || !item.trim()) {
+      throw new Error(`${where} entries must be non-empty strings, not ${JSON.stringify(item)}.`);
+    }
+    const clean = item.trim();
+    if (!out.includes(clean)) out.push(clean);
+  }
+  return out.length ? out : undefined;
+}
+
+function mergeRedactColumns(...lists: Array<readonly string[] | undefined>): string[] | undefined {
+  const out: string[] = [];
+  for (const list of lists) {
+    if (!list) continue;
+    for (const item of list) {
+      if (!out.includes(item)) out.push(item);
+    }
+  }
+  return out.length ? out : undefined;
+}
+
+function minDefined(...nums: Array<number | undefined>): number | undefined {
+  const valid = nums.filter((n): n is number => n !== undefined);
+  return valid.length ? Math.min(...valid) : undefined;
+}
+
+function mergeEnvironmentPolicies(base?: EnvironmentPolicySpec, override?: EnvironmentPolicySpec): EnvironmentPolicySpec | undefined {
+  if (!base && !override) return undefined;
+  const writable = override?.writable ?? base?.writable;
+  const rows = override?.rows ?? base?.rows;
+  const lease = mergeLeaseSpecs(base?.lease, override?.lease);
+  const blocklist = mergeBlocklists(base?.blocklist, override?.blocklist);
+  const redact = override?.redact ?? base?.redact;
+  const redactColumns = mergeRedactColumns(base?.redactColumns, override?.redactColumns);
+  const maxRows = minDefined(base?.maxRows, override?.maxRows);
+  return {
+    ...(writable !== undefined ? { writable } : {}),
+    ...(rows !== undefined ? { rows } : {}),
+    ...(lease ? { lease } : {}),
+    ...(blocklist ? { blocklist } : {}),
+    ...(redact !== undefined ? { redact } : {}),
+    ...(redactColumns ? { redactColumns } : {}),
+    ...(maxRows !== undefined ? { maxRows } : {}),
+  };
+}
+
+export function parseEnvironmentPolicies(raw: unknown, where: string): Map<string, EnvironmentPolicySpec> {
+  const out = new Map<string, EnvironmentPolicySpec>();
+  if (raw === undefined || raw === null) return out;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(
+      `${where}: "environments" must be an object mapping environment or tier names (e.g. "staging", "prod") to policy objects.`,
+    );
+  }
+  const allowedKeys = new Set([
+    'writable',
+    'rows',
+    'lease',
+    'blocklist',
+    'blockedTables',
+    'blockedFields',
+    'blockedColumns',
+    'redact',
+    'redactColumns',
+    'redact_columns',
+    'maxRows',
+    'max_rows',
+  ]);
+  for (const [rawKey, rawVal] of Object.entries(raw as Record<string, unknown>)) {
+    const key = rawKey.trim().toLowerCase();
+    if (!key) throw new Error(`${where}: "environments" has an empty environment name.`);
+    if (!rawVal || typeof rawVal !== 'object' || Array.isArray(rawVal)) {
+      throw new Error(`${where}: environments["${rawKey}"] must be an object.`);
+    }
+    const rec = rawVal as Record<string, unknown>;
+    const unknown = Object.keys(rec).filter((k) => !allowedKeys.has(k));
+    if (unknown.length) {
+      throw new Error(
+        `${where}: unknown key ${unknown.map((k) => `"${k}"`).join(', ')} in environments["${rawKey}"] ` +
+          '(expected writable, rows, lease, blocklist, blockedTables, blockedFields, redact, redactColumns, maxRows).',
+      );
+    }
+    const label = `${where}: environments["${rawKey}"]`;
+    if (rec.writable !== undefined && typeof rec.writable !== 'boolean') {
+      throw new Error(`${label}: "writable" must be true or false.`);
+    }
+    if (rec.rows !== undefined && typeof rec.rows !== 'boolean') {
+      throw new Error(`${label}: "rows" must be true or false.`);
+    }
+    if (rec.rows === false && rec.writable === true) {
+      throw new Error(`${label} cannot set both "writable": true and "rows": false.`);
+    }
+    if (rec.redact !== undefined && typeof rec.redact !== 'boolean') {
+      throw new Error(`${label}: "redact" must be true or false.`);
+    }
+    const lease = parseLeaseSpec(rec.lease, label);
+    const blocklist = extractConnectionBlocklist(rec, label);
+    const redactColumns = mergeRedactColumns(
+      parseRedactColumnsSpec(rec.redactColumns, `${label} "redactColumns"`),
+      parseRedactColumnsSpec(rec.redact_columns, `${label} "redact_columns"`),
+    );
+    const maxRows = parseMaxRows(rec.maxRows ?? rec.max_rows, `${label} "maxRows"`);
+    out.set(key, {
+      ...(rec.writable !== undefined ? { writable: rec.writable } : {}),
+      ...(rec.rows !== undefined ? { rows: rec.rows } : {}),
+      ...(lease ? { lease } : {}),
+      ...(blocklist ? { blocklist } : {}),
+      ...(rec.redact !== undefined ? { redact: rec.redact } : {}),
+      ...(redactColumns ? { redactColumns } : {}),
+      ...(maxRows !== undefined ? { maxRows } : {}),
+    });
+  }
+  return out;
+}
+
+function resolveEnvPolicyFromMap(
+  map: ReadonlyMap<string, EnvironmentPolicySpec>,
+  conn: { id: string; name: string; url: string; database?: string; env?: string },
+): EnvironmentPolicySpec | undefined {
+  if (!map.size) return undefined;
+  const detail = redact(conn.url);
+  const envInfo = resolveConnectionEnvironment({
+    id: conn.id,
+    name: conn.name,
+    detail,
+    database: conn.database,
+    env: conn.env,
+  });
+  const tier = envInfo.tier !== 'other' ? envInfo.tier : classifyEnvTier(envInfo.env, detail);
+  const tierPol = tier !== 'other' ? map.get(tier) : undefined;
+  const exactKey = envInfo.env?.trim().toLowerCase();
+  const exactPol = exactKey && exactKey !== tier ? map.get(exactKey) : undefined;
+  return mergeEnvironmentPolicies(tierPol, exactPol);
+}
+
+function parseCsvOrJsonList(raw: string, where: string): unknown {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+    try {
+      return JSON.parse(trimmed);
+    } catch (err) {
+      throw new Error(`${where} is not valid JSON: ${(err as Error).message}`);
+    }
+  }
+  return trimmed
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function parseEnvAndCliPolicies(
+  env: NodeJS.ProcessEnv | undefined,
+  cli: CliPolicyOverrides,
+): {
+  envBlocklist?: BlocklistRules;
+  envLease?: LeaseSpec;
+  forceRedact?: boolean;
+  envRedactColumns?: string[];
+  envMaxRows?: number;
+} {
+  const source = env ?? process.env;
+  let envBlocklist: BlocklistRules | undefined;
+  if (source.TABLEWALK_BLOCKLIST?.trim()) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(source.TABLEWALK_BLOCKLIST.trim());
+    } catch (err) {
+      throw new Error(`TABLEWALK_BLOCKLIST is not valid JSON: ${(err as Error).message}`);
+    }
+    envBlocklist = parseBlocklist(parsed, 'TABLEWALK_BLOCKLIST');
+  }
+  const tablesRaw = source.TABLEWALK_BLOCKED_TABLES?.trim()
+    ? parseCsvOrJsonList(source.TABLEWALK_BLOCKED_TABLES, 'TABLEWALK_BLOCKED_TABLES')
+    : undefined;
+  const fieldsRaw = source.TABLEWALK_BLOCKED_FIELDS?.trim()
+    ? parseCsvOrJsonList(source.TABLEWALK_BLOCKED_FIELDS, 'TABLEWALK_BLOCKED_FIELDS')
+    : undefined;
+  const colsRaw = source.TABLEWALK_BLOCKED_COLUMNS?.trim()
+    ? parseCsvOrJsonList(source.TABLEWALK_BLOCKED_COLUMNS, 'TABLEWALK_BLOCKED_COLUMNS')
+    : undefined;
+  if (tablesRaw !== undefined || fieldsRaw !== undefined || colsRaw !== undefined) {
+    envBlocklist = extractConnectionBlocklist(
+      {
+        ...(tablesRaw !== undefined ? { blockedTables: tablesRaw } : {}),
+        ...(fieldsRaw !== undefined ? { blockedFields: fieldsRaw } : {}),
+        ...(colsRaw !== undefined ? { blockedColumns: colsRaw } : {}),
+      },
+      'environment variables',
+      envBlocklist,
+    );
+  }
+
+  const envLeaseFromVar = source.TABLEWALK_LEASE?.trim()
+    ? (() => {
+        const raw = source.TABLEWALK_LEASE.trim();
+        if (raw.startsWith('{')) {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(raw);
+          } catch (err) {
+            throw new Error(`TABLEWALK_LEASE is not valid JSON: ${(err as Error).message}`);
+          }
+          return parseLeaseSpec(parsed, 'TABLEWALK_LEASE');
+        }
+        return parseLeaseSpec(raw, 'TABLEWALK_LEASE');
+      })()
+    : undefined;
+  const cliLease = cli.lease ? parseLeaseSpec(cli.lease, '--lease') : undefined;
+  const envLease = mergeLeaseSpecs(envLeaseFromVar, cliLease);
+
+  const redactVar = source.TABLEWALK_REDACT?.trim().toLowerCase();
+  if (redactVar && !['1', 'true', 'yes', '0', 'false', 'no'].includes(redactVar)) {
+    throw new Error(`TABLEWALK_REDACT must be 1/true or 0/false, not ${JSON.stringify(source.TABLEWALK_REDACT)}.`);
+  }
+  const forceRedact = cli.redact === true || redactVar === '1' || redactVar === 'true' || redactVar === 'yes' ? true : undefined;
+  const envRedactColumns = source.TABLEWALK_REDACT_COLUMNS?.trim()
+    ? parseRedactColumnsSpec(source.TABLEWALK_REDACT_COLUMNS, 'TABLEWALK_REDACT_COLUMNS')
+    : undefined;
+
+  const envMaxRows = minDefined(
+    source.TABLEWALK_MAX_ROWS?.trim() ? parseMaxRows(source.TABLEWALK_MAX_ROWS, 'TABLEWALK_MAX_ROWS') : undefined,
+    cli.maxRows !== undefined ? parseMaxRows(cli.maxRows, '--max-rows') : undefined,
+  );
+
+  return {
+    ...(envBlocklist ? { envBlocklist } : {}),
+    ...(envLease ? { envLease } : {}),
+    ...(forceRedact ? { forceRedact } : {}),
+    ...(envRedactColumns ? { envRedactColumns } : {}),
+    ...(envMaxRows !== undefined ? { envMaxRows } : {}),
+  };
+}
+
 export interface PolicyRegistryOptions {
   environment?: NodeJS.ProcessEnv;
   defaultBlocklist?: BlocklistRules;
   blocklists?: Map<string, BlocklistRules>;
   connectionLeases?: Map<string, LeaseSpec>;
   sessionLease?: LeaseSpec;
+  environmentPolicies?: Map<string, EnvironmentPolicySpec>;
+  defaultRedact?: boolean;
+  forceRedact?: boolean;
+  defaultRedactColumns?: string[];
+  connectionRedacts?: Map<string, { enabled: boolean; columns?: string[] }>;
+  defaultMaxRows?: number;
+  connectionMaxRows?: Map<string, number>;
   mcpMode?: boolean;
 }
 
@@ -389,29 +689,38 @@ interface ManagedSlot {
   rawAdapter: Adapter;
   wrapped: Adapter;
   schema: DatabaseSchema;
+  policySignature: string;
   evicted: boolean;
 }
 
 /**
- * First-class `Registry` subclass enforcing table/field blocklists and
- * connection leases across every route to an adapter (`open`, `refresh`,
- * `dialedAdapter`, `onAdapterDialed`, `lease`, `update`, `remove`, `closeAll`,
- * `list`, `poolStats`, and `add`).
+ * First-class `Registry` subclass enforcing table/field blocklists, always-on
+ * row redaction, environment-tier policies, session row caps, and connection
+ * leases across every route to an adapter (`open`, `refresh`, `dialedAdapter`,
+ * `onAdapterDialed`, `lease`, `update`, `remove`, `closeAll`, `list`,
+ * `poolStats`, and `add`).
  *
  * Key invariants:
- * - Default top-level `blocklist` and `sessionLease` apply dynamically via
- *   `rulesFor(id)` and `leaseFor(id)` to connections added after construction
- *   (CLI positional/`--db` targets, `--demo`, and browser session connections).
+ * - Default top-level policies, `environments.<env>` policies, and CLI/env-var
+ *   policies apply dynamically to connections added after construction (CLI
+ *   positional/`--db` targets, `--demo`, and browser session connections).
  * - Idle eviction closes the underlying adapter handle in place (`slot.evicted = true`)
  *   without calling `remove`/`add`, so `active` never moves even momentarily.
- * - Both `applyBlocklist` and `wrapLeasedAdapter` build explicit allowlist
- *   `Adapter` facades with zero prototype or unlisted-method inheritance.
+ * - `applyBlocklist`, `applyRedaction`, and `wrapLeasedAdapter` all build explicit
+ *   allowlist `Adapter` facades with zero prototype or unlisted-method inheritance.
  */
 export class PolicyRegistry extends Registry {
   private readonly defaultBlocklist?: BlocklistRules;
   private readonly blocklists = new Map<string, BlocklistRules>();
   private readonly connectionLeases = new Map<string, LeaseSpec>();
   private readonly sessionLease?: LeaseSpec;
+  private readonly environmentPolicies = new Map<string, EnvironmentPolicySpec>();
+  private readonly defaultRedact?: boolean;
+  private readonly forceRedact: boolean;
+  private readonly defaultRedactColumns?: string[];
+  private readonly connectionRedacts = new Map<string, { enabled: boolean; columns?: string[] }>();
+  private readonly defaultMaxRows?: number;
+  private readonly connectionMaxRows = new Map<string, number>();
   private readonly mcpMode: boolean;
 
   private readonly slots = new Map<string, ManagedSlot>();
@@ -430,17 +739,28 @@ export class PolicyRegistry extends Registry {
     super(options.environment ? { environment: options.environment } : {});
     this.defaultBlocklist = options.defaultBlocklist;
     if (options.blocklists) {
-      for (const [id, rules] of options.blocklists) {
-        this.blocklists.set(id, rules);
-      }
+      for (const [id, rules] of options.blocklists) this.blocklists.set(id, rules);
     }
     if (options.connectionLeases) {
-      for (const [id, lease] of options.connectionLeases) {
-        this.connectionLeases.set(id, lease);
-      }
+      for (const [id, lease] of options.connectionLeases) this.connectionLeases.set(id, lease);
+    }
+    if (options.environmentPolicies) {
+      for (const [envKey, pol] of options.environmentPolicies) this.environmentPolicies.set(envKey, pol);
+    }
+    this.defaultRedact = options.defaultRedact;
+    this.forceRedact = options.forceRedact === true;
+    this.defaultRedactColumns = options.defaultRedactColumns;
+    if (options.connectionRedacts) {
+      for (const [id, spec] of options.connectionRedacts) this.connectionRedacts.set(id, spec);
+    }
+    this.defaultMaxRows = options.defaultMaxRows;
+    if (options.connectionMaxRows) {
+      for (const [id, max] of options.connectionMaxRows) this.connectionMaxRows.set(id, max);
     }
     this.sessionLease = options.sessionLease;
     this.mcpMode = options.mcpMode === true;
+
+    setRuntimePolicyResolver(this, (id) => this.runtimePolicyFor(id));
 
     if (this.sessionLease?.maxSeconds) {
       const maxSec = this.sessionLease.maxSeconds;
@@ -478,9 +798,29 @@ export class PolicyRegistry extends Registry {
       return;
     }
     this.connectionLeases.set(id, lease);
+    this.syncPoolIdle(id);
+  }
+
+  setConnectionRedact(id: string, spec: { enabled: boolean; columns?: string[] } | undefined): void {
+    if (!spec) {
+      this.connectionRedacts.delete(id);
+      return;
+    }
+    this.connectionRedacts.set(id, spec);
+  }
+
+  setConnectionMaxRows(id: string, maxRows: number | undefined): void {
+    if (maxRows === undefined) {
+      this.connectionMaxRows.delete(id);
+      return;
+    }
+    this.connectionMaxRows.set(id, maxRows);
+  }
+
+  private syncPoolIdle(id: string): void {
     const cfg = this.configOf(id);
     const effIdle = this.leaseFor(id)?.idleSeconds ?? this.leaseFor(id)?.maxSeconds;
-    if (cfg && effIdle !== undefined && (/^postgres(ql)?:\/\//i.test(cfg.url) || cfg.url.includes('$'))) {
+    if (cfg && !cfg.http && effIdle !== undefined && (/^postgres(ql)?:\/\//i.test(cfg.url) || cfg.url.includes('$'))) {
       cfg.pool = {
         ...(cfg.pool ?? {}),
         minIdle: 0,
@@ -489,12 +829,54 @@ export class PolicyRegistry extends Registry {
     }
   }
 
+  private envPolicyFor(id: string): EnvironmentPolicySpec | undefined {
+    if (!this.environmentPolicies.size) return undefined;
+    const cfg = this.configOf(id);
+    if (!cfg) return undefined;
+    const meta = getConnectionEnvMeta(this, id);
+    return resolveEnvPolicyFromMap(this.environmentPolicies, {
+      id,
+      name: cfg.name,
+      url: cfg.url,
+      database: meta?.database,
+      env: meta?.env,
+    });
+  }
+
   private rulesFor(id: string): BlocklistRules | undefined {
-    return mergeBlocklists(this.defaultBlocklist, this.blocklists.get(id));
+    const withEnv = mergeBlocklists(this.defaultBlocklist, this.envPolicyFor(id)?.blocklist);
+    return mergeBlocklists(withEnv, this.blocklists.get(id));
+  }
+
+  private ownLeaseFor(id: string): LeaseSpec | undefined {
+    return mergeLeaseSpecs(this.envPolicyFor(id)?.lease, this.connectionLeases.get(id));
   }
 
   private leaseFor(id: string): LeaseSpec | undefined {
-    return mergeLeaseSpecs(this.sessionLease, this.connectionLeases.get(id));
+    return mergeLeaseSpecs(this.sessionLease, this.ownLeaseFor(id));
+  }
+
+  private redactFor(id: string): { columns?: string[] } | undefined {
+    const envPol = this.envPolicyFor(id);
+    const own = this.connectionRedacts.get(id);
+    const enabled = this.forceRedact || (own !== undefined ? own.enabled : (envPol?.redact ?? this.defaultRedact ?? false));
+    if (!enabled) return undefined;
+    const columns = mergeRedactColumns(this.defaultRedactColumns, envPol?.redactColumns, own?.columns);
+    return columns ? { columns } : {};
+  }
+
+  private maxRowsFor(id: string): number | undefined {
+    return minDefined(this.defaultMaxRows, this.envPolicyFor(id)?.maxRows, this.connectionMaxRows.get(id));
+  }
+
+  private runtimePolicyFor(id: string): RuntimeConnectionPolicy | undefined {
+    const redact = this.redactFor(id);
+    const maxRows = this.maxRowsFor(id);
+    if (!redact && maxRows === undefined) return undefined;
+    return {
+      ...(redact ? { redactsRows: true, ...(redact.columns ? { redactColumns: redact.columns } : {}) } : {}),
+      ...(maxRows !== undefined ? { maxRows } : {}),
+    };
   }
 
   private isExpired(id: string): boolean {
@@ -506,7 +888,7 @@ export class PolicyRegistry extends Registry {
       throw new Refusal(`Connection lease expired after ${this.sessionLease?.maxSeconds}s; start a new session to reconnect.`);
     }
     if (this.expiredIds.has(id)) {
-      const own = this.connectionLeases.get(id);
+      const own = this.ownLeaseFor(id);
       throw new Refusal(`Connection "${id}" lease expired after ${own?.maxSeconds}s.`);
     }
   }
@@ -578,7 +960,7 @@ export class PolicyRegistry extends Registry {
   }
 
   private ensureMaxTimer(id: string): void {
-    const own = this.connectionLeases.get(id);
+    const own = this.ownLeaseFor(id);
     if (!own?.maxSeconds || this.connMaxTimers.has(id)) return;
     const timer = setTimeout(
       () => {
@@ -658,60 +1040,65 @@ export class PolicyRegistry extends Registry {
   }
 
   private decorateOpened(id: string, rawAdapter: Adapter, rawSchema: DatabaseSchema): { adapter: Adapter; schema: DatabaseSchema } {
+    const rules = this.rulesFor(id);
+    const redactSpec = this.redactFor(id);
+    const leaseSpec = this.leaseFor(id);
+    const policySignature = JSON.stringify({ rules: rules ?? null, redact: redactSpec ?? null, lease: leaseSpec ?? null });
+
     const hit = this.slots.get(id);
-    if (hit && !hit.evicted && hit.rawAdapter === rawAdapter) {
+    if (hit && !hit.evicted && hit.rawAdapter === rawAdapter && hit.policySignature === policySignature) {
       this.scheduleIdle(id);
       return { adapter: hit.wrapped, schema: hit.schema };
     }
 
-    /* Make `rawAdapter.close()` idempotent so in-place idle eviction followed
-       later by `super.refresh(id)` or `super.closeAll()` never double-closes
-       a `node:sqlite` handle. */
-    let rawClosed = false;
-    const origClose = rawAdapter.close.bind(rawAdapter);
-    rawAdapter.close = async () => {
-      if (rawClosed) return;
-      rawClosed = true;
-      await origClose();
-    };
+    /* Make `rawAdapter.close()` idempotent once per underlying adapter so in-place
+       idle eviction followed later by `super.refresh(id)` or `super.closeAll()`
+       never double-closes a `node:sqlite` handle. */
+    if (!idempotentAdapters.has(rawAdapter)) {
+      idempotentAdapters.add(rawAdapter);
+      let rawClosed = false;
+      const origClose = rawAdapter.close.bind(rawAdapter);
+      rawAdapter.close = async () => {
+        if (rawClosed) return;
+        rawClosed = true;
+        await origClose();
+      };
+    }
 
     const cfg = this.configOf(id);
-    const rules = this.rulesFor(id);
+    const label = cfg?.name ?? id;
     const blocked =
-      rules && hasBlocklistRules(rules)
-        ? applyBlocklist(rawAdapter, rawSchema, cfg?.name ?? id, rules)
-        : { adapter: rawAdapter, schema: rawSchema };
-    const leased = this.wrapLeasedAdapter(id, blocked.adapter);
-    this.slots.set(id, { rawAdapter, wrapped: leased, schema: blocked.schema, evicted: false });
+      rules && hasBlocklistRules(rules) ? applyBlocklist(rawAdapter, rawSchema, label, rules) : { adapter: rawAdapter, schema: rawSchema };
+    const redacted = redactSpec ? applyRedaction(blocked.adapter, blocked.schema, label, redactSpec) : blocked;
+    const leased = this.wrapLeasedAdapter(id, redacted.adapter);
+    this.slots.set(id, { rawAdapter, wrapped: leased, schema: redacted.schema, policySignature, evicted: false });
     this.ensureMaxTimer(id);
     this.scheduleIdle(id);
-    return { adapter: leased, schema: blocked.schema };
+    return { adapter: leased, schema: redacted.schema };
   }
 
   override add(config: Parameters<Registry['add']>[0], options?: Parameters<Registry['add']>[1]): ReturnType<Registry['add']> {
     const added = super.add(config, options);
-    const effLease = this.leaseFor(added.id);
-    const effIdle = effLease?.idleSeconds ?? effLease?.maxSeconds;
-    if (effIdle !== undefined && !added.http && (/^postgres(ql)?:\/\//i.test(added.url) || added.url.includes('$'))) {
-      added.pool = {
-        ...(added.pool ?? {}),
-        minIdle: 0,
-        idleSeconds: Math.max(1, Math.ceil(Math.min(added.pool?.idleSeconds ?? effIdle, effIdle))),
-      };
+    if (added.source !== 'config') {
+      const envPol = this.envPolicyFor(added.id);
+      if (envPol?.rows === false && !added.writable) {
+        added.rows = false;
+      }
     }
+    this.syncPoolIdle(added.id);
     return added;
   }
 
   override onAdapterDialed(hook: (id: string, adapter: Adapter) => void): void {
     super.onAdapterDialed((id, rawAdapter) => {
-      /* Never expose an unwrapped adapter beneath a blocklist to dial listeners. */
-      if (this.rulesFor(id)) return;
+      /* Never expose an unwrapped adapter beneath a blocklist or redaction policy to dial listeners. */
+      if (this.rulesFor(id) || this.redactFor(id)) return;
       hook(id, rawAdapter);
     });
   }
 
   override dialedAdapter(id: string): Adapter | undefined {
-    if (this.rulesFor(id) || this.slots.get(id)?.evicted || this.isExpired(id)) {
+    if (this.rulesFor(id) || this.redactFor(id) || this.slots.get(id)?.evicted || this.isExpired(id)) {
       return undefined;
     }
     return super.dialedAdapter(id);
@@ -800,6 +1187,8 @@ export class PolicyRegistry extends Registry {
     this.slots.delete(id);
     this.blocklists.delete(id);
     this.connectionLeases.delete(id);
+    this.connectionRedacts.delete(id);
+    this.connectionMaxRows.delete(id);
     await super.remove(id);
   }
 
@@ -812,6 +1201,8 @@ export class PolicyRegistry extends Registry {
   override list(): ReturnType<Registry['list']> {
     return super.list().map((item) => {
       const rules = this.rulesFor(item.id);
+      const redactSpec = this.redactFor(item.id);
+      const maxRows = this.maxRowsFor(item.id);
       const slot = this.slots.get(item.id);
       const evictedOrExpired = Boolean(slot?.evicted) || this.isExpired(item.id);
       return {
@@ -821,8 +1212,10 @@ export class PolicyRegistry extends Registry {
           : slot
             ? { connected: true, tables: slot.schema.tables.length }
             : {}),
-        ...(rules ? { hidesColumns: true } : {}),
-      };
+        ...(rules || redactSpec ? { hidesColumns: true } : {}),
+        ...(redactSpec ? { redactsRows: true } : {}),
+        ...(maxRows !== undefined ? { maxRows } : {}),
+      } as ReturnType<Registry['list']>[number];
     });
   }
 
@@ -841,16 +1234,18 @@ export class PolicyRegistry extends Registry {
 
 /**
  * Load piped/FIFO/`TABLEWALK_CONFIG_JSON` config into a new `Registry` (using
- * `PolicyRegistry` whenever blocklists or leases apply), including in-memory
- * secrets (`env` / `secrets` / `dotenv`), `blocklist` rules, and `lease`
- * settings. Never writes secrets or config to disk.
+ * `PolicyRegistry` whenever blocklists, redaction, row caps, environment-tier
+ * policies, or leases apply), including in-memory secrets (`env` / `secrets` /
+ * `dotenv`). Never writes secrets or config to disk.
  */
 export async function loadPipedVaultConfig(
   configArg: string | undefined,
   mcpMode: boolean,
-  cliLeaseRaw?: string,
+  cliOrLease?: string | CliPolicyOverrides,
+  splitStdinStream?: boolean,
 ): Promise<LoadedVaultConfig> {
-  const { text, where, remainingStdin } = await readRawVaultSource(configArg, mcpMode);
+  const cli = normalizeCliOverrides(cliOrLease);
+  const { text, where, remainingStdin } = await readRawVaultSource(configArg, splitStdinStream ?? mcpMode);
   const trimmed = text.trim();
   if (!trimmed) {
     throw new Error(`${where} is empty — expected a JSON config (or .env variables alongside --db).`);
@@ -863,9 +1258,22 @@ export async function loadPipedVaultConfig(
       throw new Error(`${where} is neither valid JSON nor KEY=VALUE environment lines.`);
     }
     const environment = Object.freeze({ ...process.env, ...vars });
-    const cliLease = cliLeaseRaw ? parseLeaseSpec(cliLeaseRaw, '--lease') : undefined;
-    const registry = cliLease ? new PolicyRegistry({ environment, sessionLease: cliLease, mcpMode }) : new Registry({ environment });
-    return { registry, views: [], queries: [], pages: [], layouts: [], lease: cliLease, remainingStdin };
+    const envPol = parseEnvAndCliPolicies(environment, cli);
+    const hasPolicy = Boolean(
+      envPol.envBlocklist || envPol.envLease || envPol.forceRedact || envPol.envRedactColumns || envPol.envMaxRows !== undefined,
+    );
+    const registry = hasPolicy
+      ? new PolicyRegistry({
+          environment,
+          defaultBlocklist: envPol.envBlocklist,
+          sessionLease: envPol.envLease,
+          forceRedact: envPol.forceRedact,
+          defaultRedactColumns: envPol.envRedactColumns,
+          defaultMaxRows: envPol.envMaxRows,
+          mcpMode,
+        })
+      : new Registry({ environment });
+    return { registry, views: [], queries: [], pages: [], layouts: [], lease: envPol.envLease, remainingStdin };
   }
 
   let parsedRaw: unknown;
@@ -906,6 +1314,11 @@ export async function loadPipedVaultConfig(
         ...(doc.blockedTables !== undefined ? { blockedTables: doc.blockedTables } : {}),
         ...(doc.blockedFields !== undefined ? { blockedFields: doc.blockedFields } : {}),
         ...(doc.blockedColumns !== undefined ? { blockedColumns: doc.blockedColumns } : {}),
+        ...(doc.redact !== undefined ? { redact: doc.redact } : {}),
+        ...(doc.redactColumns !== undefined ? { redactColumns: doc.redactColumns } : {}),
+        ...(doc.redact_columns !== undefined ? { redact_columns: doc.redact_columns } : {}),
+        ...(doc.maxRows !== undefined ? { maxRows: doc.maxRows } : {}),
+        ...(doc.max_rows !== undefined ? { max_rows: doc.max_rows } : {}),
       },
     ];
     if (typeof doc.env === 'string') delete doc.env;
@@ -927,10 +1340,21 @@ export async function loadPipedVaultConfig(
         })
       : undefined;
 
-  const defaultBlocklist = parseBlocklist(doc.blocklist, where);
+  const envPol = parseEnvAndCliPolicies(environment ?? process.env, cli);
+  const environmentPolicies = parseEnvironmentPolicies(doc.environments, where);
+  const defaultBlocklist = mergeBlocklists(parseBlocklist(doc.blocklist, where), envPol.envBlocklist);
   const topLease = parseLeaseSpec(doc.lease, where);
-  const cliLease = cliLeaseRaw ? parseLeaseSpec(cliLeaseRaw, '--lease') : undefined;
-  const sessionLease = mergeLeaseSpecs(topLease, cliLease);
+  const sessionLease = mergeLeaseSpecs(topLease, envPol.envLease);
+  if (doc.redact !== undefined && typeof doc.redact !== 'boolean') {
+    throw new Error(`${where}: "redact" must be true or false.`);
+  }
+  const defaultRedact = typeof doc.redact === 'boolean' ? doc.redact : undefined;
+  const defaultRedactColumns = mergeRedactColumns(
+    parseRedactColumnsSpec(doc.redactColumns, `${where} "redactColumns"`),
+    parseRedactColumnsSpec(doc.redact_columns, `${where} "redact_columns"`),
+    envPol.envRedactColumns,
+  );
+  const defaultMaxRows = minDefined(parseMaxRows(doc.maxRows ?? doc.max_rows, `${where} "maxRows"`), envPol.envMaxRows);
 
   const rawConns = doc.connections;
   if (rawConns !== undefined && !Array.isArray(rawConns)) {
@@ -944,6 +1368,8 @@ export async function loadPipedVaultConfig(
     extras?: Record<string, unknown>;
     blocklist?: BlocklistRules;
     lease?: LeaseSpec;
+    redactSpec?: { enabled: boolean; columns?: string[] };
+    maxRows?: number;
   }> = [];
 
   const cwd = process.cwd();
@@ -958,32 +1384,58 @@ export async function loadPipedVaultConfig(
       throw new Error(`${where}: connection ${i + 1} has no "url".`);
     }
     const name = typeof c.name === 'string' && c.name.trim() ? c.name.trim() : redact(c.url.trim());
+    const connWhere = `${where}: connection "${name}"`;
     if (c.writable !== undefined && typeof c.writable !== 'boolean') {
-      throw new Error(`${where}: connection "${name}" has "writable": ${JSON.stringify(c.writable)}. It must be true or false.`);
+      throw new Error(`${connWhere} has "writable": ${JSON.stringify(c.writable)}. It must be true or false.`);
     }
     if (c.rows !== undefined && typeof c.rows !== 'boolean') {
-      throw new Error(`${where}: connection "${name}" has "rows": ${JSON.stringify(c.rows)}. It must be true or false.`);
+      throw new Error(`${connWhere} has "rows": ${JSON.stringify(c.rows)}. It must be true or false.`);
     }
-    if (c.rows === false && c.writable === true) {
-      throw new Error(`${where}: connection "${name}" is both "writable" and "rows": false. Drop one of them.`);
+    if (c.redact !== undefined && typeof c.redact !== 'boolean') {
+      throw new Error(`${connWhere} has "redact": ${JSON.stringify(c.redact)}. It must be true or false.`);
     }
-    const hidden = c.hidden !== undefined ? validateHiddenShape(c.hidden, `${where}: connection "${name}"`) : undefined;
-    const connBlocklist = extractConnectionBlocklist(c, `${where}: connection "${name}"`, defaultBlocklist);
-    const ownLease = parseLeaseSpec(c.lease, `${where}: connection "${name}"`);
-    if (connBlocklist || ownLease) anyConnPolicy = true;
+    const database = typeof c.database === 'string' ? c.database.trim() : typeof c.group === 'string' ? c.group.trim() : undefined;
+    const envName = typeof c.env === 'string' ? c.env.trim() : typeof c.environment === 'string' ? c.environment.trim() : undefined;
+    const matchedEnvPol = resolveEnvPolicyFromMap(environmentPolicies, { id: name, name, url: c.url, database, env: envName });
+
+    const effectiveWritable = c.writable !== undefined ? c.writable === true : matchedEnvPol?.writable === true;
+    const effectiveRows = c.rows !== undefined ? c.rows : matchedEnvPol?.rows;
+    if (effectiveRows === false && effectiveWritable === true) {
+      throw new Error(`${connWhere} is both "writable" and "rows": false. Drop one of them.`);
+    }
+
+    const hidden = c.hidden !== undefined ? validateHiddenShape(c.hidden, connWhere) : undefined;
+    const connBlocklist = extractConnectionBlocklist(c, connWhere);
+    const ownLease = parseLeaseSpec(c.lease, connWhere);
+    const ownRedactCols = mergeRedactColumns(
+      parseRedactColumnsSpec(c.redactColumns, `${connWhere} "redactColumns"`),
+      parseRedactColumnsSpec(c.redact_columns, `${connWhere} "redact_columns"`),
+    );
+    const redactSpec =
+      c.redact !== undefined || ownRedactCols !== undefined
+        ? {
+            enabled: c.redact !== undefined ? c.redact : Boolean(ownRedactCols?.length),
+            ...(ownRedactCols ? { columns: ownRedactCols } : {}),
+          }
+        : undefined;
+    const ownMaxRows = parseMaxRows(c.maxRows ?? c.max_rows, `${connWhere} "maxRows"`);
+    if (connBlocklist || ownLease || redactSpec || ownMaxRows !== undefined) anyConnPolicy = true;
 
     const rawPool = c.pool && typeof c.pool === 'object' && !Array.isArray(c.pool) ? { ...(c.pool as Record<string, number>) } : undefined;
     const isHttp = c.kind === 'http' && c.http && typeof c.http === 'object';
     const located = isHttp ? c.url : sqliteTargetFrom(c.url, cwd);
 
-    const database = typeof c.database === 'string' ? c.database.trim() : typeof c.group === 'string' ? c.group.trim() : undefined;
-    const envName = typeof c.env === 'string' ? c.env.trim() : typeof c.environment === 'string' ? c.environment.trim() : undefined;
     const hasExtras =
       c.blocklist !== undefined ||
       c.blockedTables !== undefined ||
       c.blockedFields !== undefined ||
       c.blockedColumns !== undefined ||
-      c.lease !== undefined;
+      c.lease !== undefined ||
+      c.redact !== undefined ||
+      c.redactColumns !== undefined ||
+      c.redact_columns !== undefined ||
+      c.maxRows !== undefined ||
+      c.max_rows !== undefined;
 
     parsedEntries.push({
       addArg: {
@@ -991,8 +1443,8 @@ export async function loadPipedVaultConfig(
         url: located,
         ...(located !== c.url ? { writtenUrl: c.url } : {}),
         ...(Array.isArray(c.schemas) ? { schemas: c.schemas.map(String) } : {}),
-        writable: c.writable === true,
-        rows: c.rows === false ? false : undefined,
+        writable: effectiveWritable,
+        rows: effectiveRows === false ? false : undefined,
         ...(hidden ? { hidden } : {}),
         ...(rawPool ? { pool: rawPool } : {}),
         ...(Array.isArray(c.replicas) ? { replicas: c.replicas.map(String) } : {}),
@@ -1009,22 +1461,61 @@ export async function loadPipedVaultConfig(
             ...(c.blockedFields !== undefined ? { blockedFields: c.blockedFields } : {}),
             ...(c.blockedColumns !== undefined ? { blockedColumns: c.blockedColumns } : {}),
             ...(c.lease !== undefined ? { lease: c.lease } : {}),
+            ...(c.redact !== undefined ? { redact: c.redact } : {}),
+            ...(c.redactColumns !== undefined ? { redactColumns: c.redactColumns } : {}),
+            ...(c.redact_columns !== undefined ? { redact_columns: c.redact_columns } : {}),
+            ...(c.maxRows !== undefined ? { maxRows: c.maxRows } : c.max_rows !== undefined ? { maxRows: c.max_rows } : {}),
           }
         : undefined,
       blocklist: connBlocklist,
       lease: ownLease,
+      redactSpec,
+      maxRows: ownMaxRows,
     });
   }
 
-  const usePolicyRegistry = Boolean(defaultBlocklist || sessionLease || anyConnPolicy);
+  const usePolicyRegistry = Boolean(
+    defaultBlocklist ||
+    sessionLease ||
+    environmentPolicies.size > 0 ||
+    defaultRedact !== undefined ||
+    envPol.forceRedact ||
+    defaultRedactColumns ||
+    defaultMaxRows !== undefined ||
+    anyConnPolicy,
+  );
   const registry: Registry = usePolicyRegistry
-    ? new PolicyRegistry({ environment, defaultBlocklist, sessionLease, mcpMode })
+    ? new PolicyRegistry({
+        environment,
+        defaultBlocklist,
+        sessionLease,
+        environmentPolicies,
+        defaultRedact,
+        forceRedact: envPol.forceRedact,
+        defaultRedactColumns,
+        defaultMaxRows,
+        mcpMode,
+      })
     : new Registry(environment ? { environment } : {});
 
-  if (doc.blocklist !== undefined || doc.lease !== undefined) {
+  if (
+    doc.blocklist !== undefined ||
+    doc.lease !== undefined ||
+    doc.environments !== undefined ||
+    doc.redact !== undefined ||
+    doc.redactColumns !== undefined ||
+    doc.redact_columns !== undefined ||
+    doc.maxRows !== undefined ||
+    doc.max_rows !== undefined
+  ) {
     setTopLevelConfigExtras(registry, {
       ...(doc.blocklist !== undefined ? { blocklist: doc.blocklist } : {}),
       ...(doc.lease !== undefined ? { lease: doc.lease } : {}),
+      ...(doc.environments !== undefined ? { environments: doc.environments } : {}),
+      ...(doc.redact !== undefined ? { redact: doc.redact } : {}),
+      ...(doc.redactColumns !== undefined ? { redactColumns: doc.redactColumns } : {}),
+      ...(doc.redact_columns !== undefined ? { redact_columns: doc.redact_columns } : {}),
+      ...(doc.maxRows !== undefined ? { maxRows: doc.maxRows } : doc.max_rows !== undefined ? { maxRows: doc.max_rows } : {}),
     });
   }
 
@@ -1042,6 +1533,10 @@ export async function loadPipedVaultConfig(
     if (registry instanceof PolicyRegistry) {
       if (entry.blocklist) registry.setConnectionBlocklist(added.id, entry.blocklist);
       if (entry.lease) registry.setConnectionLease(added.id, entry.lease);
+      if (entry.redactSpec) registry.setConnectionRedact(added.id, entry.redactSpec);
+      if (entry.maxRows !== undefined) registry.setConnectionMaxRows(added.id, entry.maxRows);
+      /* Re-sync pool idle now that explicit `env` metadata has been attached to `added.id`. */
+      if (entry.database || entry.envName) registry.setConnectionLease(added.id, entry.lease);
     }
   }
 
@@ -1075,16 +1570,18 @@ export async function loadPipedVaultConfig(
 
 /**
  * Upgrade a disk-loaded `Registry` (before any connection has been opened) into
- * a `PolicyRegistry` carrying top-level and per-connection `blocklist` rules,
- * `lease` settings, and isolated `secrets`/`dotenv` environment variables.
+ * a `PolicyRegistry` carrying top-level, environment-tier, env-var, and
+ * per-connection policies (`blocklist`, `redact`, `maxRows`, `lease`, and
+ * isolated `secrets`/`dotenv` variables).
  */
 export function applyExtendedDiskConfig(
   baseRegistry: Registry,
   rawConfigText: string | undefined,
   where: string,
   mcpMode: boolean,
-  cliLeaseRaw?: string,
+  cliOrLease?: string | CliPolicyOverrides,
 ): { registry: Registry; active?: string; only?: boolean; lazy?: boolean; lease?: LeaseSpec } {
+  const cli = normalizeCliOverrides(cliOrLease);
   let doc: Record<string, unknown> = {};
   if (rawConfigText) {
     try {
@@ -1110,13 +1607,27 @@ export function applyExtendedDiskConfig(
         })
       : baseRegistry.environment;
 
-  const defaultBlocklist = parseBlocklist(doc.blocklist, where);
+  const envPol = parseEnvAndCliPolicies(environment ?? process.env, cli);
+  const environmentPolicies = parseEnvironmentPolicies(doc.environments, where);
+  const defaultBlocklist = mergeBlocklists(parseBlocklist(doc.blocklist, where), envPol.envBlocklist);
   const topLease = parseLeaseSpec(doc.lease, where);
-  const cliLease = cliLeaseRaw ? parseLeaseSpec(cliLeaseRaw, '--lease') : undefined;
-  const sessionLease = mergeLeaseSpecs(topLease, cliLease);
+  const sessionLease = mergeLeaseSpecs(topLease, envPol.envLease);
+  if (doc.redact !== undefined && typeof doc.redact !== 'boolean') {
+    throw new Error(`${where}: "redact" must be true or false.`);
+  }
+  const defaultRedact = typeof doc.redact === 'boolean' ? doc.redact : undefined;
+  const defaultRedactColumns = mergeRedactColumns(
+    parseRedactColumnsSpec(doc.redactColumns, `${where} "redactColumns"`),
+    parseRedactColumnsSpec(doc.redact_columns, `${where} "redact_columns"`),
+    envPol.envRedactColumns,
+  );
+  const defaultMaxRows = minDefined(parseMaxRows(doc.maxRows ?? doc.max_rows, `${where} "maxRows"`), envPol.envMaxRows);
 
   const blocklists = new Map<string, BlocklistRules>();
   const connectionLeases = new Map<string, LeaseSpec>();
+  const connectionRedacts = new Map<string, { enabled: boolean; columns?: string[] }>();
+  const connectionMaxRows = new Map<string, number>();
+  const rawConnById = new Map<string, Record<string, unknown>>();
   const existingConfigs = baseRegistry.configs();
   const usedIds = new Set<string>();
 
@@ -1131,14 +1642,43 @@ export function applyExtendedDiskConfig(
         existingConfigs.find((c) => c.name === name && !usedIds.has(c.id));
       if (!match) continue;
       usedIds.add(match.id);
-      const bl = extractConnectionBlocklist(rec, `${where}: connection "${name}"`, defaultBlocklist);
+      rawConnById.set(match.id, rec);
+      const connWhere = `${where}: connection "${name}"`;
+      const bl = extractConnectionBlocklist(rec, connWhere);
       if (bl) blocklists.set(match.id, bl);
-      const ownLease = parseLeaseSpec(rec.lease, `${where}: connection "${name}"`);
+      const ownLease = parseLeaseSpec(rec.lease, connWhere);
       if (ownLease) connectionLeases.set(match.id, ownLease);
+      if (rec.redact !== undefined && typeof rec.redact !== 'boolean') {
+        throw new Error(`${connWhere}: "redact" must be true or false.`);
+      }
+      const ownRedactCols = mergeRedactColumns(
+        parseRedactColumnsSpec(rec.redactColumns, `${connWhere} "redactColumns"`),
+        parseRedactColumnsSpec(rec.redact_columns, `${connWhere} "redact_columns"`),
+      );
+      if (rec.redact !== undefined || ownRedactCols !== undefined) {
+        connectionRedacts.set(match.id, {
+          enabled: typeof rec.redact === 'boolean' ? rec.redact : Boolean(ownRedactCols?.length),
+          ...(ownRedactCols ? { columns: ownRedactCols } : {}),
+        });
+      }
+      const ownMax = parseMaxRows(rec.maxRows ?? rec.max_rows, `${connWhere} "maxRows"`);
+      if (ownMax !== undefined) connectionMaxRows.set(match.id, ownMax);
     }
   }
 
-  const needsPolicy = Boolean(defaultBlocklist || sessionLease || blocklists.size > 0 || connectionLeases.size > 0);
+  const needsPolicy = Boolean(
+    defaultBlocklist ||
+    sessionLease ||
+    environmentPolicies.size > 0 ||
+    defaultRedact !== undefined ||
+    envPol.forceRedact ||
+    defaultRedactColumns ||
+    defaultMaxRows !== undefined ||
+    blocklists.size > 0 ||
+    connectionLeases.size > 0 ||
+    connectionRedacts.size > 0 ||
+    connectionMaxRows.size > 0,
+  );
   let registry: Registry = baseRegistry;
 
   if (needsPolicy || environment !== baseRegistry.environment) {
@@ -1149,6 +1689,13 @@ export function applyExtendedDiskConfig(
           blocklists,
           connectionLeases,
           sessionLease,
+          environmentPolicies,
+          defaultRedact,
+          forceRedact: envPol.forceRedact,
+          defaultRedactColumns,
+          connectionRedacts,
+          defaultMaxRows,
+          connectionMaxRows,
           mcpMode,
         })
       : new Registry(environment ? { environment } : {});
@@ -1157,14 +1704,27 @@ export function applyExtendedDiskConfig(
     for (const svc of baseRegistry.serviceConfigs()) next.addService(svc);
     for (const kept of baseRegistry.keptEntries()) next.keep(kept);
     for (const cfg of existingConfigs) {
-      next.add({ ...cfg });
       const meta = getConnectionEnvMeta(baseRegistry, cfg.id);
+      const rawConn = rawConnById.get(cfg.id);
+      const matchedEnvPol = resolveEnvPolicyFromMap(environmentPolicies, {
+        id: cfg.id,
+        name: cfg.name,
+        url: cfg.url,
+        database: meta?.database,
+        env: meta?.env,
+      });
+      const writable =
+        rawConn?.writable !== undefined ? cfg.writable : matchedEnvPol?.writable !== undefined ? matchedEnvPol.writable : cfg.writable;
+      const rows = rawConn?.rows !== undefined ? cfg.rows : matchedEnvPol?.rows === false ? false : cfg.rows;
+      if (rows === false && writable === true) {
+        throw new Error(`${where}: connection "${cfg.name}" is both "writable" and "rows": false (via environment policy).`);
+      }
+      next.add({ ...cfg, writable, rows });
       if (meta) setConnectionEnvMeta(next, cfg.id, meta);
       const extras = getConnectionConfigExtras(baseRegistry, cfg.id);
       if (extras) setConnectionConfigExtras(next, cfg.id, extras);
       if (next instanceof PolicyRegistry) {
-        const ownLease = connectionLeases.get(cfg.id);
-        if (ownLease) next.setConnectionLease(cfg.id, ownLease);
+        next.setConnectionLease(cfg.id, connectionLeases.get(cfg.id));
       }
     }
     if (baseRegistry.active && next.has(baseRegistry.active)) {
@@ -1177,10 +1737,21 @@ export function applyExtendedDiskConfig(
 
   if (rawConfigText) {
     loadConfigEnvMeta(registry, rawConfigText);
-  } else if (doc.blocklist !== undefined || doc.lease !== undefined) {
+  } else if (
+    doc.blocklist !== undefined ||
+    doc.lease !== undefined ||
+    doc.environments !== undefined ||
+    doc.redact !== undefined ||
+    doc.redactColumns !== undefined ||
+    doc.maxRows !== undefined
+  ) {
     setTopLevelConfigExtras(registry, {
       ...(doc.blocklist !== undefined ? { blocklist: doc.blocklist } : {}),
       ...(doc.lease !== undefined ? { lease: doc.lease } : {}),
+      ...(doc.environments !== undefined ? { environments: doc.environments } : {}),
+      ...(doc.redact !== undefined ? { redact: doc.redact } : {}),
+      ...(doc.redactColumns !== undefined ? { redactColumns: doc.redactColumns } : {}),
+      ...(doc.maxRows !== undefined ? { maxRows: doc.maxRows } : {}),
     });
   }
 
@@ -1285,6 +1856,165 @@ export async function runCliOneShot(
     }
     const payload = answer.structuredContent ?? { text: answer.content[0]?.text ?? '' };
     process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+  } finally {
+    await registry.closeAll().catch(() => {});
+    await registry.closeServices().catch(() => {});
+  }
+}
+
+async function readStreamUtf8(stream: NodeJS.ReadableStream): Promise<string> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of stream) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+    total += buf.length;
+    if (total > MAX_PIPED_CONFIG_BYTES) {
+      throw new Error(`Batch input exceeds ${MAX_PIPED_CONFIG_BYTES} bytes.`);
+    }
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+/**
+ * Execute newline-delimited queries, breakdowns, or JSON tool calls (`--batch <path|->`)
+ * over a single connection session, streaming NDJSON lines to stdout and closing all
+ * connections when finished.
+ */
+export async function runCliBatch(
+  registry: Registry,
+  shelf: { views?: ViewDef[]; queries: SavedQuery[]; pages: PageDef[] },
+  options: { batch: string; connection?: string; env?: string; inputStream?: NodeJS.ReadableStream },
+): Promise<void> {
+  bindShelf(registry, shelf);
+  try {
+    let rawText: string;
+    try {
+      rawText =
+        options.batch === '-' || options.batch === '/dev/stdin'
+          ? await readStreamUtf8(options.inputStream ?? process.stdin)
+          : await readFile(options.batch, 'utf8');
+    } catch (err) {
+      console.error(`tablewalk: could not read --batch ${options.batch}: ${(err as Error).message}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const lines = rawText
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && !l.startsWith('#') && !l.startsWith('//'));
+
+    if (!lines.length) {
+      console.error('tablewalk: --batch input contains no queries or tool calls.');
+      process.exitCode = 2;
+      return;
+    }
+
+    let anyFailed = false;
+    for (const [index, line] of lines.entries()) {
+      let toolName = '';
+      let toolArgs: Record<string, unknown> = {};
+      let callId: unknown;
+
+      if (line.startsWith('{')) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(line);
+        } catch (err) {
+          anyFailed = true;
+          process.stdout.write(
+            `${JSON.stringify({ index, ok: false, code: 'invalid_argument', error: `Invalid JSON on line ${index + 1}: ${(err as Error).message}` })}\n`,
+          );
+          continue;
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          anyFailed = true;
+          process.stdout.write(
+            `${JSON.stringify({ index, ok: false, code: 'invalid_argument', error: `Line ${index + 1} must be a JSON object or query string.` })}\n`,
+          );
+          continue;
+        }
+        const rec = parsed as Record<string, unknown>;
+        callId = rec.id;
+        const rawArgs = rec.args ?? rec.arguments;
+        if (rawArgs !== undefined) {
+          if (!rawArgs || typeof rawArgs !== 'object' || Array.isArray(rawArgs)) {
+            anyFailed = true;
+            process.stdout.write(
+              `${JSON.stringify({
+                index,
+                ...(callId !== undefined ? { id: callId } : {}),
+                ok: false,
+                code: 'invalid_argument',
+                error: '"args" must be a JSON object.',
+              })}\n`,
+            );
+            continue;
+          }
+          toolArgs = { ...(rawArgs as Record<string, unknown>) };
+        }
+        const namedTool =
+          typeof rec.tool === 'string' ? rec.tool : typeof rec.call === 'string' ? rec.call : typeof rec.name === 'string' ? rec.name : '';
+        const queryShorthand = typeof rec.query === 'string' ? rec.query : typeof rec.q === 'string' ? rec.q : '';
+        if (namedTool.trim()) {
+          toolName = namedTool.trim();
+        } else if (queryShorthand.trim()) {
+          const q = queryShorthand.trim();
+          toolName = looksLikeBreakdown(q) ? 'breakdown' : 'query';
+          toolArgs.q = q;
+          if (rec.limit !== undefined && toolArgs.limit === undefined) toolArgs.limit = rec.limit;
+          if (rec.offset !== undefined && toolArgs.offset === undefined) toolArgs.offset = rec.offset;
+        } else {
+          anyFailed = true;
+          process.stdout.write(
+            `${JSON.stringify({
+              index,
+              ...(callId !== undefined ? { id: callId } : {}),
+              ok: false,
+              code: 'invalid_argument',
+              error: 'Batch JSON object must specify "tool" (or "call") or "query".',
+            })}\n`,
+          );
+          continue;
+        }
+        if (typeof rec.connection === 'string' && toolArgs.connection === undefined) toolArgs.connection = rec.connection;
+        if (typeof rec.env === 'string' && toolArgs.env === undefined) toolArgs.env = rec.env;
+      } else {
+        toolName = looksLikeBreakdown(line) ? 'breakdown' : 'query';
+        toolArgs = { q: line };
+      }
+
+      if (options.connection && toolArgs.connection === undefined) toolArgs.connection = options.connection;
+      if (options.env && toolArgs.env === undefined) toolArgs.env = options.env;
+
+      const answer = await runTool(registry, toolName, toolArgs);
+      if (answer.isError) {
+        anyFailed = true;
+        process.stdout.write(
+          `${JSON.stringify({
+            index,
+            ...(callId !== undefined ? { id: callId } : {}),
+            ok: false,
+            tool: toolName,
+            code: answer._meta?.['tablewalk/code'] ?? 'internal',
+            error: answer.content[0]?.text ?? 'Tool call failed.',
+          })}\n`,
+        );
+      } else {
+        process.stdout.write(
+          `${JSON.stringify({
+            index,
+            ...(callId !== undefined ? { id: callId } : {}),
+            ok: true,
+            tool: toolName,
+            result: answer.structuredContent ?? { text: answer.content[0]?.text ?? '' },
+          })}\n`,
+        );
+      }
+    }
+
+    if (anyFailed) process.exitCode = 1;
   } finally {
     await registry.closeAll().catch(() => {});
     await registry.closeServices().catch(() => {});

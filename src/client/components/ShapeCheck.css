@@ -1,0 +1,86 @@
+@layer look {
+  .shape-check-tabs {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-1h);
+    margin-block-end: var(--space-3h);
+    padding-block-end: var(--space-2h);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .shape-check-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1h);
+    padding: var(--space-1h) var(--space-3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink-muted);
+    font: 500 var(--text-sm) var(--face-ui, var(--sans));
+    cursor: pointer;
+  }
+
+  .shape-check-tab.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent-ink, var(--ink));
+  }
+
+  .shape-check-item-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-2h);
+  }
+
+  .shape-check-approx {
+    font: var(--text-xs) var(--figures, var(--code));
+    color: var(--ink-subtle);
+    margin-inline-start: var(--space-2);
+  }
+
+  .shape-check-inline-btn {
+    padding: var(--space-1) var(--space-2h);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink);
+    font: 500 var(--text-xs) var(--face-ui, var(--sans));
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .shape-check-drift-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-block-end: var(--space-3);
+  }
+
+  .shape-check-drift-label {
+    font: 500 var(--text-xs) var(--face-ui, var(--sans));
+    color: var(--ink-subtle);
+  }
+
+  .shape-check-diff-line {
+    margin: var(--space-1) 0;
+    font: var(--text-sm) var(--code);
+    color: var(--ink);
+  }
+
+  @media (hover: hover) {
+    .shape-check-tab:not(.active):hover {
+      background: var(--raised);
+      color: var(--ink);
+    }
+
+    .shape-check-inline-btn:hover {
+      background: var(--raised);
+      border-color: var(--accent-ink, var(--accent));
+    }
+  }
+}

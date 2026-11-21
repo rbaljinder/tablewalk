@@ -169,6 +169,7 @@ describe('the MCP server', () => {
       'schema_summary',
       'tables',
       'table',
+      'path',
       'find',
       'query',
       'breakdown',

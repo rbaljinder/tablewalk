@@ -86,6 +86,11 @@ const ALLOWED = [
   },
   { file: 'components/Ask.tsx', text: 'customer active = true sort name limit 20', reason: 'a query-language example' },
   { file: 'components/Ask.tsx', text: 'invoice count by status', reason: 'a query-language example' },
+  {
+    file: 'components/ShapeCheck.tsx',
+    text: 'CREATE INDEX {} ON {} ({});',
+    reason: 'a SQL CREATE INDEX statement copied to the clipboard',
+  },
 ];
 
 /** Attributes whose string value is read by a person, or said by a screen reader. */
