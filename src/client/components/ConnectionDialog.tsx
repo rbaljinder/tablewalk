@@ -425,7 +425,7 @@ export function ConnectionDialog({
                     aria-label={say('environmentLabel')}
                   />
                 </label>
-                <div className="conn-env-picks" role="group" aria-label={say('environmentLabel')}>
+                <div className="conn-env-picks" role="group" aria-label={say('environmentPresets')}>
                   {QUICK_ENVS.map((tier) => {
                     const selected = envValue.trim().toLowerCase() === tier;
                     const inferredMatch = !envValue.trim() && activeEnv.toLowerCase() === tier;

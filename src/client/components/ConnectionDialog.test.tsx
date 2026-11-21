@@ -151,10 +151,10 @@ test('auto-infers database/environment placeholders from Connection name and sub
   const nameInput = screen.getByLabelText('Connection name');
   await user.clear(nameInput);
   await user.type(nameInput, 'billing-staging');
-  expect(screen.getByLabelText('Database group')).toHaveAttribute('placeholder', 'billing');
+  expect(screen.getByLabelText('Group')).toHaveAttribute('placeholder', 'billing');
   expect(screen.getByRole('textbox', { name: 'Environment' })).toHaveAttribute('placeholder', 'staging');
 
-  await user.type(screen.getByLabelText('Database group'), 'billing');
+  await user.type(screen.getByLabelText('Group'), 'billing');
   await user.click(screen.getByRole('button', { name: 'staging' }));
   await user.click(screen.getByRole('button', { name: 'Add and open' }));
   expect(run).toHaveBeenCalledWith({
