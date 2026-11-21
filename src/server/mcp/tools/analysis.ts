@@ -11,7 +11,17 @@ import { tableNamed } from '@mistriwork/engine/host';
 import { lintCounts, lintSchema } from '../../../shared/lint.js';
 import { diffSchemas } from '../../../shared/diff.js';
 import { insertOrder } from '../../../shared/order.js';
-import { ENV_ARG, linkTo, openFor, READS, STATS, wholeKeyOrThrow, type Handler, ToolError } from '../toolkit.js';
+import {
+  ENV_ARG,
+  getConnectionRuntimePolicy,
+  linkTo,
+  openFor,
+  READS,
+  STATS,
+  wholeKeyOrThrow,
+  type Handler,
+  ToolError,
+} from '../toolkit.js';
 
 export const definitions = [
   {
@@ -657,7 +667,7 @@ export const handlers: Record<Name, Handler> = {
       ...(await changeImpact(adapter, schema, table.id, args.column === undefined ? undefined : String(args.column))),
     };
   },
-  fixture: async ({ args, adapter, schema, id }) => {
+  fixture: async ({ registry, args, adapter, schema, id }) => {
     const table = tableNamed(schema, String(args.table ?? ''));
     if (!table)
       throw new ToolError(
@@ -674,12 +684,13 @@ export const handlers: Record<Name, Handler> = {
             .map((c) => c.trim())
             .filter(Boolean)
         : undefined;
+    const connRedacts = Boolean(getConnectionRuntimePolicy(registry, id)?.redactsRows);
     const taken = await extractFixture(adapter, schema, table.id, key, {
       children: args.children === true || args.children === 'true',
       depth: args.depth === undefined ? undefined : Number(args.depth),
       perChild: args.per_child === undefined ? undefined : Number(args.per_child),
       max: args.max === undefined ? undefined : Number(args.max),
-      redact: args.redact === true || args.redact === 'true',
+      redact: connRedacts || args.redact === true || args.redact === 'true',
       redactColumns,
     });
     return { connection: id, ...taken };

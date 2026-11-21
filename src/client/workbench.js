@@ -9,12 +9,10 @@
  * it. An App's page never names it: an App's reader never downloads it.
  */
 import { initComplete } from './complete.js';
-import { closeConnectionManagement, openConnections } from './connmanager.js';
 import { selectConnection, whenManageConnections } from './connections.js';
 import { initSql, openSql } from './sql.js';
 import { initUndo, refreshUndo, undoDescription, undoLast, undoToast } from './undo.js';
 import { loadSavedPages } from '@mistriwork/kit/client/savedPages.js';
-import { openBuilder } from './pagebuilder.js';
 import { loadSavedSql, savedStatements } from './sqlsaved.js';
 import { registerSurface } from '@mistriwork/kit/client/surfaces.js';
 import { onDemand } from '@mistriwork/kit/client/components/onDemand.js';
@@ -46,6 +44,12 @@ import { listConnections, showWelcome } from './welcome.js';
 
 /** @type {import('@mistriwork/kit/client/shells.js').KitShell | null} */
 let kit = null;
+/** @type {Promise<typeof import('./connmanager.js')> | null} */
+let connManagerLoaded = null;
+const openConnections = () => (connManagerLoaded ??= import('./connmanager.js')).then((m) => m.openConnections());
+const closeConnectionManagement = () => {
+  if (connManagerLoaded) void connManagerLoaded.then((m) => m.closeConnectionManagement());
+};
 
 /**
  * Run a line of the query language, from wherever it was written.
@@ -84,7 +88,7 @@ function start(boot) {
   installShell({
     undo: { refresh: refreshUndo, last: undoLast, toast: undoToast },
     /* The page builder, which a saved page's Layout opens (PageRoom.tsx). */
-    editPage: (page, options) => void openBuilder(/** @type {any} */ (page), options),
+    editPage: (page, options) => void import('./pagebuilder.js').then((m) => m.openBuilder(/** @type {any} */ (page), options)),
   });
   /* What a store opens (surfaces.js; connections.js's Manage): a store never
      imports the component or manager that imports it, so the loop between them

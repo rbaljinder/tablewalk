@@ -40,28 +40,30 @@ When credentials live in a secret vault, pipe a JSON config straight into `table
 # MCP session over a vault config with lazy startup, a 5-minute lease, and a table/field blocklist
 { vault get db/billing-staging; cat; } | npx tablewalk --mcp --config - --env staging --lease 5m
 
-# Process substitution or one-shot JSON lookup (closes all connections on exit)
+# Process substitution, one-shot JSON lookup, or multi-call NDJSON batch (closes all connections on exit)
 npx tablewalk --config <(vault get db/billing) --env staging --query "invoice status = open limit 10"
 npx tablewalk --config <(vault get db/billing) --call schema_summary
+{ vault get db/billing; cat calls.jsonl; } | npx tablewalk --config - --batch - --redact --max-rows 5000
 ```
 
-Piped JSON configs can include `"secrets"` (or `.env` text under `"dotenv"`), `"active": "billing@staging"`, `"only": true` to expose only the selected target, `"lazy": true` (default for piped `--mcp` configs so `initialize` and `tools/list` answer before dialing the database), `"lease": { "idleSeconds": 30, "maxSeconds": 300 }`, and `"blocklist": { "tables": ["audit_*"], "fields": { "*": ["*_token"], "customer": ["tax_id"] } }`.
+Piped JSON configs can include `"secrets"` (or `.env` text under `"dotenv"`), `"environments"` tier defaults (`"local"`, `"staging"`, `"prod"`), `"active": "billing@staging"`, `"only": true` to expose only the selected target, `"lazy": true` (default for piped `--mcp` configs so `initialize` and `tools/list` answer before dialing the database), `"lease": { "idleSeconds": 30, "maxSeconds": 300 }`, `"redact": true` / `"redactColumns"`, `"maxRows"`, and `"blocklist": { "tables": ["audit_*"], "fields": { "*": ["*_token"], "customer": ["tax_id"] } }`.
 
 ![The Agent console running the record tool on customer 1, with the answer and its cost](/shots/agent.webp?v=2)
 
 ## The tools
 
-Twenty-six tools: twenty read-only, and six writes that are listed only when a connection is `"writable": true`. Every tool also takes `connection` (an id, `"db@env"` such as `"billing@staging"`, or `"@staging"` relative to the active database) and optional `env` (`"local"`, `"staging"`, `"prod"`) when multiple environments are configured. Connections can declare `"database"` and `"env"` in `tablewalk.json` or rely on naming conventions (`billing-local`, `billing_staging`, `billing [prod]`); when a `prod` environment is active, write tools refuse implicit calls unless `connection` or `env: "prod"` is passed explicitly.
+Twenty-seven tools: twenty-one read-only, and six writes that are listed only when a connection is `"writable": true`. Every tool also takes `connection` (an id, `"db@env"` such as `"billing@staging"`, or `"@staging"` relative to the active database) and optional `env` (`"local"`, `"staging"`, `"prod"`) when multiple environments are configured. Connections can declare `"database"` and `"env"` in `tablewalk.json` or rely on naming conventions (`billing-local`, `billing_staging`, `billing [prod]`); when a `prod` environment is active, write tools refuse implicit calls unless `connection` or `env: "prod"` is passed explicitly.
 
 ### Reading
 
 | Tool | What it answers | Example arguments |
 | --- | --- | --- |
-| `connections` | The configured connections: name, dialect, table count. The call to start with. | `{}` |
+| `connections` | The configured connections: name, dialect, table count, environments, redaction posture and session row budget. The call to start with. | `{}` |
 | `refresh` | Re-reads a connection's schema after a migration. | `{}` |
 | `schema_summary` | Orientation in one call: the hubs, the event tables, the join tables, the deepest chain of references. | `{}` |
 | `tables` | Every table with its column count, approximate rows, and whether it is a view. | `{}` |
 | `table` | One table in full: columns, keys, DDL, and its foreign keys in both directions. | `{"table": "invoice"}` |
+| `path` | Shortest foreign-key paths between two tables across `to-one` and `to-many` hops, flagging unindexed reverse joins with `CREATE INDEX` DDL and `queryHint`. | `{"from": "invoice_line", "to": "country"}` |
 | `find` | Where a name or a value lives, across every table and column. | `{"value": "Harbour Freight"}` |
 | `query` | Rows from the [query language](/docs/query/) or a named `view` in `tablewalk.json`, a total, and the SQL it compiled to. | `{"q": "invoice total > 500 sort total desc", "limit": 10}` |
 | `breakdown` | Counts and sums grouped by something. | `{"q": "invoice count by status"}` |
@@ -99,7 +101,7 @@ Listed only when a connection is `"writable": true`, and refused on any other co
 
 - Files land in `tablewalk-exports` under the system temp directory, named `<connection>-<name or table>-<yyyyMMdd-HHmmss>.<ext>` (UTC). An existing file is never overwritten, and a caller cannot choose the directory.
 - Give exactly one of `query` (the [query language](/docs/query/)), `view` (a named view from `tablewalk.json`), `sql` (a read-only `SELECT`), or `saved` (a named query from `tablewalk.json`). `format` is `csv` (default), `ndjson` or `json`; `limit` caps the rows; `name` sets the file stem; `compress: "gzip"` writes `.csv.gz` or `.ndjson.gz`; `redact: true` deterministically masks emails, phones, names, addresses and secrets in both the file and the sample.
-- A `query` export pages through the whole result by key in batches of 5,000 rows, with no ceiling beyond `limit`. A query that cannot page by key (a view over references, a union) reads by position and stops at 100,000 rows, and says so. A `sql` export is one read capped at 100,000 rows; the answer says when it stopped short.
+- A `query` export pages through the whole result by key in batches of 5,000 rows on SQLite and 25,000 rows on PostgreSQL (prefetching the next batch while writing), with no ceiling beyond `limit`. A query that cannot page by key (a view over references, a union) reads by position and stops at 100,000 rows, and says so. A `sql` export is one read capped at 100,000 rows; the answer says when it stopped short.
 - Ids past 2^53 stay strings, dates are ISO, and an empty CSV field is `null`. At most two exports run at once.
 
 ```json
@@ -112,9 +114,9 @@ Listed only when a connection is `"writable": true`, and refused on any other co
 
 | Profile | Tools |
 | --- | --- |
-| `explore` | connections, refresh, schema_summary, tables, table, find, query, breakdown, sql, export, record, explain, profile, anomalies |
-| `migrate` | connections, refresh, schema_summary, tables, table, change_impact, lint, anomalies, verify_ddl, order, diff, profile, explain |
-| `seed` | connections, refresh, schema_summary, tables, table, order, fixture, record, query, insert, insert_graph, delete_graph, revert |
+| `explore` | connections, refresh, schema_summary, tables, table, path, find, query, breakdown, sql, export, record, explain, profile, anomalies |
+| `migrate` | connections, refresh, schema_summary, tables, table, path, change_impact, lint, anomalies, verify_ddl, order, diff, profile, explain |
+| `seed` | connections, refresh, schema_summary, tables, table, path, order, fixture, record, query, insert, insert_graph, delete_graph, revert |
 | `full` | all of them (the default) |
 
 `--output-schema` adds each tool's output shape to the listing. It is off by default because it doubles the listing's size, and the answers carry the same fields either way.
@@ -142,7 +144,7 @@ A failed call is a normal result with `isError: true` and a sentence a model can
 | `cancelled` | the client withdrew the call | nothing; it is over |
 | `invalid_argument` | an argument is wrong, missing or contradicts another | fix the call |
 | `forbidden` | not allowed here: a tool outside `--tools`, one of tablewalk's own tables, a capability the dialect lacks | do not retry |
-| `limit` | past a bound the tool sets, such as more than 20 keys in one call | take less |
+| `limit` | past a bound the tool or session sets, such as more than 20 keys in one call or an exhausted `maxRows` session budget | take less |
 | `internal` | anything else, the database's or the server's | read the sentence |
 
 ```json
@@ -151,7 +153,7 @@ A failed call is a normal result with `isError: true` and a sentence a model can
 
 ## Limits
 
-- Rows that enter an agent's context leave your machine. Point agents at development databases, or mark a connection `"rows": false` so only the shape and bounded counts (`lint`, `anomalies`) answer. When every connection is shape-only, `query`, `sql`, `record`, `breakdown` and `export` are not listed at all. When every connection [hides columns](/docs/connections/#a-connections-fields), `sql`, `explain` and `verify_ddl` are not listed.
+- Rows that enter an agent's context leave your machine. Point agents at development databases, enable `"redact": true` (`--redact`) and `"maxRows"` (`--max-rows`), or mark a connection `"rows": false` so only the shape and bounded counts (`lint`, `anomalies`) answer. When every connection is shape-only, `query`, `sql`, `record`, `breakdown` and `export` are not listed at all. When every connection [hides or redacts columns](/docs/connections/#a-connections-fields), `sql`, `explain` and `verify_ddl` are not listed.
 - A statement runs under a 30-second cap; `sql` takes `timeout_ms` to lower it (at least 100). A client that cancels a call stops its statement.
 - Totals from `query` and `breakdown`, and counts on `record`, stop at 10,000 and say so.
 - `sql`, `explain` and `verify_ddl` refuse statements that touch tablewalk's own tables (`__mistri_*`, the `mistri` schema, `__tablewalk_*`, `tablewalk_auth`).

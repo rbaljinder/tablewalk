@@ -19,6 +19,9 @@ export interface PickerConnection {
   connected?: boolean;
   writable?: boolean;
   rows?: boolean;
+  hidesColumns?: boolean;
+  redactsRows?: boolean;
+  maxRows?: number;
   database?: string;
   env?: string;
   tier?: EnvironmentTier;
@@ -26,9 +29,11 @@ export interface PickerConnection {
   siblings?: SiblingEnvironment[];
 }
 
-function postureShort(conn: { writable?: boolean; rows?: boolean }): string {
+function postureShort(conn: { writable?: boolean; rows?: boolean; redactsRows?: boolean }): string {
   if (conn.rows === false) return say('postureShape');
-  return conn.writable ? say('postureRw') : say('postureRo');
+  if (conn.writable) return say('postureRw');
+  if (conn.redactsRows) return say('postureMasked');
+  return say('postureRo');
 }
 
 export function ConnectionPicker({

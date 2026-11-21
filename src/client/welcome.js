@@ -31,12 +31,14 @@
  *     itself.
  */
 import { createElement } from 'react';
-import { $, api, el } from '@mistriwork/kit/client/core.js';
+import { $, api } from '@mistriwork/kit/client/core.js';
 import { element } from '@mistriwork/kit/client/components/mount.js';
-import { Welcome } from './components/Welcome.js';
+import { onDemand } from '@mistriwork/kit/client/components/onDemand.js';
 import { setAppConfigured } from '@mistriwork/kit/client/connectionScope.js';
 import { say } from './copy/workbench/welcome.js';
 import { setTabTitle, shellBody } from '@mistriwork/kit/client/shellHost.js';
+
+const Welcome = onDemand(() => import('./components/Welcome.js'), 'Welcome', { quiet: true });
 
 /**
  * What the server has, for the screen that runs when none of it opened.

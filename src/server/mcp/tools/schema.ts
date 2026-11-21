@@ -21,13 +21,23 @@ import {
 // Plain JS and pure on purpose — the same analysis the landing page says out
 // loud, importable here because it takes a schema and touches nothing else.
 import { groupConnectionsByDatabase } from '../../../shared/environments.js';
-import { ENV_ARG, linkTo, listEnrichedConnections, READS, sessionEgress, STATS, type Handler, ToolError } from '../toolkit.js';
+import {
+  ENV_ARG,
+  getConnectionRuntimePolicy,
+  linkTo,
+  listEnrichedConnections,
+  READS,
+  sessionEgress,
+  STATS,
+  type Handler,
+  ToolError,
+} from '../toolkit.js';
 
 export const definitions = [
   {
     name: 'connections',
     description:
-      'List the configured database connections and logical database environments: id, name, database, env, tier, dialect, table count, write/shape posture, and sibling environments. ' +
+      'List the configured database connections and logical database environments: id, name, database, env, tier, dialect, table count, write/shape/masking posture, session row budgets, and sibling environments. ' +
       'Call this first when unsure which database or environment to ask about; every other tool takes ' +
       'an optional "connection" (an id, "db@env", or "@env") and optional "env", defaulting to the active connection.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
@@ -51,6 +61,9 @@ export const definitions = [
               writable: { type: 'boolean' },
               rows: { type: 'boolean' },
               hidesColumns: { type: 'boolean' },
+              redactsRows: { type: 'boolean' },
+              maxRows: { type: 'number' },
+              rowsRemaining: { type: 'number' },
               siblings: { type: 'array', items: { type: 'object' } },
               rowsReadThisSession: { type: 'number' },
             },
@@ -239,6 +252,50 @@ export const definitions = [
     },
   },
   {
+    name: 'path',
+    description:
+      'Find the shortest foreign-key paths between two tables (`from` and `to`) across both `to-one` and `to-many` edges. ' +
+      'Flags reverse hops lacking a leading index on child tables (with `scannedApproxRows` and a ready-to-run `CREATE INDEX` statement) ' +
+      'and synthesizes a `query` expression when the chain can be projected directly.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Starting table name or id, e.g. "invoice".' },
+        to: { type: 'string', description: 'Target table name or id, e.g. "country".' },
+        max_hops: { type: 'number', description: 'Maximum foreign-key hops to walk (default 6, max 10).' },
+        max_paths: { type: 'number', description: 'Maximum paths to return (default 5, max 10).' },
+        connection: { type: 'string' },
+        env: ENV_ARG,
+      },
+      required: ['from', 'to'],
+      additionalProperties: false,
+    },
+    annotations: { title: 'Find foreign-key paths', ...READS },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        connection: { type: 'string' },
+        from: { type: 'string' },
+        to: { type: 'string' },
+        connected: { type: 'boolean' },
+        paths: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              length: { type: 'number' },
+              unindexedHops: { type: 'number' },
+              summary: { type: 'string' },
+              queryHint: { type: 'string' },
+              hops: { type: 'array', items: { type: 'object' } },
+            },
+          },
+        },
+        stats: STATS,
+      },
+    },
+  },
+  {
     name: 'find',
     description:
       'Where something lives. `name` searches table and column names, case-insensitive ' +
@@ -329,53 +386,71 @@ type Name = (typeof definitions)[number]['name'];
 
 /** The one tool answered without opening a connection: the list is the registry's, enriched with environment topology. */
 export function connections(registry: Registry): Record<string, unknown> {
-  const enriched = listEnrichedConnections(registry);
+  type RichConn = ReturnType<typeof listEnrichedConnections>[number] & { redactsRows?: boolean; maxRows?: number };
+  const enriched = listEnrichedConnections(registry) as RichConn[];
   const groups = groupConnectionsByDatabase(enriched);
   const hasMultiEnv = groups.some((g) => g.environments.length > 1 || g.environments.some((c) => Boolean(c.env)));
   const databases = groups.map((g) => ({
     database: g.database,
-    environments: g.environments.map((c) => ({
-      id: c.id,
-      name: c.name,
-      ...(c.env ? { env: c.env } : {}),
-      tier: c.tier,
-      active: c.id === registry.active,
-      writable: c.writable,
-      ...(c.rows === false ? { rows: false } : {}),
-      ...(c.hidesColumns ? { hidesColumns: true } : {}),
-    })),
+    environments: g.environments.map((c) => {
+      const policy = getConnectionRuntimePolicy(registry, c.id);
+      const redactsRows = Boolean(c.redactsRows || policy?.redactsRows);
+      const maxRows = c.maxRows ?? policy?.maxRows;
+      return {
+        id: c.id,
+        name: c.name,
+        ...(c.env ? { env: c.env } : {}),
+        tier: c.tier,
+        active: c.id === registry.active,
+        writable: c.writable,
+        ...(c.rows === false ? { rows: false } : {}),
+        ...(c.hidesColumns ? { hidesColumns: true } : {}),
+        ...(redactsRows ? { redactsRows: true } : {}),
+        ...(maxRows !== undefined ? { maxRows } : {}),
+      };
+    }),
   }));
   const note = hasMultiEnv
     ? `Environments by database: ${groups
         .map(
           (g) =>
             `${g.database} [${g.environments
-              .map(
-                (c) =>
-                  `${c.env ?? c.tier}="${c.id}" (${c.rows === false ? 'shape-only' : c.writable ? 'writable' : 'read-only'}${c.id === registry.active ? ', active' : ''})`,
-              )
+              .map((c) => {
+                const policy = getConnectionRuntimePolicy(registry, c.id);
+                const masked = Boolean(c.redactsRows || policy?.redactsRows);
+                const posture = c.rows === false ? 'shape-only' : c.writable ? 'writable' : 'read-only';
+                return `${c.env ?? c.tier}="${c.id}" (${posture}${masked ? ', masked' : ''}${c.id === registry.active ? ', active' : ''})`;
+              })
               .join(', ')}]`,
         )
         .join('; ')}. Target any environment with connection: "db@env", "@env", or env: "<env>".`
     : undefined;
   return {
-    connections: enriched.map((c) => ({
-      id: c.id,
-      name: c.name,
-      database: c.database,
-      ...(c.env ? { env: c.env } : {}),
-      tier: c.tier,
-      dialect: c.dialect,
-      tables: c.tables,
-      active: c.id === registry.active,
-      writable: c.writable,
-      ...(c.rows === false ? { rows: false } : {}),
-      ...(c.hidesColumns ? { hidesColumns: true } : {}),
-      siblings: c.siblings,
-      /* The trust boundary as a number: data rows this session has handed
-         to the caller from this connection. Zero is an auditable answer. */
-      rowsReadThisSession: sessionEgress.get(c.id) ?? 0,
-    })),
+    connections: enriched.map((c) => {
+      const policy = getConnectionRuntimePolicy(registry, c.id);
+      const redactsRows = Boolean(c.redactsRows || policy?.redactsRows);
+      const maxRows = c.maxRows ?? policy?.maxRows;
+      const rowsRead = sessionEgress.get(c.id) ?? 0;
+      return {
+        id: c.id,
+        name: c.name,
+        database: c.database,
+        ...(c.env ? { env: c.env } : {}),
+        tier: c.tier,
+        dialect: c.dialect,
+        tables: c.tables,
+        active: c.id === registry.active,
+        writable: c.writable,
+        ...(c.rows === false ? { rows: false } : {}),
+        ...(c.hidesColumns ? { hidesColumns: true } : {}),
+        ...(redactsRows ? { redactsRows: true } : {}),
+        ...(maxRows !== undefined ? { maxRows, rowsRemaining: Math.max(0, maxRows - rowsRead) } : {}),
+        siblings: c.siblings,
+        /* The trust boundary as a number: data rows this session has handed
+           to the caller from this connection. Zero is an auditable answer. */
+        rowsReadThisSession: rowsRead,
+      };
+    }),
     databases,
     ...(note ? { note } : {}),
   };
@@ -472,7 +547,26 @@ export const handlers = {
       link: linkTo(id, encodeURIComponent(table.id)),
     };
   },
-  find: async ({ args, adapter, schema, id }) => {
+  path: async ({ args, schema, id }) => {
+    const from = String(args.from ?? '').trim();
+    const to = String(args.to ?? '').trim();
+    if (!from || !to) {
+      throw new ToolError('invalid_argument', 'path: pass both `from` and `to` table names.');
+    }
+    const maxHops = args.max_hops === undefined ? undefined : Number(args.max_hops);
+    const maxPaths = args.max_paths === undefined ? undefined : Number(args.max_paths);
+    /* Loaded dynamically so plain `serve` and `--mcp` keep their exact cold-start module budgets. */
+    const { findForeignKeyPaths } = await import('../../../shared/path.js');
+    const result = findForeignKeyPaths(schema, from, to, { maxHops, maxPaths });
+    if ('error' in result) {
+      throw new ToolError('not_found', result.error);
+    }
+    return {
+      connection: id,
+      ...result,
+    };
+  },
+  find: async ({ registry, args, adapter, schema, id }) => {
     /* A number is a perfectly ordinary thing to search for, and a client that
        does not coerce to the declared type sends one. Coerced here rather
        than type-checked, or `find {value: 42}` answers "you gave me
@@ -488,7 +582,11 @@ export const handlers = {
           '`value` searches the data. Two different questions, two calls.',
       );
     }
-    if (value) return findValue(adapter, schema, id, value);
+    if (value) {
+      const policy = getConnectionRuntimePolicy(registry, id);
+      const maxMatches = policy?.maxRows !== undefined ? Math.max(0, policy.maxRows - (sessionEgress.get(id) ?? 0)) : undefined;
+      return findValue(adapter, schema, id, value, maxMatches);
+    }
     if (!needle) throw new ToolError('invalid_argument', 'Nothing to look for. Give `name` or `value`.');
     const lowered = needle.toLowerCase();
     /* Capped and said so: a one-letter needle on a wide schema matches half
@@ -569,9 +667,16 @@ function searchableColumns(table: TableMeta, value: string): { like: string[]; e
  * table with no early exit, and on SQLite the driver is synchronous, so
  * those scans block the web UI and every other call with them.
  */
-export async function findValue(adapter: Adapter, schema: DatabaseSchema, id: string, value: string): Promise<Record<string, unknown>> {
+export async function findValue(
+  adapter: Adapter,
+  schema: DatabaseSchema,
+  id: string,
+  value: string,
+  maxMatches?: number,
+): Promise<Record<string, unknown>> {
   const PER_TABLE = 5;
-  const TOTAL = 40;
+  const TOTAL = maxMatches !== undefined ? Math.max(0, Math.min(40, maxMatches)) : 40;
+  const stopReason = maxMatches !== undefined && maxMatches < 40 ? 'session row budget' : 'match cap';
   const BUDGET_MS = 5_000;
   const deadline = Date.now() + BUDGET_MS;
 
@@ -590,7 +695,7 @@ export async function findValue(adapter: Adapter, schema: DatabaseSchema, id: st
       continue;
     }
     if (matches.length >= TOTAL) {
-      stopped = 'match cap';
+      stopped = stopReason;
       unreached += 1;
       continue;
     }
@@ -648,7 +753,7 @@ export async function findValue(adapter: Adapter, schema: DatabaseSchema, id: st
           values: Object.fromEntries(where.map((c) => [c, row[c]])),
         });
       }
-      if (matches.length >= TOTAL) stopped = 'match cap';
+      if (matches.length >= TOTAL) stopped = stopReason;
     } catch (err) {
       /* Named, not swallowed. One unreadable table must not stop the sweep,
          and must not be reported as a searched one either. */

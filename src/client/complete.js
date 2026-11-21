@@ -25,7 +25,9 @@ const OPERATORS = ['=', '!=', '>', '>=', '<', '<=', 'between', 'contains', 'star
    and an operator list that offers everything everywhere is a list you stop
    reading. */
 const RANGEABLE = new Set(['number', 'date']);
-const CLAUSES = ['sort', 'show', 'limit', 'where', 'order by'];
+const CLAUSES = ['sort', 'show', 'limit', 'by', 'where', 'order by'];
+const MEASURES = ['count', 'sum', 'avg', 'min', 'max'];
+const PERIODS = ['day', 'month', 'quarter', 'year'];
 const JOINERS = ['and', 'or'];
 const NULL_CHECKS = ['is empty', 'is not empty'];
 const DATE_VALUES = [
@@ -104,14 +106,14 @@ export function initComplete() {
  *
  * @param {HTMLInputElement|HTMLTextAreaElement} input
  * @param {(text: string, caret: number) => Array} suggest
- * @param {{ anchor?: 'field' | 'caret', split?: (text: string, caret: number) => {word: string, start: number} }} [options]
+ * @param {{ anchor?: 'field' | 'caret', preserveRole?: boolean, split?: (text: string, caret: number) => {word: string, start: number} }} [options]
  */
 export function attachComplete(input, suggest, options = {}) {
   /* The combobox contract: without it a screen reader hears nothing when
      the list opens or the highlight moves. The listbox and options carry
      ids for aria-activedescendant; focus itself never leaves the input,
      which is the behaviour readers expect from this pattern. */
-  input.setAttribute('role', 'combobox');
+  if (!options.preserveRole) input.setAttribute('role', 'combobox');
   input.setAttribute('aria-autocomplete', 'list');
   input.setAttribute('aria-expanded', 'false');
   const own = el('div', { class: 'ac', hidden: true, role: 'listbox' });
@@ -166,6 +168,47 @@ function previousWord(text, start) {
   return text.slice(0, start).trim().split(/\s+/).pop()?.toLowerCase() ?? '';
 }
 
+const findTableNamed = (id) =>
+  state.schema.tables.find((t) => t.id === id) ?? state.schema.tables.find((t) => t.name.toLowerCase() === id.toLowerCase());
+
+function columnOption(c, prefix = '') {
+  const name = prefix ? `${prefix}.${c.name}` : c.name;
+  return {
+    value: name,
+    label: name,
+    detail: `${c.type.toLowerCase()}${c.primaryKey ? say('key') : ''}${c.references ? ` → ${c.references.table}` : ''}`,
+    kind: 'column',
+  };
+}
+
+function resolveColumnAt(baseTable, pathText) {
+  if (!pathText) return undefined;
+  const parts = pathText.split('.');
+  let cur = baseTable;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const hop = cur.columns.find((c) => c.name.toLowerCase() === parts[i].toLowerCase());
+    if (!hop?.references) return undefined;
+    cur = findTableNamed(hop.references.table);
+    if (!cur) return undefined;
+  }
+  const leaf = parts[parts.length - 1].toLowerCase();
+  return cur.columns.find((c) => c.name.toLowerCase() === leaf);
+}
+
+function dottedSuggestions(baseTable, word) {
+  const parts = word.split('.');
+  const leaf = (parts.pop() ?? '').toLowerCase();
+  const prefix = parts.join('.');
+  let cur = baseTable;
+  for (const seg of parts) {
+    const hop = cur.columns.find((c) => c.name.toLowerCase() === seg.toLowerCase());
+    if (!hop?.references) return [];
+    cur = findTableNamed(hop.references.table);
+    if (!cur) return [];
+  }
+  return cur.columns.filter((c) => !leaf || c.name.toLowerCase().startsWith(leaf)).map((c) => columnOption(c, prefix));
+}
+
 /**
  * What could come next, given where the caret is.
  *
@@ -173,12 +216,13 @@ function previousWord(text, start) {
  * what Tab accepts, so it should be the likeliest thing, not the alphabetically
  * first.
  *
- * Exported for test/mirrors.test.ts, which asks it for the suggestions on
+ * Exported for test/agreement-completer.test.ts, which asks it for the suggestions on
  * every column of a fixture schema and checks that the ones offering relative
  * dates are exactly the columns shared/schema.ts calls dates. That the rule is
  * shared is a fact about the source; that the completer *applies* it is not.
  */
 export function suggestionsFor(text, caret) {
+  if (!state.schema?.tables) return [];
   const { word, start } = tokenAt(text, caret);
   const lower = word.toLowerCase();
   const head = text.trim().split(/\s+/)[0] ?? '';
@@ -224,14 +268,50 @@ export function suggestionsFor(text, caret) {
   }
   const table = insideAny(text.slice(0, start), pointing) ?? listed;
 
-  const columns = table.columns.map((c) => ({
-    value: c.name,
-    label: c.name,
-    detail: `${c.type.toLowerCase()}${c.primaryKey ? say('key') : ''}${c.references ? ` → ${c.references.table}` : ''}`,
-    kind: 'column',
-  }));
+  /* Dotted foreign-key walk (`customer_id.country_code.na`): resolve hops across the catalog. */
+  if (word.includes('.')) {
+    const aList = TAKES_A_LIST.has(previous) || inList(text, start);
+    return dottedSuggestions(table, word).map((c) => (aList ? { ...c, list: true } : c));
+  }
 
+  const columns = table.columns.map((c) => columnOption(c));
   const matches = (list) => list.filter((s) => !lower || s.value.toLowerCase().startsWith(lower));
+
+  /* Right-hand side of `=` or `!=`: offer CHECK/enum allowed values, booleans, or relative date phrases. */
+  if (previous === '=' || previous === '!=') {
+    const col = resolveColumnAt(table, twoBack);
+    if (col?.allowed?.length) {
+      return col.allowed
+        .map((v) => {
+          const quoted = /\s/.test(v) ? `"${v.replace(/"/g, '\\"')}"` : v;
+          return { value: quoted, label: v, detail: say('allowedValue'), kind: 'value' };
+        })
+        .filter((s) => !lower || s.value.toLowerCase().startsWith(lower) || s.label.toLowerCase().startsWith(lower));
+    }
+    if (col && columnKind(col.type) === 'boolean') {
+      return matches(['true', 'false'].map((v) => ({ value: v, label: v, detail: 'boolean', kind: 'value' })));
+    }
+    if (col && looksLikeDateColumn(col)) {
+      return matches(DATE_VALUES.map((v) => ({ value: v, label: v, detail: say('dateRange'), kind: 'value' })));
+    }
+  }
+
+  /* Breakdown measure (`count `, `sum `) or period bucket (`by month `). */
+  if (MEASURES.includes(previous)) {
+    const numFirst =
+      previous === 'sum' || previous === 'avg'
+        ? [
+            ...table.columns.filter((c) => columnKind(c.type) === 'number').map((c) => columnOption(c)),
+            ...table.columns.filter((c) => columnKind(c.type) !== 'number').map((c) => columnOption(c)),
+          ]
+        : columns;
+    return matches([{ value: 'by', label: 'by', detail: 'clause', kind: 'kw' }, ...numFirst]);
+  }
+  if (PERIODS.includes(previous) && twoBack === 'by') {
+    const dateCols = table.columns.filter((c) => looksLikeDateColumn(c)).map((c) => columnOption(c));
+    return matches(dateCols.length ? dateCols : columns);
+  }
+
   /* Where a condition starts, the rows that point at the record may be asked about too. */
   const asking =
     table === listed && pointing.length
@@ -240,33 +320,37 @@ export function suggestionsFor(text, caret) {
 
   /* Immediately after the table name a column is what you want essentially
      always — `customer ` is the start of a filter, not the end of a query.
-     Keywords come after, for the rarer case of jumping straight to `sort`. */
+     Keywords and measures come after, for jumping straight to `sort` or `count`. */
   if (previous === head.toLowerCase() || previous === listed.name.toLowerCase()) {
-    return matches([...columns, ...asking, ...CLAUSES.map((c) => ({ value: c, label: c, detail: 'clause', kind: 'kw' }))]);
+    return matches([
+      ...columns,
+      ...asking,
+      ...CLAUSES.map((c) => ({ value: c, label: c, detail: 'clause', kind: 'kw' })),
+      ...MEASURES.map((m) => ({ value: m, label: m, detail: say('measure'), kind: 'kw' })),
+    ]);
   }
 
   // After a joiner or a clause word, a column name comes next.
   if (EXPECTS_COLUMN.has(previous) || previous === '') {
     const aList = TAKES_A_LIST.has(previous) || inList(text, start);
     const conditionStarts = !aList && (previous === 'and' || previous === 'or' || previous === 'where' || previous === 'filter');
-    return matches([...columns, ...(conditionStarts ? asking : [])]).map((c) => (aList ? { ...c, list: true } : c));
+    const periods =
+      previous === 'by' && table.columns.some((c) => looksLikeDateColumn(c))
+        ? PERIODS.map((p) => ({ value: p, label: p, detail: say('period'), kind: 'kw' }))
+        : [];
+    return matches([...columns, ...periods, ...(conditionStarts ? asking : [])]).map((c) =>
+      aList && c.kind === 'column' ? { ...c, list: true } : c,
+    );
   }
 
-  const previousIsColumn = table.columns.some((c) => c.name.toLowerCase() === previous);
-  if (previousIsColumn) {
-    const column = table.columns.find((c) => c.name.toLowerCase() === previous);
+  const column = resolveColumnAt(table, previous);
+  if (column) {
     /* An operator, or a null check — and for a date column the relative-date
        phrases, because `opened_on = last 30 days` is the single most useful
        thing you can write about a date and the least guessable. */
-    /* The date test comes from core.js, which mirrors looksLikeDate in
-       shared/schema.ts. Written out here it had lost `timestamp`, `datetime`
-       and `deleted` from the name pattern, so `event_timestamp TEXT` was
-       offered `=` and nothing else while the server was perfectly willing to
-       answer `event_timestamp = last 30 days` on it — the language's best
-       feature, hidden on the columns it exists for. */
-    const isDate = column ? looksLikeDateColumn(column) : false;
+    const isDate = looksLikeDateColumn(column);
     const dateHints = isDate ? DATE_VALUES.map((v) => ({ value: `= ${v}`, label: `= ${v}`, detail: say('dateRange'), kind: 'value' })) : [];
-    const ranged = isDate || RANGEABLE.has(columnKind(column?.type ?? ''));
+    const ranged = isDate || RANGEABLE.has(columnKind(column.type ?? ''));
     const ops = [
       ...OPERATORS.filter((o) => o !== 'between' || ranged).map((o) => ({
         value: o,
@@ -276,9 +360,6 @@ export function suggestionsFor(text, caret) {
       })),
       ...NULL_CHECKS.map((o) => ({ value: o, label: o, detail: say('nullCheck'), kind: 'op' })),
     ];
-    /* On a date column the relative phrases lead. They are the most useful
-       thing you can say about a date and the least guessable, whereas `=` on
-       a timestamp is usually a mistake — it matches an exact instant. */
     return matches(isDate ? [...dateHints, ...ops] : ops);
   }
 
@@ -289,8 +370,6 @@ export function suggestionsFor(text, caret) {
     ...columns,
   ]);
 }
-
-const findTableNamed = (id) => state.schema.tables.find((t) => t.id === id);
 
 /**
  * The table whose columns come next when the caret is inside an `any …

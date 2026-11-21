@@ -60,10 +60,13 @@ interface BrowserExtraArgs {
   connection?: string;
   env?: string;
   lease?: string;
+  maxRows?: string;
+  redact?: boolean;
   lazy?: boolean;
   query?: string;
   call?: string;
   args?: string;
+  batch?: string;
   error?: string;
 }
 
@@ -85,6 +88,8 @@ function extractBrowserExtraArgs(argv: readonly string[]): BrowserExtraArgs {
     }
     if (arg === '--lazy') {
       out.lazy = true;
+    } else if (arg === '--redact') {
+      out.redact = true;
     } else if (arg === '--connection') {
       const got = takeValue(arg, argv[i + 1], i);
       if (got) [out.connection, i] = got;
@@ -94,6 +99,9 @@ function extractBrowserExtraArgs(argv: readonly string[]): BrowserExtraArgs {
     } else if (arg === '--lease') {
       const got = takeValue(arg, argv[i + 1], i);
       if (got) [out.lease, i] = got;
+    } else if (arg === '--max-rows') {
+      const got = takeValue(arg, argv[i + 1], i);
+      if (got) [out.maxRows, i] = got;
     } else if (arg === '--query') {
       const got = takeValue(arg, argv[i + 1], i);
       if (got) [out.query, i] = got;
@@ -103,12 +111,21 @@ function extractBrowserExtraArgs(argv: readonly string[]): BrowserExtraArgs {
     } else if (arg === '--args') {
       const got = takeValue(arg, argv[i + 1], i);
       if (got) [out.args, i] = got;
+    } else if (arg === '--batch') {
+      const next = argv[i + 1];
+      if (next === undefined || (next.startsWith('-') && next !== '-')) {
+        out.batch = '-';
+      } else {
+        out.batch = next;
+        i += 1;
+      }
     } else {
       rest.push(arg);
     }
   }
-  if (out.query !== undefined && out.call !== undefined) {
-    out.error ??= 'Pass either --query or --call, not both.';
+  const modes = [out.query !== undefined, out.call !== undefined, out.batch !== undefined].filter(Boolean).length;
+  if (modes > 1) {
+    out.error ??= 'Pass only one of --query, --call, or --batch.';
   }
   if (out.args !== undefined && out.call === undefined && out.query === undefined) {
     out.error ??= '--args goes with --call (or --query).';
@@ -180,7 +197,7 @@ export const main: Main = async () => {
     }
   }
 
-  const oneShotTool = extra.query !== undefined || Boolean(extra.call);
+  const oneShotTool = extra.query !== undefined || Boolean(extra.call) || extra.batch !== undefined;
   /* Detect piped/FIFO/`TABLEWALK_CONFIG_JSON` config before `configNamesApps` touches `opts.config` (reading a FIFO
      twice would lose its contents). Avoids importing `vaultConfig.js` on ordinary starts. */
   const maybePiped =
@@ -218,11 +235,13 @@ export const main: Main = async () => {
   let config: Awaited<ReturnType<typeof readStartupConfig>>;
   let mcpInputStream: NodeJS.ReadableStream | undefined;
   let startupMeta: { active?: string; only?: boolean; lazy?: boolean } = {};
+  const cliOverrides = { lease: extra.lease, maxRows: extra.maxRows, redact: extra.redact };
 
   if (maybePiped) {
     const { loadPipedVaultConfig } = await import('./vaultConfig.js');
     try {
-      const loaded = await loadPipedVaultConfig(opts.config, opts.mcp, extra.lease);
+      const splitStdin = opts.mcp || extra.batch === '-' || extra.batch === '/dev/stdin';
+      const loaded = await loadPipedVaultConfig(opts.config, opts.mcp, cliOverrides, splitStdin);
       if (loaded.namesApps) return refuseApp('a config file that lists Apps', rawArgv);
       registry = loaded.registry;
       mcpInputStream = loaded.remainingStdin;
@@ -254,11 +273,21 @@ export const main: Main = async () => {
     }
     /* Checked inline here so plain `serve` and `--mcp` do not import `vaultConfig.js` + `blocklist.js`
        (test/cli-startup.test.ts holds plain `serve` at <= 260 modules). */
+    const hasPolicyEnvVars = Boolean(
+      process.env.TABLEWALK_BLOCKLIST?.trim() ||
+      process.env.TABLEWALK_BLOCKED_TABLES?.trim() ||
+      process.env.TABLEWALK_BLOCKED_FIELDS?.trim() ||
+      process.env.TABLEWALK_BLOCKED_COLUMNS?.trim() ||
+      process.env.TABLEWALK_REDACT?.trim() ||
+      process.env.TABLEWALK_REDACT_COLUMNS?.trim() ||
+      process.env.TABLEWALK_MAX_ROWS?.trim() ||
+      process.env.TABLEWALK_LEASE?.trim(),
+    );
     const needsExtended =
-      Boolean(extra.lease) ||
+      Boolean(extra.lease || extra.maxRows !== undefined || extra.redact || hasPolicyEnvVars) ||
       Boolean(
         config.loadedConfigText &&
-        /"(?:blocklist|blockedTables|blockedFields|blockedColumns|lease|secrets|dotenv|defaultConnection|active|lazy|only)"/.test(
+        /"(?:blocklist|blockedTables|blockedFields|blockedColumns|lease|environments|redact|redactColumns|redact_columns|maxRows|max_rows|secrets|dotenv|defaultConnection|active|lazy|only)"/.test(
           config.loadedConfigText,
         ),
       );
@@ -270,7 +299,7 @@ export const main: Main = async () => {
           config.loadedConfigText,
           config.configPath ?? 'tablewalk.json',
           opts.mcp,
-          extra.lease,
+          cliOverrides,
         );
         registry = upgraded.registry;
         startupMeta = { active: upgraded.active, only: upgraded.only, lazy: upgraded.lazy };
@@ -380,6 +409,15 @@ export const main: Main = async () => {
     console.log((await import('./usage.js')).USAGE);
     console.log(`\nLooked for a config file in:\n  ${configLocations(opts.config).join('\n  ')}`);
     process.exit(1);
+  }
+
+  if (extra.batch !== undefined) {
+    const { runCliBatch } = await import('./vaultConfig.js');
+    return runCliBatch(
+      registry,
+      { views: config.views, queries: config.queries, pages: config.pages },
+      { batch: extra.batch, connection: extra.connection, env: extra.env, inputStream: mcpInputStream },
+    );
   }
 
   if (oneShotTool) {

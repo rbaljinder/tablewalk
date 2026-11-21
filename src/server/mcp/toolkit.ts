@@ -112,15 +112,39 @@ export interface ConnectionConfigExtras {
   blockedFields?: unknown;
   blockedColumns?: unknown;
   lease?: unknown;
+  redact?: unknown;
+  redactColumns?: unknown;
+  redact_columns?: unknown;
+  maxRows?: unknown;
 }
 
 export interface TopLevelConfigExtras {
   blocklist?: unknown;
   lease?: unknown;
+  environments?: unknown;
+  redact?: unknown;
+  redactColumns?: unknown;
+  redact_columns?: unknown;
+  maxRows?: unknown;
+}
+
+export interface RuntimeConnectionPolicy {
+  redactsRows?: boolean;
+  redactColumns?: readonly string[];
+  maxRows?: number;
 }
 
 const configExtrasByRegistry = new WeakMap<Registry, Map<string, ConnectionConfigExtras>>();
 const topLevelExtrasByRegistry = new WeakMap<Registry, TopLevelConfigExtras>();
+const runtimePolicyResolvers = new WeakMap<Registry, (id: string) => RuntimeConnectionPolicy | undefined>();
+
+export function setRuntimePolicyResolver(registry: Registry, resolver: (id: string) => RuntimeConnectionPolicy | undefined): void {
+  runtimePolicyResolvers.set(registry, resolver);
+}
+
+export function getConnectionRuntimePolicy(registry: Registry, id: string): RuntimeConnectionPolicy | undefined {
+  return runtimePolicyResolvers.get(registry)?.(id);
+}
 
 export function setConnectionConfigExtras(registry: Registry, id: string, extras: ConnectionConfigExtras | undefined): void {
   let map = configExtrasByRegistry.get(registry);
@@ -157,7 +181,7 @@ export function removeConnectionEnvMeta(registry: Registry, id: string): void {
 }
 
 /**
- * Hydrate explicit `database`/`group`, `env`/`environment`, and `blocklist`/`lease` metadata from raw `tablewalk.json` text.
+ * Hydrate explicit `database`/`group`, `env`/`environment`, and agent policy metadata from raw `tablewalk.json` text.
  */
 export function loadConfigEnvMeta(registry: Registry, rawConfigJsonText: string): void {
   let parsed: Record<string, unknown>;
@@ -167,10 +191,23 @@ export function loadConfigEnvMeta(registry: Registry, rawConfigJsonText: string)
     return;
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
-  if (parsed.blocklist !== undefined || parsed.lease !== undefined) {
+  if (
+    parsed.blocklist !== undefined ||
+    parsed.lease !== undefined ||
+    parsed.environments !== undefined ||
+    parsed.redact !== undefined ||
+    parsed.redactColumns !== undefined ||
+    parsed.redact_columns !== undefined ||
+    parsed.maxRows !== undefined
+  ) {
     setTopLevelConfigExtras(registry, {
       ...(parsed.blocklist !== undefined ? { blocklist: parsed.blocklist } : {}),
       ...(parsed.lease !== undefined ? { lease: parsed.lease } : {}),
+      ...(parsed.environments !== undefined ? { environments: parsed.environments } : {}),
+      ...(parsed.redact !== undefined ? { redact: parsed.redact } : {}),
+      ...(parsed.redactColumns !== undefined ? { redactColumns: parsed.redactColumns } : {}),
+      ...(parsed.redact_columns !== undefined ? { redact_columns: parsed.redact_columns } : {}),
+      ...(parsed.maxRows !== undefined ? { maxRows: parsed.maxRows } : {}),
     });
   }
   if (!Array.isArray(parsed.connections)) return;
@@ -188,7 +225,11 @@ export function loadConfigEnvMeta(registry: Registry, rawConfigJsonText: string)
       rec.blockedTables !== undefined ||
       rec.blockedFields !== undefined ||
       rec.blockedColumns !== undefined ||
-      rec.lease !== undefined;
+      rec.lease !== undefined ||
+      rec.redact !== undefined ||
+      rec.redactColumns !== undefined ||
+      rec.redact_columns !== undefined ||
+      rec.maxRows !== undefined;
     if (!database && !env && !hasExtras) continue;
     const match =
       configs.find((c) => c.source === 'config' && c.name === name && !usedIds.has(c.id)) ??
@@ -208,6 +249,10 @@ export function loadConfigEnvMeta(registry: Registry, rawConfigJsonText: string)
           ...(rec.blockedFields !== undefined ? { blockedFields: rec.blockedFields } : {}),
           ...(rec.blockedColumns !== undefined ? { blockedColumns: rec.blockedColumns } : {}),
           ...(rec.lease !== undefined ? { lease: rec.lease } : {}),
+          ...(rec.redact !== undefined ? { redact: rec.redact } : {}),
+          ...(rec.redactColumns !== undefined ? { redactColumns: rec.redactColumns } : {}),
+          ...(rec.redact_columns !== undefined ? { redact_columns: rec.redact_columns } : {}),
+          ...(rec.maxRows !== undefined ? { maxRows: rec.maxRows } : {}),
         });
       }
     }
@@ -544,13 +589,19 @@ export function recordAgentActivity(
 export function agentActivity(
   registry: Registry,
   sinceSeq = 0,
-): { seq: number; calls: AgentActivityEntry[]; egress: Record<string, number> } {
+): { seq: number; calls: AgentActivityEntry[]; egress: Record<string, number>; maxRows?: Record<string, number> } {
   const st = stateFor(registry);
   const calls = sinceSeq > 0 ? st.entries.filter((e) => e.seq > sinceSeq) : st.entries.slice();
+  const maxRows: Record<string, number> = {};
+  for (const conn of registry.list()) {
+    const policy = getConnectionRuntimePolicy(registry, conn.id);
+    if (policy?.maxRows !== undefined) maxRows[conn.id] = policy.maxRows;
+  }
   return {
     seq: st.seq,
     calls,
     egress: Object.fromEntries(sessionEgress),
+    ...(Object.keys(maxRows).length ? { maxRows } : {}),
   };
 }
 

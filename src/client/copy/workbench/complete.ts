@@ -9,4 +9,7 @@ export const say = defineMessages({
   nullCheck: 'null check',
   rowsThatPointHere: 'rows that point here',
   pointsHere: 'points at {table}',
+  allowedValue: 'allowed',
+  measure: 'measure',
+  period: 'period',
 });

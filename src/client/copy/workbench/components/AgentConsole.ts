@@ -30,4 +30,7 @@ export const say = defineMessages({
   targetConnectionsGroup: 'Target connection',
   shapeOnlyBadge: 'shape-only',
   writableBadge: 'writable',
+  maskedBadge: 'masked',
+  rowsBudgetPill: '{read}/{max} rows',
+  rowsReadPill: '{read} rows',
 });

@@ -1,0 +1,25 @@
+@layer look {
+  .ask-target {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2h) var(--space-4) 0;
+    font: 500 var(--text-xs) var(--face-ui, var(--sans));
+    color: var(--ink-subtle);
+  }
+
+  .ask-preview {
+    padding: var(--space-2) var(--space-4);
+    border-top: 1px solid var(--line);
+    font: var(--text-xs) var(--code);
+    color: var(--ink-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ask-preview.has-issue {
+    color: var(--status-critical);
+    font-family: var(--face-ui, var(--sans));
+  }
+}

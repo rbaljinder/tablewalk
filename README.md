@@ -208,8 +208,8 @@ Or point it at a database instead of a config file: `"args": ["tablewalk",
 running loopback browser session over Streamable HTTP at
 `http://localhost:4111/mcp` (or set `TABLEWALK_MCP_URL=http://localhost:4111/mcp`
 for stdio-only clients) so the browser and the agent share one connection pool,
-Undo stack, row-egress counter, and live activity trail. **Twenty-six tools** —
-twenty read-only, and six writes offered only when a connection is
+Undo stack, row-egress counter, and live activity trail. **Twenty-seven tools** —
+twenty-one read-only, and six writes offered only when a connection is
 `"writable": true`. Every answer carries a deep link the human beside the
 agent can open in the UI, and says what it cost in rows and milliseconds.
 
@@ -219,6 +219,7 @@ agent can open in the UI, and says what it cost in rows and milliseconds.
 |---|---|
 | `schema_summary` | orientation in a few hundred tokens — hubs, event tables, the deepest reference chain |
 | `tables` / `table` | the list; then a table's columns, DDL, and foreign keys in **both** directions |
+| `path` | shortest foreign-key paths between two tables across `to-one` and `to-many` hops, flagging unindexed reverse joins with approximate row costs, `CREATE INDEX` DDL, and a `queryHint` |
 | `find` | where a name lives, across every table and column |
 | `query` | the query language, or a named `view` from `tablewalk.json` (even on `"hidden"`-column connections); errors carry suggestions and the table's real columns |
 | `breakdown` | counts and sums grouped by something — `invoice count by month invoice_date` |
@@ -288,8 +289,12 @@ token, an internal audit or secrets table), give the connection
 (top-level or per connection): the catalog, foreign-key graph and every answer
 leave blocked tables, database SQL views (`CREATE VIEW`) and blocked fields out,
 a query or configured view that names or traverses one is refused, and raw SQL
-(`sql`, `explain`, `verify_ddl`) is withheld and refused on that connection. A
-database role without `SELECT` on them is stronger still.
+(`sql`, `explain`, `verify_ddl`) is withheld and refused on that connection.
+Where PII or secrets should stay visible in shape and deterministically masked in
+values, set `"redact": true` (and optional `"redactColumns": ["notes"]`, or pass
+`--redact` / `TABLEWALK_REDACT=1`), and bound total session egress with
+`"maxRows": 5000` (or `--max-rows 5000` / `TABLEWALK_MAX_ROWS=5000`). A
+database role without `SELECT` on sensitive tables is stronger still.
 
 For a local secret vault or ephemeral agent session, pipe the config in memory
 instead of writing secrets to disk — `--config <(vault read db/staging)`,
@@ -299,8 +304,8 @@ resolved only inside `Registry.environment`, `"active": "billing@staging"` and
 `"only": true` to expose one target, `--lazy` so MCP handshake answers before
 the database is dialed, `"lease": { "idleSeconds": 30, "maxSeconds": 300 }` (or
 `--lease 5m`) to evict idle sockets and close connections when the lease ends,
-or `--query "invoice status = open"` / `--call schema_summary` for a single
-fast JSON lookup that closes its connection on exit.
+`--query "invoice status = open"` / `--call schema_summary` for a single fast
+JSON lookup, or `--batch calls.jsonl` (including `{ vault read db/staging; cat calls.jsonl; } | npx tablewalk --config - --batch -`) to stream multiple queries and tool calls as NDJSON over one session before closing all connections.
 
 A call is bounded in time and in what it counts. Statements run under a
 30-second cap, and `sql` takes `timeout_ms` to lower it for one statement:
@@ -341,10 +346,15 @@ on should live in version control rather than in one person's browser.
 
 ```json
 {
+  "environments": {
+    "local":   { "writable": true },
+    "staging": { "redact": true, "maxRows": 10000, "lease": "10m" },
+    "prod":    { "rows": false, "blocklist": { "tables": ["audit_*"] } }
+  },
   "connections": [
-    { "name": "app-local",   "url": "postgres://localhost/app", "database": "app", "env": "local", "writable": true, "schemas": ["public"] },
+    { "name": "app-local",   "url": "postgres://localhost/app", "database": "app", "env": "local", "schemas": ["public"] },
     { "name": "app-staging", "url": "postgres://reader@staging/app", "database": "app", "env": "staging" },
-    { "name": "production",  "url": "postgres://reader@prod/app", "database": "app", "env": "prod", "rows": false },
+    { "name": "production",  "url": "postgres://reader@prod/app", "database": "app", "env": "prod" },
     { "name": "analytics",   "url": "postgres://user:pass@warehouse/an" },
     { "name": "cache",       "url": "./var/cache.sqlite" }
   ]
@@ -356,7 +366,9 @@ Connections that share a logical `database` (either declared explicitly with
 `app (prod)`, or `app-replica`) appear as one promotion pipeline across the top
 bar, the SQL editor, and the Connections screen — switching environments keeps
 your current table, query, or record open when that table exists on the other
-side. In MCP, every tool accepts `"connection": "app@staging"`, `"@staging"`, or
+side, while top-level `"environments"` policies apply shared `writable`, `rows`,
+`lease`, `blocklist`, `redact` and `maxRows` defaults across every database in
+that tier. In MCP, every tool accepts `"connection": "app@staging"`, `"@staging"`, or
 `"env": "staging"`, and implicit writes while a `prod` environment is active are
 refused unless `"connection"` or `"env": "prod"` is named explicitly.
 
@@ -634,6 +646,9 @@ mistri --app <dir>            an App, served: the App framework's, npx @mistriwo
                               staging, prod)
       --lease <duration>      bound connection lifetime (e.g. 120, 5m): close
                               idle connections and expire when the lease ends
+      --redact                deterministically mask sensitive PII and secret
+                              columns on every row read, withholding raw SQL
+      --max-rows <n>          cap total rows read per connection in this session
       --base-path <path>      the path a reverse proxy serves this server
                               under, like /tools: every address, asset, API
                               call, cookie and link carries it. Or "basePath"
@@ -657,6 +672,8 @@ mistri --app <dir>            an App, served: the App framework's, npx @mistriwo
       --call <tool>           run one MCP tool by name, print JSON, close all
                               connections, and exit
       --args <json>           with --call or --query: JSON object of arguments
+      --batch [path|-]        run newline-delimited queries or JSON {"tool","args"}
+                              calls over one session, print NDJSON, and exit
       --export <fmt>          print the schema as md, mermaid or json, then exit
                               (an App's brief, types, openapi and asyncapi are
                               mistri's)
@@ -728,7 +745,7 @@ as given, from the current directory.
 An option it does not recognize is an error, not a shrug: `tablewalk --prot
 4111` says so rather than quietly serving the default port.
 
-`--tools` offers one job's worth of tools instead of all twenty-six. Most
+`--tools` offers one job's worth of tools instead of all twenty-seven. Most
 sessions are one job — an agent reading a schema does not need the graph
 writers, one seeding a fixture does not need `explain` — and the listing is a
 fixed cost paid on connect, before anything is asked. `connections` and

@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.0.0-rc.19
+
+Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.77`.
+
+- Environment-tier policies (`"environments"` in `tablewalk.json` or piped vault configs, keyed by `"local"`, `"dev"`,
+  `"test"`, `"staging"`, `"replica"`, `"prod"` or custom `env` names) set shared `writable`, `rows`, `lease`,
+  `blocklist`, `redact` / `redactColumns` and `maxRows` defaults across every connection in that tier, with explicit
+  per-connection overrides and round-trip preservation on **Save to file**.
+- Always-on connection redaction (`"redact": true`, `"redactColumns": [...]`, `--redact`, `TABLEWALK_REDACT`,
+  `TABLEWALK_REDACT_COLUMNS`) deterministically and idempotently masks PII and secrets across `query`, joined `views`,
+  `breakdown`, `profile`, `record`, `find`, `fixture`, `export` and HTTP reads while withholding raw `sql`, `explain`
+  and `verify_ddl`.
+- Session row-egress budgets (`"maxRows"`, `--max-rows <n>`, `TABLEWALK_MAX_ROWS`) cap total rows returned per
+  connection across `query`, `breakdown`, `sql`, `find`, `fixture` and `export`, clamp per-call limits to the remaining
+  budget, refuse further row reads with `limit` once exhausted, and surface `redactsRows`, `maxRows` and
+  `rowsRemaining` across `connections`, `/api/connections`, `/api/agent/activity`, Connections and the Agent console.
+- Guardrails can also be supplied directly from environment variables (`TABLEWALK_BLOCKLIST`,
+  `TABLEWALK_BLOCKED_TABLES`, `TABLEWALK_BLOCKED_FIELDS`, `TABLEWALK_REDACT`, `TABLEWALK_REDACT_COLUMNS`,
+  `TABLEWALK_MAX_ROWS`, `TABLEWALK_LEASE`) for zero-file CLI and MCP launches.
+- A new read-only MCP tool, `path` (bringing the server to twenty-seven tools: twenty-one read-only and six writes),
+  finds the shortest foreign-key paths between two tables across `to-one` and `to-many` hops, flags reverse hops
+  missing a leading index with approximate rows scanned and ready-to-run `CREATE INDEX` DDL, and emits `queryHint`
+  expressions.
+- Multi-call CLI batch mode (`--batch [path|-]`) runs newline-delimited queries, breakdowns or JSON `{ "tool", "args" }`
+  calls over one connection session (including single-pipe `{ vault get; cat calls.jsonl; } | tablewalk --config - --batch -`),
+  streaming NDJSON lines to stdout before closing all connections; PostgreSQL keyset `export` now streams 25,000-row
+  batches with overlapped prefetching.
+- Workbench refinements: foreign-key dot-path (`customer_id.country_code.name`), `CHECK` vocabulary, boolean/date value
+  and breakdown measure/period autocomplete in the query bar and `⌘/` **Ask** dialog (with active `@env` posture badge
+  and live query/breakdown/joined-view preview); a 3-tab **Check the shape** dialog combining **Schema & perf**
+  (approximate row counts and 1-click **Copy index SQL**), **Data anomalies** (1-click **Walk rows**) and **Environment
+  drift** (`diff` against sibling environments); and `masked`, `restricted` and row-budget indicators across the
+  topbar, Connections and Agent console.
+
 ## 1.0.0-rc.18
 
 Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.77`.

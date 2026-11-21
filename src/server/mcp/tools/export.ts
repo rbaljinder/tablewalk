@@ -32,7 +32,7 @@ import { MAX_LIMIT } from '@mistriwork/engine/shared/reads.js';
 import { resolveOrder, tableDialect, type Order } from '@mistriwork/engine/shared/schema.js';
 import { continueGroups, keysetAfter, keysetOrder, pageBounds } from '@mistriwork/engine/shared/keysetPage.js';
 import { resolveNamedView, resolveSavedQuery, shelfOf } from '../shelf.js';
-import { ENV_ARG, STATS, type Handler, ToolError } from '../toolkit.js';
+import { ENV_ARG, getConnectionRuntimePolicy, STATS, type Handler, ToolError } from '../toolkit.js';
 
 export const definitions = [
   {
@@ -105,8 +105,10 @@ export const definitions = [
 
 type Name = (typeof definitions)[number]['name'];
 
-/** Rows read per statement, and so the most the server holds of a file at once. */
+/** Rows read per statement on synchronous/default adapters, and so the most the server holds of a file at once. */
 export const EXPORT_BATCH = 5_000;
+/** Rows read per statement over asynchronous PostgreSQL connections, cutting keyset round-trips 5x on million-row exports. */
+export const POSTGRES_EXPORT_BATCH = 25_000;
 /** The most rows an export paged by offset holds: past it the database re-reads every row before each batch. */
 export const EXPORT_OFFSET_ROWS = 100_000;
 /** Exports running at once in this process. Each holds a statement and a file for as long as it reads. */
@@ -175,6 +177,7 @@ export const handlers = {
       throw new ToolError('invalid_argument', 'export: "compress" must be "gzip" when given.');
     }
     const stem = args.name === undefined ? undefined : stemOf(String(args.name));
+    const connRedacts = Boolean(registry && getConnectionRuntimePolicy(registry, id)?.redactsRows);
     const redact = args.redact === true || args.redact === 'true';
     const redactColumns = Array.isArray(args.redact_columns)
       ? args.redact_columns.map(String)
@@ -207,7 +210,8 @@ export const handlers = {
       } else {
         source = await sqlSource(adapter, schema, statement, wanted);
       }
-      const maskModule = redact ? await import('../../mask.js') : undefined;
+      const needsExplicitMask = redact || (connRedacts && Boolean(redactColumns?.length));
+      const maskModule = needsExplicitMask ? await import('../../mask.js') : undefined;
       const maskTableId = findTable(schema, source.table)?.id;
       const outcome = await writeExport({
         source,
@@ -215,6 +219,7 @@ export const handlers = {
         gzip: args.compress === 'gzip',
         connection: id,
         stem: stem ?? defaultStem ?? source.table,
+        alreadyRedacted: connRedacts,
         ...(maskModule
           ? {
               mask: (rows: Row[]) => maskModule.maskTableRows(schema, maskTableId, rows, { columns: redactColumns }),
@@ -260,6 +265,10 @@ function hintFor(format: Format, path: string): string {
 }
 
 /* ---- sources ---------------------------------------------------------- */
+
+function batchSizeFor(dialect: DatabaseSchema['dialect']): number {
+  return dialect === 'postgres' ? POSTGRES_EXPORT_BATCH : EXPORT_BATCH;
+}
 
 function typeOfValue(value: unknown): string {
   if (value === null || value === undefined) return 'unknown';
@@ -320,6 +329,8 @@ function viewDefSource(adapter: Adapter, schema: DatabaseSchema, view: ViewDef, 
       return result;
     },
     (names) => names.map((name) => ({ name, type: types.get(name) ?? 'unknown' })),
+    0,
+    batchSizeFor(adapter.dialect),
   );
 }
 
@@ -361,6 +372,7 @@ async function querySource(
       ? resolveOrder(table, query.orderBy).order
       : key.map((column) => ({ column, direction: 'asc' as const }));
   const dialect = tableDialect(schema, table);
+  const batchSize = batchSizeFor(dialect);
   const keyed = !table.union && keysetOrder(table, order, dialect);
   const read = (
     limit: number,
@@ -376,8 +388,8 @@ async function querySource(
       undefined,
       continuation as never,
     ).then(({ result }) => result);
-  if (!keyed) return offsetSource(table.id, total, (offset, size) => read(size, offset, shown), typed);
-  return keysetSource(table, order, total, shown, read, query.filter?.groups, dialect, typed);
+  if (!keyed) return offsetSource(table.id, total, (offset, size) => read(size, offset, shown), typed, 0, batchSize);
+  return keysetSource(table, order, total, shown, read, query.filter?.groups, dialect, typed, batchSize);
 }
 
 /** The rows the file is to hold: the caller's `limit`, else the query's own, else all of them. */
@@ -403,6 +415,7 @@ function keysetSource(
   filterGroups: unknown,
   dialect: DatabaseSchema['dialect'],
   typed: (names: string[]) => Column[],
+  batchSize = EXPORT_BATCH,
 ): Source & { table: string } {
   /* An order column the file does not show is read for the boundary and taken out of the rows. */
   const extra = shown ? order.map((o) => o.column).filter((c) => !shown.includes(c)) : [];
@@ -424,7 +437,7 @@ function keysetSource(
     async next() {
       if (fallback) return fallback.next();
       if (done || written >= total) return undefined;
-      const size = Math.min(EXPORT_BATCH, total - written);
+      const size = Math.min(batchSize, total - written);
       const tail = after && keysetAfter(table, order, after, dialect);
       if (lost || (after && !tail)) return switchToOffset(size);
       const continuation = tail ? { reverse: false as const, groups: continueGroups(filterGroups as never, tail) as never } : undefined;
@@ -443,7 +456,14 @@ function keysetSource(
   /* A boundary that cannot be said exactly (a value that does not come back as stored): the rest goes by offset, in
      the same total order, and the offset cap applies from there. */
   function switchToOffset(_size: number): Promise<Batch | undefined> {
-    const rest = offsetSource(table.id, total - written, (offset, size) => read(size, written + offset, columns), typed, written);
+    const rest = offsetSource(
+      table.id,
+      total - written,
+      (offset, size) => read(size, written + offset, columns),
+      typed,
+      written,
+      batchSize,
+    );
     fallback = rest;
     source.paging = 'offset';
     return rest.next();
@@ -458,6 +478,7 @@ function offsetSource(
   read: (offset: number, size: number) => Promise<Page>,
   typed: (names: string[]) => Column[],
   already = 0,
+  batchSize = EXPORT_BATCH,
 ): Source & { table: string } {
   const cap = Math.max(EXPORT_OFFSET_ROWS - already, 0);
   const target = Math.min(total, cap);
@@ -481,7 +502,7 @@ function offsetSource(
       if (done || written >= target) return undefined;
       /* One row past the cap says whether the cap cut anything off. */
       const peek = target === cap && cap < total ? 1 : 0;
-      const size = Math.min(EXPORT_BATCH, target + peek - written);
+      const size = Math.min(batchSize, target + peek - written);
       const page = await read(written, size);
       if (!names.length) names = typed(page.columns);
       let rows = page.rows;
@@ -556,6 +577,7 @@ async function writeExport(opts: {
   gzip: boolean;
   connection: string;
   stem: string;
+  alreadyRedacted?: boolean;
   mask?: (rows: Row[]) => { rows: Row[]; maskedColumns: string[] };
 }): Promise<ExportOutcome> {
   const { source, format } = opts;
@@ -587,6 +609,9 @@ async function writeExport(opts: {
     const names = source.columns.map((c) => c.name);
     if (format === 'csv') await put(`${names.map(csvCell).join(',')}\r\n`);
     while (batch) {
+      /* Prefetch the next page while formatting and writing the current page to disk. */
+      const nextBatch = source.next();
+      nextBatch.catch(() => {});
       let batchRows = batch.rows;
       if (opts.mask && batchRows.length) {
         const masked = opts.mask(batchRows);
@@ -600,7 +625,7 @@ async function writeExport(opts: {
         rows++;
       }
       await put(lines.join(''));
-      batch = await source.next();
+      batch = await nextBatch;
     }
     if (format === 'json') await put(rows ? '\n]\n' : '[]\n');
     if (gzip) {
@@ -626,7 +651,12 @@ async function writeExport(opts: {
     ms: Date.now() - started,
     truncated: source.truncated(),
     paging: source.paging,
-    ...(opts.mask ? { redacted: true, redactedColumns: [...redactedSet] } : {}),
+    ...(opts.mask || opts.alreadyRedacted
+      ? {
+          redacted: true,
+          ...(redactedSet.size ? { redactedColumns: [...redactedSet] } : {}),
+        }
+      : {}),
     sample,
     ...(note ? { note } : {}),
   };

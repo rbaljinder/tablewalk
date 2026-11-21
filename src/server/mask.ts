@@ -10,7 +10,18 @@
  * as stored, nulls stay null, and distinct inputs map to distinct synthetic
  * values of the right shape and length.
  */
-import { findTable, referencesFrom, referencesTo, type DatabaseSchema, type TableMeta } from '@mistriwork/engine/host';
+import {
+  Refusal,
+  findTable,
+  referencesFrom,
+  referencesTo,
+  type Adapter,
+  type DatabaseSchema,
+  type TableMeta,
+} from '@mistriwork/engine/host';
+import { type BreakdownResult, type ProfileResult, type ViewResult } from '@mistriwork/engine/adapters/adapter.js';
+import { lendWriteView, writeViewOf } from '@mistriwork/engine/adapters/storeHost.js';
+import { tryResolvePath } from '@mistriwork/engine/shared/view.js';
 
 type ColumnMeta = TableMeta['columns'][number];
 
@@ -210,6 +221,26 @@ function maskJsonObject(value: unknown, seed: number): unknown {
   return out;
 }
 
+const ALREADY_MASKED: Record<MaskKind, RegExp> = {
+  email: /^user-[0-9a-f]{8}@example\.com$/,
+  phone: /^\+1-555-0\d{2}-\d{4}$/,
+  first_name: /^(?:Alex|Sam|Jordan|Taylor|Morgan|Casey|Riley|Jamie|Avery|Quinn|Cameron|Drew) [0-9a-f]{4}$/,
+  last_name: /^(?:Rivera|Chen|Patel|Kim|Silva|Novak|Costa|Brooks|Hayes|Reed|Ellis|Stone)-[0-9a-f]{4}$/,
+  full_name:
+    /^(?:Alex|Sam|Jordan|Taylor|Morgan|Casey|Riley|Jamie|Avery|Quinn|Cameron|Drew) (?:Rivera|Chen|Patel|Kim|Silva|Novak|Costa|Brooks|Hayes|Reed|Ellis|Stone) \([0-9a-f]{4}\)$/,
+  address: /^\d{3} Example St #[0-9a-f]{4}$/,
+  postal: /^00\d{3}$/,
+  ip: /^192\.0\.2\.\d{1,3}$/,
+  dob: /^\d{4}-\d{2}-\d{2}$/,
+  secret: /^redacted-[0-9a-f]{8}$/,
+  text: /^Redacted [0-9a-f]{8}$/,
+};
+
+function isAlreadyMasked(kind: MaskKind, value: unknown): boolean {
+  if (typeof value !== 'string' || kind === 'dob') return false;
+  return ALREADY_MASKED[kind].test(value);
+}
+
 function matchesExplicit(wanted: ReadonlySet<string>, table: TableMeta | undefined, column: string): boolean {
   const lower = column.toLowerCase();
   if (wanted.has(lower)) return true;
@@ -280,6 +311,10 @@ export function maskTableRows<Row extends Record<string, unknown>>(
         continue;
       }
       if (!kind) continue;
+      if (isAlreadyMasked(kind, value)) {
+        maskedSet.add(colName);
+        continue;
+      }
       const hash = fnv1a(`${salt}\0${label}\0${colName}\0${String(value)}`);
       copy[colName] = maskScalar(kind, value, hash, spec?.max);
       maskedSet.add(colName);
@@ -288,4 +323,343 @@ export function maskTableRows<Row extends Record<string, unknown>>(
   });
 
   return { rows: out, maskedColumns: [...maskedSet] };
+}
+
+/**
+ * Mask a compiled multi-table `ViewResult` using each output column's resolved
+ * `(table, column)` origin so joined foreign-key paths receive the exact same
+ * deterministic tokens as single-table reads.
+ */
+export function maskViewResult(schema: DatabaseSchema, result: ViewResult, options: MaskOptions = {}): ViewResult {
+  if (!result.rows.length) return result;
+  const wanted = new Set((options.columns ?? []).map((c) => c.trim().toLowerCase()).filter(Boolean));
+  const salt = options.salt ?? DEFAULT_SALT;
+
+  interface ViewColPlan {
+    tableLabel: string;
+    colLabel: string;
+    locked: boolean;
+    allowed: boolean;
+    kind: MaskKind | null;
+    max?: number;
+  }
+
+  const lockedCache = new Map<string, Set<string>>();
+  const peerCache = new Map<string, boolean>();
+  const getLocked = (t: TableMeta) => {
+    let s = lockedCache.get(t.id);
+    if (!s) lockedCache.set(t.id, (s = structuralColumns(schema, t)));
+    return s;
+  };
+  const getPeer = (t: TableMeta) => {
+    let p = peerCache.get(t.id);
+    if (p === undefined) peerCache.set(t.id, (p = tableHasPiiPeer(t)));
+    return p;
+  };
+
+  const plan = new Map<string, ViewColPlan>();
+  for (const col of result.resolved ?? []) {
+    if (col.aggregate && col.aggregate !== 'latest' && col.aggregate !== 'min' && col.aggregate !== 'max') {
+      plan.set(col.name, { tableLabel: col.table, colLabel: col.column, locked: true, allowed: false, kind: null });
+      continue;
+    }
+    const table = findTable(schema, col.table);
+    const meta = table?.columns.find((c) => c.name === col.column);
+    const locked = table ? getLocked(table).has(col.column) : false;
+    const explicit = matchesExplicit(wanted, table, col.column) || wanted.has(col.name.toLowerCase()) || wanted.has(col.path.toLowerCase());
+    const kind = locked
+      ? null
+      : classifyColumn(
+          table ?? ({ id: col.table, name: col.table, columns: [] } as unknown as TableMeta),
+          meta,
+          col.column,
+          explicit,
+          table ? getPeer(table) : false,
+        );
+    plan.set(col.name, {
+      tableLabel: table?.id ?? col.table,
+      colLabel: col.column,
+      locked,
+      allowed: Boolean(meta?.allowed?.length),
+      kind,
+      max: meta?.text?.max,
+    });
+  }
+
+  const rows = result.rows.map((row) => {
+    const copy: Record<string, unknown> = { ...row };
+    for (const [outName, value] of Object.entries(row)) {
+      if (value === null || value === undefined) continue;
+      const spec = plan.get(outName);
+      if (spec?.locked) continue;
+      const tableLabel = spec?.tableLabel ?? 'view';
+      const colLabel = spec?.colLabel ?? outName;
+      let kind = spec?.kind ?? null;
+      if (!kind && typeof value === 'string' && EMAIL_VALUE.test(value) && !spec?.allowed) {
+        kind = 'email';
+      } else if (!kind && typeof value === 'object' && !(value instanceof Date) && !(value instanceof Uint8Array)) {
+        copy[outName] = maskJsonObject(value, fnv1a(`${salt}\0${tableLabel}\0${colLabel}`));
+        continue;
+      }
+      if (!kind || isAlreadyMasked(kind, value)) continue;
+      const hash = fnv1a(`${salt}\0${tableLabel}\0${colLabel}\0${String(value)}`);
+      copy[outName] = maskScalar(kind, value, hash, spec?.max);
+    }
+    return copy;
+  });
+
+  return { ...result, rows };
+}
+
+/**
+ * Mask group keys, reference labels, and `min`/`max` measures in a `BreakdownResult`.
+ */
+export function maskBreakdownResult(
+  schema: DatabaseSchema,
+  baseTableId: string,
+  result: BreakdownResult,
+  options: MaskOptions = {},
+): BreakdownResult {
+  if (!result.rows.length) return result;
+  const baseTable = findTable(schema, baseTableId);
+  const wanted = new Set((options.columns ?? []).map((c) => c.trim().toLowerCase()).filter(Boolean));
+  const salt = options.salt ?? DEFAULT_SALT;
+
+  const plan = new Map<
+    string,
+    { tableLabel: string; colLabel: string; locked: boolean; allowed: boolean; kind: MaskKind | null; max?: number }
+  >();
+  for (const m of result.resolved ?? []) {
+    const canHoldValue =
+      (m.kind === 'key' && !m.bucket) || m.kind === 'label' || (m.kind === 'measure' && (m.fn === 'min' || m.fn === 'max'));
+    if (!canHoldValue) {
+      plan.set(m.name, { tableLabel: baseTableId, colLabel: m.name, locked: true, allowed: false, kind: null });
+      continue;
+    }
+    const resolved = baseTable && m.path ? tryResolvePath(schema, baseTable.id, m.path).resolved : undefined;
+    const targetTable = resolved ? findTable(schema, resolved.table.id) : baseTable;
+    const colName = resolved?.column.name ?? m.path?.split('.').at(-1) ?? m.name;
+    const colMeta = resolved?.column ?? targetTable?.columns.find((c) => c.name === colName);
+    const locked = targetTable ? structuralColumns(schema, targetTable).has(colName) : false;
+    const explicit =
+      matchesExplicit(wanted, targetTable, colName) ||
+      wanted.has(m.name.toLowerCase()) ||
+      (m.path ? wanted.has(m.path.toLowerCase()) : false);
+    const kind = locked
+      ? null
+      : classifyColumn(
+          targetTable ?? ({ id: baseTableId, name: baseTableId, columns: [] } as unknown as TableMeta),
+          colMeta,
+          colName,
+          explicit,
+          targetTable ? tableHasPiiPeer(targetTable) : false,
+        );
+    plan.set(m.name, {
+      tableLabel: targetTable?.id ?? baseTableId,
+      colLabel: colName,
+      locked,
+      allowed: Boolean(colMeta?.allowed?.length),
+      kind,
+      max: colMeta?.text?.max,
+    });
+  }
+
+  const rows = result.rows.map((row) => {
+    const copy: Record<string, unknown> = { ...row };
+    for (const [outName, value] of Object.entries(row)) {
+      if (value === null || value === undefined) continue;
+      const spec = plan.get(outName);
+      if (spec?.locked) continue;
+      const tableLabel = spec?.tableLabel ?? baseTableId;
+      const colLabel = spec?.colLabel ?? outName;
+      let kind = spec?.kind ?? null;
+      if (!kind && typeof value === 'string' && EMAIL_VALUE.test(value) && !spec?.allowed) {
+        kind = 'email';
+      }
+      if (!kind || isAlreadyMasked(kind, value)) continue;
+      const hash = fnv1a(`${salt}\0${tableLabel}\0${colLabel}\0${String(value)}`);
+      copy[outName] = maskScalar(kind, value, hash, spec?.max);
+    }
+    return copy;
+  });
+
+  return { ...result, rows };
+}
+
+/**
+ * Scrub `min`, `max`, and `common` samples on sensitive columns in a `ProfileResult`.
+ */
+export function maskProfileResult(schema: DatabaseSchema, result: ProfileResult, options: MaskOptions = {}): ProfileResult {
+  const table = findTable(schema, result.table);
+  const locked = table ? structuralColumns(schema, table) : new Set<string>();
+  const peerPii = table ? tableHasPiiPeer(table) : false;
+  const wanted = new Set((options.columns ?? []).map((c) => c.trim().toLowerCase()).filter(Boolean));
+  const salt = options.salt ?? DEFAULT_SALT;
+  const label = table?.id ?? result.table;
+
+  let anyScrubbed = false;
+  const columns = result.columns.map((colProfile) => {
+    if (locked.has(colProfile.column)) return colProfile;
+    const meta = table?.columns.find((c) => c.name === colProfile.column);
+    const explicit = matchesExplicit(wanted, table, colProfile.column);
+    const kind = classifyColumn(
+      table ?? ({ id: label, name: label, columns: [] } as unknown as TableMeta),
+      meta,
+      colProfile.column,
+      explicit,
+      peerPii,
+    );
+    if (!kind) return colProfile;
+    anyScrubbed = true;
+    const { min: _min, max: _max, common, ...rest } = colProfile;
+    return {
+      ...rest,
+      ...(common
+        ? {
+            common: common.map((item) => ({
+              frac: item.frac,
+              value:
+                item.value === null || item.value === undefined || isAlreadyMasked(kind, item.value)
+                  ? item.value
+                  : maskScalar(kind, item.value, fnv1a(`${salt}\0${label}\0${colProfile.column}\0${String(item.value)}`), meta?.text?.max),
+            })),
+          }
+        : {}),
+    };
+  });
+
+  return {
+    ...result,
+    columns,
+    ...(anyScrubbed && !result.redacted ? { redacted: 'Sensitive column samples are deterministically masked on this connection.' } : {}),
+  };
+}
+
+/**
+ * Wrap an `Adapter` so every row-bearing read (`query`, `runView`, `runBreakdown`,
+ * `scopeReads`, `profile`, and write readbacks) deterministically masks PII,
+ * secrets, and `options.columns`, while refusing raw SQL and EXPLAIN.
+ */
+export function applyRedaction(
+  adapter: Adapter,
+  introspected: DatabaseSchema,
+  name: string,
+  options: MaskOptions = {},
+): { adapter: Adapter; schema: DatabaseSchema } {
+  let currentSchema = introspected;
+  const refusedSql = (what: string) =>
+    new Refusal(
+      `"${name}" masks sensitive columns ("redact": true): ${what}. ` +
+        'Use `query`, `breakdown`, `record`, `export`, or a configured `view` instead.',
+    );
+
+  const maskTx = <Tx extends (Parameters<NonNullable<Adapter['transaction']>>[0] extends (tx: infer T) => unknown ? T : never)>(
+    tx: Tx,
+  ): Tx =>
+    ({
+      ...(tx.lockRecord ? { lockRecord: tx.lockRecord.bind(tx) } : {}),
+      query: async (request) => {
+        const res = await tx.query(request);
+        return { ...res, rows: maskTableRows(currentSchema, request.table, res.rows, options).rows };
+      },
+      count: tx.count.bind(tx),
+      ...(tx.aggregate ? { aggregate: tx.aggregate.bind(tx) } : {}),
+      insert: async (request) => {
+        const res = await tx.insert(request);
+        return res.row ? { ...res, row: maskTableRows(currentSchema, request.table, [res.row], options).rows[0] } : res;
+      },
+      update: tx.update.bind(tx),
+      remove: tx.remove.bind(tx),
+      ...(tx.tell ? { tell: tx.tell.bind(tx) } : {}),
+      ...(tx.noted ? { noted: tx.noted.bind(tx) } : {}),
+    }) as Tx;
+
+  const wrapped: Adapter = {
+    dialect: adapter.dialect,
+    close: adapter.close.bind(adapter),
+    introspect: async () => {
+      currentSchema = await adapter.introspect();
+      return currentSchema;
+    },
+    query: async (request) => {
+      const res = await adapter.query(request);
+      return { ...res, rows: maskTableRows(currentSchema, request.table, res.rows, options).rows };
+    },
+    count: adapter.count.bind(adapter),
+  };
+
+  if (adapter.poolStats) wrapped.poolStats = adapter.poolStats.bind(adapter);
+  if (adapter.estimateCount) wrapped.estimateCount = adapter.estimateCount.bind(adapter);
+  if (adapter.countEach) wrapped.countEach = adapter.countEach.bind(adapter);
+  if (adapter.runView) {
+    const runView = adapter.runView.bind(adapter);
+    wrapped.runView = async (view, offset) => maskViewResult(currentSchema, await runView(view, offset), options);
+  }
+  if (adapter.countView) wrapped.countView = adapter.countView.bind(adapter);
+  if (adapter.runBreakdown) {
+    const runBreakdown = adapter.runBreakdown.bind(adapter);
+    wrapped.runBreakdown = async (def, offset) => maskBreakdownResult(currentSchema, def.base, await runBreakdown(def, offset), options);
+  }
+  if (adapter.countBreakdown) wrapped.countBreakdown = adapter.countBreakdown.bind(adapter);
+  if (adapter.aggregate) wrapped.aggregate = adapter.aggregate.bind(adapter);
+  if (adapter.scopeReads) {
+    const scopeReads = adapter.scopeReads.bind(adapter);
+    wrapped.scopeReads = async (scope) => {
+      const bound = await scopeReads(scope);
+      return {
+        query: async (request) => {
+          const res = await bound.query(request);
+          return { ...res, rows: maskTableRows(currentSchema, request.table, res.rows, options).rows };
+        },
+        count: bound.count.bind(bound),
+        runView: async (view, offset) => maskViewResult(currentSchema, await bound.runView(view, offset), options),
+        countView: bound.countView.bind(bound),
+        runBreakdown: async (def, offset) => maskBreakdownResult(currentSchema, def.base, await bound.runBreakdown(def, offset), options),
+        countBreakdown: bound.countBreakdown.bind(bound),
+        ...(bound.aggregate ? { aggregate: bound.aggregate.bind(bound) } : {}),
+        ...(bound.countEach ? { countEach: bound.countEach.bind(bound) } : {}),
+      };
+    };
+  }
+  if (adapter.runSql) {
+    wrapped.runSql = async () => {
+      throw refusedSql('raw SQL is refused because arbitrary projections can alias around column masking');
+    };
+  }
+  if (adapter.explainSql) {
+    wrapped.explainSql = async () => {
+      throw refusedSql('explaining raw SQL is refused when connection masking is active');
+    };
+  }
+  if (adapter.ddl) wrapped.ddl = adapter.ddl.bind(adapter);
+  if (adapter.profile) {
+    const profile = adapter.profile.bind(adapter);
+    wrapped.profile = async (table, limits) => maskProfileResult(currentSchema, await profile(table, limits), options);
+  }
+  if (adapter.insert) {
+    const insert = adapter.insert.bind(adapter);
+    wrapped.insert = async (request) => {
+      const res = await insert(request);
+      return res.row ? { ...res, row: maskTableRows(currentSchema, request.table, [res.row], options).rows[0] } : res;
+    };
+  }
+  if (adapter.update) wrapped.update = adapter.update.bind(adapter);
+  if (adapter.remove) wrapped.remove = adapter.remove.bind(adapter);
+  if (adapter.transaction) {
+    const txFn = adapter.transaction.bind(adapter);
+    wrapped.transaction = (run) => txFn((tx) => run(maskTx(tx)));
+  }
+  if (adapter.scopeTransaction) {
+    const scopeTx = adapter.scopeTransaction.bind(adapter);
+    wrapped.scopeTransaction = (scope, run) => scopeTx(scope, (tx, catalog) => run(maskTx(tx), catalog));
+  }
+
+  const innerView = writeViewOf(adapter);
+  lendWriteView(wrapped, {
+    over: innerView ? innerView.over : adapter,
+    records: (records) => maskTx(innerView ? innerView.records(records) : records),
+    catalog: (catalog) => (innerView ? innerView.catalog(catalog) : catalog),
+  });
+
+  return { adapter: wrapped, schema: currentSchema };
 }

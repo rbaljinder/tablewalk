@@ -115,6 +115,12 @@ Options:
       --lease <duration>
                       Bound connection lifetime (e.g. 120, 5m): close idle
                       connections and expire the session when the lease ends
+                      (or set TABLEWALK_LEASE)
+      --redact        Deterministically mask sensitive PII and secret columns on
+                      every row read, withholding raw SQL (or set
+                      TABLEWALK_REDACT=1 / TABLEWALK_REDACT_COLUMNS)
+      --max-rows <n>  Cap total rows read per connection in this session (or set
+                      TABLEWALK_MAX_ROWS)
       --base-path <path>
                       The path a reverse proxy serves this server under, like
                       /tools: every address, asset, API call, cookie and
@@ -145,6 +151,10 @@ Options:
       --call <tool>   Run one MCP tool by name, print JSON, close all
                       connections, and exit.
       --args <json>   With --call or --query: JSON object of tool arguments.
+      --batch [path|-]
+                      Run newline-delimited queries, breakdowns or JSON
+                      {"tool","args"} calls over one session, print NDJSON,
+                      close all connections, and exit.
       --export <fmt>  Print the schema as md, mermaid or json, then exit.
       --lint [fmt]    Report what the shape will cost — missing keys,
                       unindexed references, naive timestamps — as text or

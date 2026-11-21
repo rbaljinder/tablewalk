@@ -26,6 +26,9 @@ export interface SiblingEnvironment {
   tier: EnvironmentTier;
   writable: boolean;
   rows?: boolean;
+  hidesColumns?: boolean;
+  redactsRows?: boolean;
+  maxRows?: number;
 }
 
 export type EnrichedConnection<T extends { id: string; name: string }> = T & {
@@ -187,6 +190,9 @@ export function enrichConnectionsWithEnvironments<
     detail?: string;
     writable?: boolean;
     rows?: boolean;
+    hidesColumns?: boolean;
+    redactsRows?: boolean;
+    maxRows?: number;
     database?: string;
     env?: string;
     explicit?: boolean;
@@ -245,6 +251,9 @@ export function enrichConnectionsWithEnvironments<
         tier: o.envInfo.tier,
         writable: Boolean(o.item.writable),
         ...(o.item.rows === false ? { rows: false } : {}),
+        ...(o.item.hidesColumns ? { hidesColumns: true } : {}),
+        ...(o.item.redactsRows ? { redactsRows: true } : {}),
+        ...(typeof o.item.maxRows === 'number' ? { maxRows: o.item.maxRows } : {}),
       }));
     return {
       ...item,

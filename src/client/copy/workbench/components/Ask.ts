@@ -7,4 +7,8 @@ export const say = defineMessages({
   by: 'by',
   groups: ' groups — ',
   enterToRunEsc: 'Enter to run · Esc to cancel',
+  targetEnvLabel: 'Target: {name}',
+  maskedBadge: 'masked',
+  previewBreakdown: 'Breakdown over {table}',
+  previewJoinedView: 'Joined view from {table}',
 });

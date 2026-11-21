@@ -13,6 +13,7 @@ import { shown } from '@mistriwork/kit/client/addressMount.js';
 import { addHostListener, navFollow, removeHostListener } from '@mistriwork/kit/client/shellHost.js';
 import { shell } from '@mistriwork/kit/client/shellMode.js';
 import { enrichConnectionsWithEnvironments, type EnvironmentTier, type SiblingEnvironment } from '../../shared/environments.js';
+import './AgentConsole.css';
 
 interface Spec {
   type?: string | string[];
@@ -53,6 +54,7 @@ interface ActivityPayload {
   seq?: number;
   calls?: LiveCall[];
   egress?: Record<string, number>;
+  maxRows?: Record<string, number>;
   mcpEndpoint?: string | null;
 }
 
@@ -144,6 +146,9 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
       detail?: string;
       writable?: boolean;
       rows?: boolean;
+      hidesColumns?: boolean;
+      redactsRows?: boolean;
+      maxRows?: number;
       database?: string;
       env?: string;
       tier?: EnvironmentTier;
@@ -179,6 +184,7 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
       return;
     }
     if (got.structuredContent?.undoId !== undefined) void shell().undo?.refresh?.();
+    void activity.refetch();
     setTranscript((was) => [{ tool: tool.name, args: effectiveArgs, answer: got }, ...was]);
     setAnswer({ kind: 'answer', answer: got });
   };
@@ -239,6 +245,8 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
               <div className="agent-target-list">
                 {enrichedConnections.map((conn) => {
                   const current = conn.id === targetId;
+                  const rowsRead = activity.data?.egress?.[conn.id] ?? 0;
+                  const connMax = activity.data?.maxRows?.[conn.id] ?? conn.maxRows;
                   return (
                     <button
                       key={conn.id}
@@ -251,8 +259,21 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
                       <span className="agent-target-name">{conn.name}</span>
                       {conn.env ? <span className={`env-pill compact tone-${conn.tier}`}>{conn.env}</span> : null}
                       <span className="agent-target-posture">
-                        {conn.rows === false ? say('shapeOnlyBadge') : conn.writable ? say('writableBadge') : say('readOnly')}
+                        {conn.rows === false
+                          ? say('shapeOnlyBadge')
+                          : conn.redactsRows
+                            ? say('maskedBadge')
+                            : conn.writable
+                              ? say('writableBadge')
+                              : say('readOnly')}
                       </span>
+                      {connMax !== undefined ? (
+                        <span className={`agent-target-egress${rowsRead >= connMax ? ' at-cap' : ''}`}>
+                          {say('rowsBudgetPill', { read: formatNumber(rowsRead), max: formatNumber(connMax) })}
+                        </span>
+                      ) : rowsRead > 0 ? (
+                        <span className="agent-target-egress">{say('rowsReadPill', { read: formatNumber(rowsRead) })}</span>
+                      ) : null}
                     </button>
                   );
                 })}
