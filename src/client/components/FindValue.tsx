@@ -16,7 +16,9 @@ import { useQuery } from '@tanstack/react-query';
 import { api, findTable, openRecord, state } from '@mistriwork/kit/client/core.js';
 import type { TableMeta } from '@mistriwork/engine/shared/schema.js';
 import { Modal, type ModalHandle } from '@mistriwork/ui/Modal.js';
+import { enrichConnectionsWithEnvironments, type EnvironmentTier } from '../../shared/environments.js';
 import { say } from '../copy/workbench/components/FindValue.js';
+import './FindValue.css';
 
 interface Match {
   table: string;
@@ -37,6 +39,14 @@ interface Reply {
   content?: Array<{ text?: string }>;
   structuredContent?: Answer;
 }
+interface FindConn {
+  id: string;
+  name?: string;
+  database?: string;
+  env?: string;
+  tier?: EnvironmentTier;
+  redactsRows?: boolean;
+}
 
 export function FindValueDialog({ initial = '', onClose }: { initial?: string; onClose: () => void }) {
   const dialog = useRef<ModalHandle>(null);
@@ -49,8 +59,11 @@ export function FindValueDialog({ initial = '', onClose }: { initial?: string; o
     const timer = setTimeout(() => setAsked(typed.trim()), 450);
     return () => clearTimeout(timer);
   }, [typed]);
+  const appState = state as { activeConnection?: string; connections?: FindConn[] };
+  const enriched = enrichConnectionsWithEnvironments((appState.connections ?? []).map((c) => ({ ...c, name: c.name ?? c.id })));
+  const activeConn = enriched.find((c) => c.id === appState.activeConnection);
   const found = useQuery<Reply>({
-    queryKey: ['find', (state as { activeConnection?: string }).activeConnection ?? '', asked],
+    queryKey: ['find', appState.activeConnection ?? '', asked],
     queryFn: () => api('/api/agent/call', { name: 'find', arguments: { value: asked } }),
     enabled: asked.length > 0,
     staleTime: 0,
@@ -58,21 +71,30 @@ export function FindValueDialog({ initial = '', onClose }: { initial?: string; o
   const close = () => dialog.current?.close();
   return (
     <Modal
-      className="conn-manager find-value"
+      className="find-value-dialog find-value"
       ref={dialog}
       onClose={onClose}
       initialFocus={input}
       ariaLabel={say('findAValue')}
       plain
-      backdrop={false}
+      backdrop
     >
-      <div className="conn-inner">
-        <div className="conn-head">
+      <div className="find-dialog-head">
+        <div className="find-dialog-title-row">
           <h2>{say('findAValue')}</h2>
-          <button type="button" className="ghost" aria-label={say('common.close')} onClick={close}>
-            ×
-          </button>
+          {activeConn ? (
+            <span className={`env-pill compact tone-${activeConn.tier}`}>
+              <span className="env-pill-dot" aria-hidden="true" />
+              <span>{activeConn.env ? `${activeConn.database}@${activeConn.env}` : activeConn.name}</span>
+            </span>
+          ) : null}
+          {activeConn?.redactsRows ? <span className="conn-badge">{say('maskedBadge')}</span> : null}
         </div>
+        <button type="button" className="find-dialog-close" aria-label={say('common.close')} onClick={close}>
+          ×
+        </button>
+      </div>
+      <div className="find-dialog-body">
         <p className="find-note">{say('searchesTheTextColumns')}</p>
         <input
           ref={input}

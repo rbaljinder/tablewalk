@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@mistriwork/ui/Button.js';
 import { Modal, type ModalHandle } from '@mistriwork/ui/Modal.js';
-import { api, go, render, state, toast } from '@mistriwork/kit/client/core.js';
+import { api, go, render, state, toast, viewportBox, viewportScale } from '@mistriwork/kit/client/core.js';
 import { advanceRecordSource } from '@mistriwork/kit/client/recordSource.js';
 import { attachComplete } from '../complete.js';
 import { sqlSuggestions, tokenAt } from '../sqlcomplete.js';
@@ -29,6 +29,7 @@ import {
   type EnvironmentTier,
   type SiblingEnvironment,
 } from '../../shared/environments.js';
+import './SqlPane.css';
 
 interface SqlResult {
   columns: string[];
@@ -38,6 +39,22 @@ interface SqlResult {
   bounded?: boolean;
   affected?: number;
   errors?: Array<{ message: string }>;
+}
+interface FanoutEnvEntry {
+  connection: string;
+  name: string;
+  env?: string;
+  tier: EnvironmentTier;
+  ok: boolean;
+  ms: number;
+  error?: string;
+  result?: {
+    columns?: string[];
+    rows?: Array<unknown[] | Record<string, unknown>>;
+    truncated?: boolean;
+    bounded?: boolean;
+    errors?: string[];
+  };
 }
 interface Statement {
   name: string;
@@ -50,7 +67,8 @@ type Outcome =
   | { kind: 'running' }
   | { kind: 'error'; message: string }
   | { kind: 'written'; affected: number }
-  | { kind: 'rows'; data: SqlResult };
+  | { kind: 'rows'; data: SqlResult }
+  | { kind: 'fanout'; entries: FanoutEnvEntry[] };
 
 interface SqlPaneProps {
   draft: string;
@@ -58,6 +76,8 @@ interface SqlPaneProps {
   onSwitchConnection?: (id: string, currentDraft: string) => void;
   onClose: () => void;
 }
+
+let savedPanelHeightPx: number | null = null;
 
 /* A textarea that grows with its content, to a point. */
 function autoGrow(input: HTMLTextAreaElement) {
@@ -69,6 +89,7 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
   const queryClient = useQueryClient();
   const input = useRef<HTMLTextAreaElement>(null);
   const [outcome, setOutcome] = useState<Outcome>({ kind: 'idle' });
+  const [fanoutIdx, setFanoutIdx] = useState(0);
   const [savedVersion, bump] = useState(0);
   const [pendingWrite, setPendingWrite] = useState<string | null>(null);
   const schema = (state as { schema?: { label?: string; dialect?: string } }).schema;
@@ -178,10 +199,81 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
     }
   };
 
+  const compareAcrossEnvs = async () => {
+    const statement = (input.current?.value ?? '').trim();
+    if (!statement) return;
+    setOutcome({ kind: 'running' });
+    setFanoutIdx(0);
+    try {
+      const reply = (await api('/api/agent/call', {
+        name: 'sql',
+        arguments: { statement, envs: 'all' },
+      })) as {
+        isError?: boolean;
+        content?: Array<{ text?: string }>;
+        structuredContent?: { environments?: FanoutEnvEntry[] };
+      };
+      if (reply.isError || !Array.isArray(reply.structuredContent?.environments)) {
+        setOutcome({ kind: 'error', message: reply.content?.[0]?.text ?? say('compareEnvsFailed') });
+        return;
+      }
+      setOutcome({ kind: 'fanout', entries: reply.structuredContent.environments });
+    } catch (err) {
+      setOutcome({ kind: 'error', message: (err as Error).message });
+    }
+  };
+
+  useEffect(() => {
+    const panelEl = input.current?.closest('.sql-panel') as HTMLElement | null;
+    if (panelEl && savedPanelHeightPx !== null) {
+      panelEl.style.height = `${savedPanelHeightPx}px`;
+      panelEl.style.maxHeight = '82vh';
+      panelEl.style.overflowY = 'auto';
+    }
+  }, []);
+
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const handle = e.currentTarget;
+    const panelEl = handle.closest('.sql-panel') as HTMLElement | null;
+    if (!panelEl) return;
+    const startY = e.clientY;
+    const startH = viewportBox(panelEl).height;
+    handle.setPointerCapture(e.pointerId);
+    const onMove = (ev: PointerEvent) => {
+      const scale = typeof viewportScale === 'function' ? viewportScale() : 1;
+      const delta = (startY - ev.clientY) / (scale || 1);
+      const next = Math.max(180, Math.min(760, Math.round(startH + delta)));
+      savedPanelHeightPx = next;
+      panelEl.style.height = `${next}px`;
+      panelEl.style.maxHeight = '82vh';
+      panelEl.style.overflowY = 'auto';
+    };
+    const onUp = () => {
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onUp);
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
+  };
+
   const saved = savedStatements() as Statement[];
+  const hasSiblingEnvs = Boolean(activeConn && activeGroup && activeGroup.environments.length > 1);
   void savedVersion;
   return (
     <>
+      <div
+        className="sql-resize-handle"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label={say('resizeSqlPane')}
+        title={say('resizeSqlPane')}
+        onPointerDown={startResize}
+      >
+        <span className="sql-resize-grip" aria-hidden="true" />
+      </div>
       <div className="sql-head">
         <div className="sql-title">
           <span className="sql-eyebrow">SQL</span>
@@ -226,6 +318,11 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
               }}
             >
               {say('runAsWrite')}
+            </Button>
+          ) : null}
+          {hasSiblingEnvs ? (
+            <Button title={say('compareEnvsTitle')} onClick={() => void compareAcrossEnvs()}>
+              {say('compareEnvs')}
             </Button>
           ) : null}
           <Button title={say('keepThisStatementUnder')} onClick={() => void save()}>
@@ -293,7 +390,7 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
         />
       </div>
       <div className="sql-results">
-        <Results outcome={outcome} onClose={onClose} />
+        <Results outcome={outcome} fanoutIdx={fanoutIdx} onSelectFanout={setFanoutIdx} onClose={onClose} />
       </div>
       {pendingWrite !== null && (
         <WriteConfirm
@@ -307,7 +404,34 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
   );
 }
 
-function Results({ outcome, onClose }: { outcome: Outcome; onClose: () => void }) {
+function normalizeFanoutSqlResult(entry: FanoutEnvEntry): SqlResult | null {
+  if (!entry.ok || !entry.result) return null;
+  if (entry.result.errors?.length) {
+    return { columns: [], rows: [], ms: entry.ms, errors: entry.result.errors.map((message) => ({ message })) };
+  }
+  const columns = entry.result.columns ?? [];
+  const rawRows = entry.result.rows ?? [];
+  const rows: unknown[][] = rawRows.map((r) => (Array.isArray(r) ? r : columns.map((col) => (r as Record<string, unknown>)[col])));
+  return {
+    columns,
+    rows,
+    ms: entry.ms,
+    truncated: entry.result.truncated,
+    bounded: entry.result.bounded,
+  };
+}
+
+function Results({
+  outcome,
+  fanoutIdx,
+  onSelectFanout,
+  onClose,
+}: {
+  outcome: Outcome;
+  fanoutIdx: number;
+  onSelectFanout: (idx: number) => void;
+  onClose: () => void;
+}) {
   switch (outcome.kind) {
     case 'idle':
       return null;
@@ -323,6 +447,48 @@ function Results({ outcome, onClose }: { outcome: Outcome; onClose: () => void }
       return <p className="note">{`${say('rows', { count: outcome.affected })} changed.`}</p>;
     case 'rows':
       return <RowsResult data={outcome.data} onClose={onClose} />;
+    case 'fanout': {
+      const picked = outcome.entries[fanoutIdx] ?? outcome.entries[0];
+      const normalized = picked ? normalizeFanoutSqlResult(picked) : null;
+      return (
+        <>
+          <div className="sql-fanout-tabs" role="tablist">
+            {outcome.entries.map((entry, idx) => {
+              const rowCount = entry.ok ? (entry.result?.rows?.length ?? 0) : null;
+              return (
+                <button
+                  key={entry.connection}
+                  type="button"
+                  role="tab"
+                  aria-selected={idx === fanoutIdx}
+                  className={`sql-fanout-tab${idx === fanoutIdx ? ' active' : ''}`}
+                  onClick={() => onSelectFanout(idx)}
+                >
+                  <span className={`env-pill compact tone-${entry.tier}`}>
+                    <span className="env-pill-dot" aria-hidden="true" />
+                    <span>{entry.env ?? entry.name}</span>
+                  </span>
+                  <span className="sql-fanout-meta">
+                    {entry.ok ? `${say('rows', { count: rowCount ?? 0 })} · ${say('msMs', { ms: entry.ms })}` : say('fanoutErrorBadge')}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {!picked ? null : !picked.ok ? (
+            <p className="sql-error" role="alert">
+              {picked.error ?? say('compareEnvsFailed')}
+            </p>
+          ) : normalized?.errors?.length ? (
+            <p className="sql-error" role="alert">
+              {normalized.errors[0].message}
+            </p>
+          ) : normalized ? (
+            <RowsResult data={normalized} onClose={onClose} />
+          ) : null}
+        </>
+      );
+    }
   }
 }
 

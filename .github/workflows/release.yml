@@ -155,7 +155,7 @@ jobs:
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
+          username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Both tags, deliberately: the version is what someone pins in a compose file and must never move, and `latest` is

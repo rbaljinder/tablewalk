@@ -1,4 +1,41 @@
 @layer look {
+  .agent-rail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2h);
+    min-inline-size: 14.5rem;
+    max-inline-size: 16.5rem;
+    flex: 0 0 15.5rem;
+  }
+
+  .agent-tool-search {
+    width: 100%;
+    block-size: var(--control-h, 32px);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: var(--field-fill, var(--surface));
+    color: var(--ink);
+    font: var(--text-sm) var(--face-ui, var(--sans));
+  }
+
+  .agent-tool-search:focus-visible {
+    outline: var(--focus-width, 2px) solid var(--focus);
+    outline-offset: -1px;
+  }
+
+  .agent-cat-head {
+    margin: var(--space-2h) 0 var(--space-1);
+    padding: 0 var(--space-2h);
+    font: 600 var(--text-xs) var(--face-ui, var(--sans));
+    color: var(--ink-subtle);
+    letter-spacing: 0.02em;
+  }
+
+  .agent-cat-head:first-child {
+    margin-block-start: 0;
+  }
+
   .agent-target-bar {
     display: flex;
     align-items: center;
@@ -61,6 +98,13 @@
   .agent-target-egress.at-cap {
     color: var(--status-critical);
     font-weight: 600;
+  }
+
+  @media (max-width: 720px) {
+    .agent-rail {
+      flex: 1 1 100%;
+      max-inline-size: none;
+    }
   }
 
   @media (hover: hover) {

@@ -44,7 +44,7 @@
     & .grid-inset .table-wrap :is(th, td):first-child { padding-left: var(--space-3h); }
     & .grid-inset .table-wrap :is(th, td):last-child { padding-right: var(--space-4h); }
     & th { background: var(--head-band); border-bottom: 1px solid var(--line-strong); }
-    & th.sorted { border-bottom-color: var(--accent); }
+    & th.sorted { border-bottom-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--head-band)); }
     & :is(th, td) { border-right: 1px solid var(--line); }
     & :is(th, td):last-child { border-right: 0; }
     & tbody tr:last-child td { border-bottom: 0; }
@@ -75,9 +75,11 @@
       background-size: 16px 16px;
     }
     & .node > rect { stroke: var(--line-strong); }
-    & .node-focus > rect { stroke: var(--accent); }
+    & :is(.node-focus, .node.lit) > rect { stroke: var(--accent); stroke-width: 1.5px; }
     & .node-field.is-key, & .node-field.is-ref { font-family: var(--figures); }
     & .edge { stroke: var(--line-strong); }
+    & svg.has-focus .edge:not(.dim) { stroke: var(--accent); stroke-width: 1.75px; }
+    & svg.has-focus :is(.edge.dim, .node.dim) { opacity: 0.28; }
 
     /* ---------- figures elsewhere ---------- */
 

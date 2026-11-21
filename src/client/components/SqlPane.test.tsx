@@ -202,9 +202,30 @@ test('renders sibling environment pills in SQL header and highlights production 
         </div>
       </QueryClientProvider>,
     );
+    expect(screen.getByRole('separator', { name: 'Drag to resize SQL panel' })).toBeInTheDocument();
     const localPill = screen.getByRole('button', { name: 'local' });
     await user.click(localPill);
     expect(onSwitchConnection).toHaveBeenCalledWith('billing-local', 'select count(*) from customer');
+
+    reply = {
+      structuredContent: {
+        environments: [
+          {
+            connection: 'billing-local',
+            name: 'billing-local',
+            env: 'local',
+            tier: 'local',
+            ok: true,
+            ms: 2,
+            result: { columns: ['cnt'], rows: [[5]] },
+          },
+          { connection: 'billing-prod', name: 'billing-prod', env: 'prod', tier: 'prod', ok: false, ms: 1, error: 'Refused: masked' },
+        ],
+      },
+    };
+    await user.click(screen.getByRole('button', { name: 'Compare envs' }));
+    expect(calls).toContainEqual({ name: 'sql', arguments: { statement: 'select count(*) from customer', envs: 'all' } });
+    await screen.findByText('1 row · 2 ms');
 
     await user.click(screen.getByRole('button', { name: 'Run as write…' }));
     expect(screen.getByRole('alert')).toHaveTextContent('Production environment (billing-prod)');

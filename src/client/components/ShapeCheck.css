@@ -1,31 +1,140 @@
 @layer look {
-  .shape-check-tabs {
+  [data-slot='dialog-backdrop'][data-for='shape-check-dialog'] {
+    position: fixed;
+    inset: 0;
+    z-index: 95;
+    background: var(--scrim);
+    backdrop-filter: blur(2px);
+  }
+
+  .shape-check-dialog {
+    position: fixed;
+    top: 7vh;
+    inset-inline: 0;
+    margin: 0 auto;
+    z-index: 96;
+    width: min(58rem, calc(100vw / var(--density-zoom, 1) - 2 * var(--space-5)));
+    max-height: calc(var(--shell-vh, 100vh) - 14vh);
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--pop-line, var(--line-strong));
+    border-radius: var(--radius-dialog);
+    box-shadow: var(--shadow-modal);
+    overflow: hidden;
+  }
+
+  .shape-dialog-head {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
-    gap: var(--space-1h);
-    margin-block-end: var(--space-3h);
-    padding-block-end: var(--space-2h);
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-3h) var(--space-5);
     border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    flex: none;
+  }
+
+  .shape-dialog-title-row {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2h);
+    min-inline-size: 0;
+  }
+
+  .shape-dialog-title-row h2 {
+    margin: 0;
+    font: 600 var(--text-lg) var(--face-ui, var(--sans));
+    letter-spacing: -0.012em;
+    color: var(--ink);
+  }
+
+  .shape-dialog-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    inline-size: 28px;
+    block-size: 28px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--ink-muted);
+    font: 500 var(--text-md) var(--face-ui, var(--sans));
+    cursor: pointer;
+    flex: none;
+  }
+
+  .shape-check-tabs {
+    display: flex;
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+    padding: 0 var(--space-5);
+    border-bottom: 1px solid var(--line);
+    background: var(--ground);
+    flex: none;
   }
 
   .shape-check-tab {
     display: inline-flex;
     align-items: center;
     gap: var(--space-1h);
-    padding: var(--space-1h) var(--space-3);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--surface);
+    margin-block-end: -1px;
+    padding: var(--space-2h) 0;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: transparent;
     color: var(--ink-muted);
     font: 500 var(--text-sm) var(--face-ui, var(--sans));
     cursor: pointer;
+    white-space: nowrap;
   }
 
   .shape-check-tab.active {
-    background: var(--accent-soft);
-    border-color: var(--accent);
-    color: var(--accent-ink, var(--ink));
+    border-bottom-color: var(--accent);
+    color: var(--ink);
+  }
+
+  .shape-tab-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-inline-size: 1.25rem;
+    padding: 0 var(--space-1h);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--ink-subtle);
+    font: 600 var(--text-xs) var(--figures, var(--code));
+    line-height: 1.35;
+  }
+
+  .shape-tab-badge.tone-high {
+    color: var(--status-critical);
+    border-color: color-mix(in srgb, var(--status-critical) 35%, var(--line));
+    background: color-mix(in srgb, var(--status-critical) 10%, var(--surface));
+  }
+
+  .shape-tab-badge.tone-medium {
+    color: var(--status-warning);
+    border-color: color-mix(in srgb, var(--status-warning) 35%, var(--line));
+    background: color-mix(in srgb, var(--status-warning) 10%, var(--surface));
+  }
+
+  .shape-dialog-body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: var(--space-4h) var(--space-5) var(--space-5);
+  }
+
+  .shape-check-item-block {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1h);
+    margin-block-end: var(--space-2h);
   }
 
   .shape-check-item-row {
@@ -36,6 +145,36 @@
     gap: var(--space-2h);
   }
 
+  .shape-check-sql-box {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin: 0 0 0 10.5rem;
+    padding: var(--space-1h) var(--space-2h);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--ground);
+  }
+
+  .shape-check-sql-code {
+    flex: 1 1 16rem;
+    min-inline-size: 0;
+    font: var(--text-xs) var(--code);
+    color: var(--ink);
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .shape-check-btn-group {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-1h);
+    flex: none;
+  }
+
   .shape-check-group-head {
     display: flex;
     align-items: center;
@@ -44,7 +183,7 @@
   }
 
   .shape-check-group-head .shape-check-table {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
   }
 
   .shape-check-approx {
@@ -69,8 +208,12 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: var(--space-2);
-    margin-block-end: var(--space-3);
+    gap: var(--space-2h);
+    margin-block-end: var(--space-3h);
+    padding: var(--space-2h) var(--space-3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--ground);
   }
 
   .shape-check-drift-label {
@@ -81,19 +224,21 @@
   .shape-check-path-field {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-1h);
+    gap: var(--space-2);
     font: 500 var(--text-xs) var(--face-ui, var(--sans));
     color: var(--ink-subtle);
   }
 
   .shape-check-path-select {
-    min-inline-size: 9rem;
-    padding: var(--space-1) var(--space-2);
+    min-inline-size: 11rem;
+    block-size: 28px;
+    padding: 0 var(--space-3) 0 var(--space-2h);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius);
     background: var(--surface);
     color: var(--ink);
-    font: var(--text-sm) var(--code);
+    font: 500 var(--text-sm) var(--code);
+    cursor: pointer;
   }
 
   .shape-check-path-head {
@@ -114,10 +259,10 @@
 
   .shape-check-query-hint {
     margin: 0 0 var(--space-2);
-    padding: var(--space-1h) var(--space-2);
+    padding: var(--space-1h) var(--space-2h);
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: var(--raised);
+    background: var(--ground);
     font: var(--text-xs) var(--code);
     color: var(--ink);
     overflow-x: auto;
@@ -135,7 +280,7 @@
     justify-content: space-between;
     flex-wrap: wrap;
     gap: var(--space-2);
-    padding: var(--space-1h) var(--space-2);
+    padding: var(--space-2) var(--space-2h);
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--surface);
@@ -146,7 +291,39 @@
     display: inline-flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: var(--space-1h);
+    gap: var(--space-2);
+  }
+
+  .shape-hop-table {
+    padding: 1px var(--space-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-item, var(--radius));
+    background: var(--ground);
+    color: var(--ink);
+    font: 500 var(--text-xs) var(--code);
+  }
+
+  .shape-hop-via {
+    color: var(--ink-muted);
+  }
+
+  .shape-hop-status {
+    padding: 0 var(--space-1h);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-item, var(--radius));
+    font: 500 var(--text-xs) var(--face-ui, var(--sans));
+  }
+
+  .shape-hop-status.is-indexed {
+    color: var(--status-good);
+    border-color: color-mix(in srgb, var(--status-good) 30%, var(--line));
+    background: color-mix(in srgb, var(--status-good) 9%, var(--surface));
+  }
+
+  .shape-hop-status.is-unindexed {
+    color: var(--status-warning);
+    border-color: color-mix(in srgb, var(--status-warning) 35%, var(--line));
+    background: color-mix(in srgb, var(--status-warning) 10%, var(--surface));
   }
 
   .shape-check-diff-line {
@@ -155,9 +332,27 @@
     color: var(--ink);
   }
 
+  @media (max-width: 640px) {
+    .shape-check-dialog {
+      inset: 0;
+      width: 100%;
+      max-height: none;
+      border-radius: 0;
+      border: 0;
+    }
+
+    .shape-check-sql-box {
+      margin-inline-start: 0;
+    }
+  }
+
   @media (hover: hover) {
-    .shape-check-tab:not(.active):hover {
+    .shape-dialog-close:hover {
       background: var(--raised);
+      color: var(--ink);
+    }
+
+    .shape-check-tab:not(.active):hover {
       color: var(--ink);
     }
 

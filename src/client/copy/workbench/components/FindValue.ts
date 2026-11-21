@@ -18,4 +18,5 @@ export const say = defineMessages({
     one: 'Stopped at the {stopped}, with {count} table unread. Narrow the value to see the rest.',
     other: 'Stopped at the {stopped}, with {count} tables unread. Narrow the value to see the rest.',
   },
+  maskedBadge: 'masked',
 });

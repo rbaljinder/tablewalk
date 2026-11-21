@@ -198,12 +198,17 @@ test('inspects live index & scan health (perf) and explores foreign-key join pat
   draw(<ShapeCheckDialog onClose={onClose} initialTab="paths" />);
 
   await screen.findByText(/1 shortest foreign-key path between invoice_line and country/);
+  const joinCopyBtn = screen.getByRole('button', { name: 'Copy JOIN SQL' });
+  await user.click(joinCopyBtn);
+  expect(await navigator.clipboard.readText()).toContain('JOIN invoice t1 ON t0.id = t1.invoice_id');
+
   const hopCopyBtn = screen.getByRole('button', { name: 'Copy index SQL' });
   await user.click(hopCopyBtn);
   expect(await navigator.clipboard.readText()).toBe('CREATE INDEX idx_invoice_line_invoice_id ON invoice_line (invoice_id);');
 
   await user.click(screen.getByRole('tab', { name: 'Index & scan health' }));
   await screen.findByText(/Index idx_invoice_cust \(customer_id\) is a leading prefix/);
+  expect(screen.getByText('DROP INDEX CONCURRENTLY idx_invoice_cust;')).toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Copy SQL' }));
   expect(await navigator.clipboard.readText()).toBe('DROP INDEX CONCURRENTLY idx_invoice_cust;');
 
