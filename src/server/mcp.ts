@@ -34,6 +34,7 @@ export {
   loadConfigEnvMeta,
   removeConnectionEnvMeta,
   resolveConnectionEntry,
+  setAuditSink,
   setConnectionConfigExtras,
   setConnectionEnvMeta,
   setTopLevelConfigExtras,

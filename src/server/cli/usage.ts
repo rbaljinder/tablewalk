@@ -121,6 +121,18 @@ Options:
                       TABLEWALK_REDACT=1 / TABLEWALK_REDACT_COLUMNS)
       --max-rows <n>  Cap total rows read per connection in this session (or set
                       TABLEWALK_MAX_ROWS)
+      --timeout-ms <ms>
+                      Per-call statement deadline in milliseconds (or set
+                      TABLEWALK_TIMEOUT_MS)
+      --focus <tables>
+                      Scope the catalog and queries to these tables and their
+                      foreign-key neighborhood (or set TABLEWALK_FOCUS)
+      --focus-hops <n>
+                      With --focus: foreign-key hops to include, 0 to 5
+                      (default 1, or set TABLEWALK_FOCUS_HOPS)
+      --audit-log <path|stderr>
+                      Append zero-PII JSONL audit receipts for every tool call
+                      (or set TABLEWALK_AUDIT_LOG)
       --base-path <path>
                       The path a reverse proxy serves this server under, like
                       /tools: every address, asset, API call, cookie and
@@ -147,14 +159,19 @@ Options:
                       default: it is half the listing's size, and most agents
                       never read it. Answers carry the same fields either way.
       --query <q>     Run one query or breakdown in the query language, print
-                      JSON, close all connections, and exit.
-      --call <tool>   Run one MCP tool by name, print JSON, close all
+                      the result, close all connections, and exit.
+      --call <tool>   Run one MCP tool by name, print the result, close all
                       connections, and exit.
       --args <json>   With --call or --query: JSON object of tool arguments.
       --batch [path|-]
                       Run newline-delimited queries, breakdowns or JSON
                       {"tool","args"} calls over one session, print NDJSON,
                       close all connections, and exit.
+      --all-envs      With --query, --call or --batch: run a read-only call
+                      across every environment of the target database in
+                      parallel.
+      --format <fmt>  With --query, --call or --batch: output format — json,
+                      ndjson, tsv or md.
       --export <fmt>  Print the schema as md, mermaid or json, then exit.
       --lint [fmt]    Report what the shape will cost — missing keys,
                       unindexed references, naive timestamps — as text or

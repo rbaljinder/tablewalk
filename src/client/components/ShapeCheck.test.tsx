@@ -8,15 +8,18 @@ import type { ReactNode } from 'react';
 const gone: unknown[] = [];
 let result: Record<string, unknown> = {};
 let byTool: Record<string, Record<string, unknown>> = {};
+let activeEntry: Record<string, unknown> | undefined;
 const mockState: Record<string, unknown> = { activeConnection: 'demo' };
 vi.mock('@mistriwork/kit/client/core.js', () => ({
   state: mockState,
   api: async (_url: string, body?: { name?: string }) => ({
     structuredContent: (body?.name && byTool[body.name]) || result,
   }),
+  currentEntry: () => activeEntry,
   findTable: (id: string) => ({ id, name: id, approxRows: id === 'invoice' ? 4200 : undefined }),
   go: (...args: unknown[]) => gone.push(args),
   tableView: (table: string, query?: string) => (query ? { kind: 'table', table, query } : { kind: 'table', table }),
+  breakdownView: (table: string, query?: string) => ({ kind: 'breakdown', table, query }),
 }));
 
 const draw = (tree: ReactNode) =>
@@ -28,8 +31,10 @@ afterEach(() => {
   gone.length = 0;
   result = {};
   byTool = {};
+  activeEntry = undefined;
   mockState.activeConnection = 'demo';
   delete mockState.connections;
+  delete mockState.schema;
 });
 
 test('counts by severity, groups by table then rule, and the heading opens the table', async () => {
@@ -126,6 +131,85 @@ test('copies CREATE INDEX DDL, walks anomalous rows, and compares sibling enviro
   await user.click(screen.getByRole('tab', { name: 'Data anomalies' }));
   await user.click(await screen.findByRole('button', { name: 'Walk rows' }));
   expect(gone).toEqual([[{ kind: 'table', table: 'invoice', query: 'invoice paid_at < issued_at' }, 'reset']]);
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+test('inspects live index & scan health (perf) and explores foreign-key join paths', async () => {
+  const user = userEvent.setup();
+  mockState.schema = {
+    tables: [
+      { id: 'invoice_line', name: 'invoice_line', columns: [{ name: 'id' }] },
+      { id: 'country', name: 'country', columns: [{ name: 'code' }] },
+    ],
+  };
+  byTool = {
+    perf: {
+      scannedTables: 5,
+      counts: { high: 0, medium: 1, low: 0 },
+      rules: { 'duplicate-index': { why: 'writes maintain both indexes' } },
+      findings: [
+        {
+          table: 'invoice',
+          rule: 'duplicate-index',
+          severity: 'medium',
+          index: 'idx_invoice_cust',
+          coveredBy: 'idx_invoice_cust_status',
+          message: 'Index idx_invoice_cust (customer_id) is a leading prefix of idx_invoice_cust_status',
+          suggestedSql: 'DROP INDEX CONCURRENTLY idx_invoice_cust;',
+        },
+      ],
+    },
+    path: {
+      from: 'invoice_line',
+      to: 'country',
+      connected: true,
+      paths: [
+        {
+          length: 2,
+          unindexedHops: 1,
+          summary: 'invoice_line.invoice_id -> invoice.id ; invoice.country_code -> country.code',
+          queryHint: 'invoice_line invoice_id.country_code.name != ""',
+          hops: [
+            {
+              from: 'invoice_line',
+              to: 'invoice',
+              direction: 'to-many',
+              via: ['invoice_id'],
+              targetColumns: ['id'],
+              indexed: false,
+              scannedApproxRows: 4200,
+              suggestedIndex: 'CREATE INDEX idx_invoice_line_invoice_id ON invoice_line (invoice_id);',
+            },
+            {
+              from: 'invoice',
+              to: 'country',
+              direction: 'to-one',
+              via: ['country_code'],
+              targetColumns: ['code'],
+              indexed: true,
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  const onClose = vi.fn();
+  draw(<ShapeCheckDialog onClose={onClose} initialTab="paths" />);
+
+  await screen.findByText(/1 shortest foreign-key path between invoice_line and country/);
+  const hopCopyBtn = screen.getByRole('button', { name: 'Copy index SQL' });
+  await user.click(hopCopyBtn);
+  expect(await navigator.clipboard.readText()).toBe('CREATE INDEX idx_invoice_line_invoice_id ON invoice_line (invoice_id);');
+
+  await user.click(screen.getByRole('tab', { name: 'Index & scan health' }));
+  await screen.findByText(/Index idx_invoice_cust \(customer_id\) is a leading prefix/);
+  await user.click(screen.getByRole('button', { name: 'Copy SQL' }));
+  expect(await navigator.clipboard.readText()).toBe('DROP INDEX CONCURRENTLY idx_invoice_cust;');
+
+  await user.click(screen.getByRole('tab', { name: 'Join paths' }));
+  await user.click(await screen.findByRole('button', { name: 'Walk rows' }));
+  expect(gone).toEqual([[{ kind: 'table', table: 'invoice_line', query: 'invoice_line invoice_id.country_code.name != ""' }, 'reset']]);
   expect(onClose).toHaveBeenCalledTimes(1);
 });
 

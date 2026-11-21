@@ -470,6 +470,79 @@ export const definitions = [
     },
   },
   {
+    name: 'perf',
+    description:
+      'Live index, scan, bloat, and planner-statistics diagnostics across a connection or a single table. ' +
+      'On PostgreSQL (`pg_stat_user_tables` and `pg_stat_user_indexes`), surfaces sequential-scan hotspots, ' +
+      'duplicate prefix btree indexes, zero-scan non-constraint indexes, dead-tuple bloat, and stale ANALYZE ' +
+      'statistics with ready-to-run `DROP INDEX CONCURRENTLY`, `VACUUM (ANALYZE)`, or `ANALYZE` SQL. ' +
+      'On SQLite (`PRAGMA index_list`, `EXPLAIN QUERY PLAN`, and `sqlite_stat1`), surfaces redundant prefix ' +
+      'indexes, views that trigger full-table scans on populated tables, and multi-index tables missing ' +
+      'selectivity statistics. Reads zero row values and intersects strictly with the policy-filtered schema.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        table: { type: 'string', description: 'Check this table only. Omit for the whole schema.' },
+        severity: {
+          type: 'string',
+          enum: ['high', 'medium', 'low'],
+          description: 'Minimum severity to return: high, medium, or low (default low).',
+        },
+        all: {
+          type: 'boolean',
+          description: 'Return every finding instead of capping at 5 examples per rule.',
+        },
+        connection: { type: 'string' },
+        env: ENV_ARG,
+      },
+      additionalProperties: false,
+    },
+    annotations: { title: 'Check index & scan health', ...READS },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        connection: { type: 'string' },
+        dialect: { type: 'string' },
+        source: { type: 'string', enum: ['pg_stat', 'sqlite_pragma', 'catalog_only'] },
+        scannedTables: { type: 'number' },
+        counts: {
+          type: 'object',
+          properties: { high: { type: 'number' }, medium: { type: 'number' }, low: { type: 'number' } },
+        },
+        rules: {
+          type: 'object',
+          additionalProperties: {
+            type: 'object',
+            properties: { severity: { type: 'string' }, why: { type: 'string' } },
+          },
+        },
+        total: { type: 'number' },
+        shown: { type: 'number' },
+        note: { type: 'string' },
+        findings: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              rule: { type: 'string' },
+              severity: { type: 'string' },
+              table: { type: 'string' },
+              index: { type: 'string' },
+              coveredBy: { type: 'string' },
+              columns: { type: 'array', items: { type: 'string' } },
+              bytes: { type: 'number' },
+              approxRows: { type: 'number' },
+              message: { type: 'string' },
+              suggestedSql: { type: 'string' },
+              link: { type: 'string' },
+            },
+          },
+        },
+        stats: STATS,
+      },
+    },
+  },
+  {
     name: 'verify_ddl',
     description:
       'Test candidate migration DDL (`CREATE TABLE`, `ALTER TABLE`, `CREATE INDEX`, `DROP …`) ' +
@@ -740,6 +813,61 @@ export const handlers: Record<Name, Handler> = {
       connection: id,
       scannedTables: scanned.scannedTables,
       ...(scanned.skippedTables ? { skippedTables: scanned.skippedTables } : {}),
+      counts: lintCounts(matched),
+      rules,
+      findings: kept,
+      total: matched.length,
+      shown: kept.length,
+      ...(notes.length ? { note: notes.join(' ') } : {}),
+    };
+  },
+  perf: async ({ registry, args, schema, id, trusted }) => {
+    const only = args.table === undefined ? undefined : tableNamed(schema, String(args.table));
+    if (args.table !== undefined && !only) {
+      throw new ToolError(
+        'not_found',
+        `Unknown table "${String(args.table)}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`,
+      );
+    }
+    const levels = ['high', 'medium', 'low'];
+    const floor = args.severity === undefined ? levels.length - 1 : levels.indexOf(String(args.severity));
+    if (floor === -1) throw new ToolError('invalid_argument', '`severity` is high, medium or low.');
+    const wanted = new Set(levels.slice(0, floor + 1));
+
+    const { PERF_RULES, checkPerf } = await import('../../perf.js');
+    const scanned = await checkPerf(registry, id, schema, {
+      ...(only ? { table: only.id } : {}),
+      trusted,
+      linkTo,
+    });
+    const matched = scanned.findings.filter((f) => wanted.has(f.severity));
+    const rules: Record<string, { severity: string; why: string }> = {};
+    for (const f of matched) rules[f.rule] ??= PERF_RULES[f.rule];
+
+    const PER_RULE = 5;
+    const all = args.all === true || args.all === 'true';
+    const kept: typeof matched = [];
+    const seen: Record<string, number> = {};
+    for (const f of matched) {
+      seen[f.rule] = (seen[f.rule] ?? 0) + 1;
+      if (all || seen[f.rule] <= PER_RULE) kept.push(f);
+    }
+    const withheld = matched.length - kept.length;
+    const notes: string[] = [];
+    if (withheld) {
+      notes.push(
+        `${withheld} more finding${withheld === 1 ? '' : 's'} not listed — showing at most ${PER_RULE} per rule. Ask with \`all: true\` or narrow with \`table\` or \`severity\`.`,
+      );
+    }
+    if (scanned.source === 'catalog_only') {
+      notes.push('Connection is in-memory or non-file-backed; live index/scan statistics were skipped.');
+    }
+
+    return {
+      connection: id,
+      dialect: scanned.dialect,
+      source: scanned.source,
+      scannedTables: scanned.scannedTables,
       counts: lintCounts(matched),
       rules,
       findings: kept,

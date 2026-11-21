@@ -62,8 +62,10 @@ export const definitions = [
               rows: { type: 'boolean' },
               hidesColumns: { type: 'boolean' },
               redactsRows: { type: 'boolean' },
+              focused: { type: 'boolean' },
               maxRows: { type: 'number' },
               rowsRemaining: { type: 'number' },
+              timeoutMs: { type: 'number' },
               siblings: { type: 'array', items: { type: 'object' } },
               rowsReadThisSession: { type: 'number' },
             },
@@ -386,7 +388,12 @@ type Name = (typeof definitions)[number]['name'];
 
 /** The one tool answered without opening a connection: the list is the registry's, enriched with environment topology. */
 export function connections(registry: Registry): Record<string, unknown> {
-  type RichConn = ReturnType<typeof listEnrichedConnections>[number] & { redactsRows?: boolean; maxRows?: number };
+  type RichConn = ReturnType<typeof listEnrichedConnections>[number] & {
+    redactsRows?: boolean;
+    focused?: boolean;
+    maxRows?: number;
+    timeoutMs?: number;
+  };
   const enriched = listEnrichedConnections(registry) as RichConn[];
   const groups = groupConnectionsByDatabase(enriched);
   const hasMultiEnv = groups.some((g) => g.environments.length > 1 || g.environments.some((c) => Boolean(c.env)));
@@ -395,7 +402,9 @@ export function connections(registry: Registry): Record<string, unknown> {
     environments: g.environments.map((c) => {
       const policy = getConnectionRuntimePolicy(registry, c.id);
       const redactsRows = Boolean(c.redactsRows || policy?.redactsRows);
+      const focused = Boolean(c.focused || policy?.focused);
       const maxRows = c.maxRows ?? policy?.maxRows;
+      const timeoutMs = c.timeoutMs ?? policy?.timeoutMs;
       return {
         id: c.id,
         name: c.name,
@@ -406,7 +415,9 @@ export function connections(registry: Registry): Record<string, unknown> {
         ...(c.rows === false ? { rows: false } : {}),
         ...(c.hidesColumns ? { hidesColumns: true } : {}),
         ...(redactsRows ? { redactsRows: true } : {}),
+        ...(focused ? { focused: true } : {}),
         ...(maxRows !== undefined ? { maxRows } : {}),
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       };
     }),
   }));
@@ -423,13 +434,15 @@ export function connections(registry: Registry): Record<string, unknown> {
               })
               .join(', ')}]`,
         )
-        .join('; ')}. Target any environment with connection: "db@env", "@env", or env: "<env>".`
+        .join('; ')}. Target any environment with connection: "db@env", "@env", env: "<env>", or envs: "all".`
     : undefined;
   return {
     connections: enriched.map((c) => {
       const policy = getConnectionRuntimePolicy(registry, c.id);
       const redactsRows = Boolean(c.redactsRows || policy?.redactsRows);
+      const focused = Boolean(c.focused || policy?.focused);
       const maxRows = c.maxRows ?? policy?.maxRows;
+      const timeoutMs = c.timeoutMs ?? policy?.timeoutMs;
       const rowsRead = sessionEgress.get(c.id) ?? 0;
       return {
         id: c.id,
@@ -444,7 +457,9 @@ export function connections(registry: Registry): Record<string, unknown> {
         ...(c.rows === false ? { rows: false } : {}),
         ...(c.hidesColumns ? { hidesColumns: true } : {}),
         ...(redactsRows ? { redactsRows: true } : {}),
+        ...(focused ? { focused: true } : {}),
         ...(maxRows !== undefined ? { maxRows, rowsRemaining: Math.max(0, maxRows - rowsRead) } : {}),
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
         siblings: c.siblings,
         /* The trust boundary as a number: data rows this session has handed
            to the caller from this connection. Zero is an auditable answer. */

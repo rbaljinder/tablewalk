@@ -15,6 +15,8 @@ export const say = defineMessages({
   whichTableMentions: 'which table mentions this?',
   checkTheShape: 'Check the shape…',
   whatThisSchemaWill: 'what this schema will cost',
+  findPathBetweenTables: 'Find path between tables…',
+  shortestForeignKeyWalks: 'shortest foreign-key walks, index coverage and query hints',
   driveTheMcpTools: 'drive the MCP tools by hand, see what an agent sees',
   copyBriefForAgent: 'Copy brief for agent',
   copyContextForAgent: 'copy this view, key and MCP call as Markdown',

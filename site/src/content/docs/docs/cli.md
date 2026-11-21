@@ -42,6 +42,10 @@ A path typed on the command line is relative to the current directory; a path wr
 | `--lease <duration>` | Bound connection lifetime (`120`, `5m`): close idle connections and expire when the lease ends (or set `TABLEWALK_LEASE`). |
 | `--redact` | Deterministically mask sensitive PII and secret columns on every row read, withholding raw SQL (or set `TABLEWALK_REDACT=1`). |
 | `--max-rows <n>` | Cap total rows read per connection in this session (or set `TABLEWALK_MAX_ROWS`). |
+| `--timeout-ms <ms>` | Per-call statement deadline in milliseconds (or set `TABLEWALK_TIMEOUT_MS`). |
+| `--focus <tables>` | Scope the catalog and queries to these tables and their foreign-key neighborhood (or set `TABLEWALK_FOCUS`). |
+| `--focus-hops <n>` | With `--focus`: foreign-key hops to include, `0` to `5` (default `1`, or set `TABLEWALK_FOCUS_HOPS`). |
+| `--audit-log <path\|stderr>` | Append zero-PII JSONL audit receipts for every tool call (or set `TABLEWALK_AUDIT_LOG`). |
 | `--demo` | Build a throwaway sample database and open it. Nothing of yours is touched. |
 | `--openapi <spec.json\|url>` | Serve the REST API a spec describes, read-only, drafted in memory. |
 | `--api-url <url>` | With `--openapi`: the API's base URL, when the spec does not give a usable one. |
@@ -87,10 +91,12 @@ See [Deploying](/docs/deploying/#behind-a-proxy) for when you need these.
 | `--lazy` | With `--mcp`: answer handshake and `tools/list` before dialing the database (automatic for piped `--config -`). |
 | `--tools <name>` | One job's worth of tools: `explore`, `migrate`, `seed` or `full` (the default). |
 | `--output-schema` | Advertise each tool's output shape. Off by default. |
-| `--query <q>` | Run one query or breakdown in the query language, print JSON, close all connections, and exit. |
-| `--call <tool>` | Run one MCP tool by name, print JSON, close all connections, and exit. |
+| `--query <q>` | Run one query or breakdown in the query language, print the result, close all connections, and exit. |
+| `--call <tool>` | Run one MCP tool by name, print the result, close all connections, and exit. |
 | `--args <json>` | With `--call` or `--query`: JSON object of tool arguments. |
 | `--batch [path\|-]` | Run newline-delimited queries, breakdowns or JSON `{"tool","args"}` calls over one session, print NDJSON, close all connections, and exit. |
+| `--all-envs` | With `--query`, `--call` or `--batch`: run a read-only call across every environment of the target database in parallel. |
+| `--format <fmt>` | With `--query`, `--call` or `--batch`: output format (`json`, `ndjson`, `tsv` or `md`). |
 
 ## Checking a schema
 
@@ -182,6 +188,7 @@ Exit codes: 1 could not run, 2 refused (read-only, or an HTTP API).
 | `TABLEWALK_CONFIG_JSON` | Inline JSON config in memory (for vault wrappers), when `--config` is not passed. |
 | `TABLEWALK_BLOCKLIST`, `TABLEWALK_BLOCKED_TABLES`, `TABLEWALK_BLOCKED_FIELDS` | Blocklist JSON or comma-separated table and `table.field` wildcards, without a config file. |
 | `TABLEWALK_REDACT`, `TABLEWALK_REDACT_COLUMNS`, `TABLEWALK_MAX_ROWS`, `TABLEWALK_LEASE` | Deterministic PII redaction, extra redacted columns, session row-egress ceiling, and connection lease duration. |
+| `TABLEWALK_TIMEOUT_MS`, `TABLEWALK_FOCUS`, `TABLEWALK_FOCUS_HOPS`, `TABLEWALK_CREDENTIAL_COMMAND`, `TABLEWALK_AUDIT_LOG` | Per-call statement deadline, foreign-key neighborhood table focus, dynamic credential refresh command, and zero-PII JSONL audit log path or `stderr`. |
 | `TABLEWALK_MCP_URL` | With `--mcp`: bridge stdio MCP calls to a running loopback server (`http://localhost:4111/mcp`). |
 | `PORT` | The port, when no `--port` is given, as Cloud Run and most platforms set it. |
 | `TABLEWALK_CONFIG`, `TABLEWALK_HOST`, `TABLEWALK_PORT` | In the [container image](/docs/deploying/) only: the config file, interface and port. |

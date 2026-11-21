@@ -1,23 +1,26 @@
 /**
- * What this schema will cost you.
+ * What this schema will cost you — and how its tables connect.
  *
- * The `lint` tool answers it for an agent and `--lint` answers it for CI;
- * this is the same tool through the same endpoint, for the person who can
- * actually fix the unindexed key. Every finding is a fact already on screen
- * somewhere — the keys in the diagram, the types in the table view — and
- * what the check adds is the consequence, which nobody reads a catalog to
- * work out. Findings are grouped by table, then by rule with the cost said
- * once: four findings of one rule are four columns and one consequence.
+ * Unifies five read-only MCP diagnostics in one Workbench surface:
+ *   1. Schema & perf (`lint`) — static catalog checks + 1-click index DDL
+ *   2. Index & scan health (`perf`) — live index duplicates, scan hotspots, bloat, & stats SQL
+ *   3. Data anomalies (`anomalies`) — relational row outliers + 1-click Walk rows
+ *   4. Join paths (`path`) — shortest foreign-key walks, index coverage, & runnable query hints
+ *   5. Environment drift (`diff`) — schema differences across sibling environments
  */
 import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api, findTable, go, state, tableView } from '@mistriwork/kit/client/core.js';
+import { api, breakdownView, currentEntry, findTable, go, state, tableView } from '@mistriwork/kit/client/core.js';
 import { formatNumber } from '@mistriwork/kit/client/locale.js';
+import { looksLikeBreakdown } from '@mistriwork/engine/shared/breakdowntext.js';
 import type { TableMeta } from '@mistriwork/engine/shared/schema.js';
 import { Modal, type ModalHandle } from '@mistriwork/ui/Modal.js';
 import { enrichConnectionsWithEnvironments, type EnvironmentTier } from '../../shared/environments.js';
+import type { ForeignKeyPath } from '../../shared/path.js';
 import { say } from '../copy/workbench/components/ShapeCheck.js';
 import './ShapeCheck.css';
+
+export type ShapeTab = 'lint' | 'perf' | 'anomalies' | 'paths' | 'drift';
 
 interface Finding {
   table: string;
@@ -32,6 +35,19 @@ interface LintResult {
   rules?: Record<string, { why?: string }>;
   counts?: { high: number; medium: number; low: number };
 }
+interface PerfFindingItem extends Finding {
+  index?: string;
+  coveredBy?: string;
+  bytes?: number;
+  approxRows?: number;
+  suggestedSql?: string;
+}
+interface PerfResult {
+  scannedTables?: number;
+  findings?: PerfFindingItem[];
+  rules?: Record<string, { why?: string }>;
+  counts?: { high: number; medium: number; low: number };
+}
 interface AnomalyFinding extends Finding {
   rows?: number;
   query?: string;
@@ -41,6 +57,12 @@ interface AnomalyResult {
   findings?: AnomalyFinding[];
   rules?: Record<string, { why?: string }>;
   counts?: { high: number; medium: number; low: number };
+}
+interface PathToolResult {
+  from?: string;
+  to?: string;
+  connected?: boolean;
+  paths?: ForeignKeyPath[];
 }
 interface TableDiffItem {
   table: string;
@@ -87,16 +109,27 @@ function indexDdlFor(tableMeta: TableMeta | undefined, finding: Finding): string
   return `CREATE INDEX ${quoteIdent(idxName)} ON ${qualified} (${cols.map(quoteIdent).join(', ')});`;
 }
 
-export function ShapeCheckDialog({ onClose }: { onClose: () => void }) {
+export function ShapeCheckDialog({ onClose, initialTab = 'lint' }: { onClose: () => void; initialTab?: ShapeTab }) {
   const dialog = useRef<ModalHandle>(null);
-  const [tab, setTab] = useState<'lint' | 'anomalies' | 'drift'>('lint');
+  const [tab, setTab] = useState<ShapeTab>(initialTab);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const appState = state as {
     activeConnection?: string;
     connections?: ShapeConn[];
+    schema?: { tables?: TableMeta[] };
   };
   const activeId = appState.activeConnection ?? '';
+  const schemaTables = appState.schema?.tables ?? [];
+  const topEntry = currentEntry() as { table?: string } | undefined;
+  const defaultFrom = (topEntry?.table && schemaTables.find((t) => t.id === topEntry.table)?.id) ?? schemaTables[0]?.id ?? '';
+  const defaultTo = schemaTables.find((t) => t.id !== defaultFrom)?.id ?? schemaTables[1]?.id ?? defaultFrom;
+
+  const [selectedFrom, setSelectedFrom] = useState<string | null>(null);
+  const [selectedTo, setSelectedTo] = useState<string | null>(null);
+  const fromTable = (selectedFrom && schemaTables.some((t) => t.id === selectedFrom) ? selectedFrom : defaultFrom) ?? '';
+  const toTable = (selectedTo && schemaTables.some((t) => t.id === selectedTo) ? selectedTo : defaultTo) ?? '';
+
   const enriched = enrichConnectionsWithEnvironments((appState.connections ?? []).map((c) => ({ ...c, name: c.name ?? c.id })));
   const activeConn = enriched.find((c) => c.id === activeId);
   const siblingsFirst = [
@@ -112,6 +145,14 @@ export function ShapeCheckDialog({ onClose }: { onClose: () => void }) {
   const lint = useQuery<{ structuredContent?: LintResult }>({
     queryKey: ['lint', activeId],
     queryFn: () => api('/api/agent/call', { name: 'lint', arguments: { all: true } }),
+    enabled: tab === 'lint',
+    staleTime: 0,
+  });
+
+  const perf = useQuery<{ structuredContent?: PerfResult }>({
+    queryKey: ['perf', activeId],
+    queryFn: () => api('/api/agent/call', { name: 'perf', arguments: { all: true } }),
+    enabled: tab === 'perf',
     staleTime: 0,
   });
 
@@ -119,6 +160,13 @@ export function ShapeCheckDialog({ onClose }: { onClose: () => void }) {
     queryKey: ['anomalies', activeId],
     queryFn: () => api('/api/agent/call', { name: 'anomalies', arguments: { all: true } }),
     enabled: tab === 'anomalies',
+    staleTime: 0,
+  });
+
+  const pathQuery = useQuery<{ structuredContent?: PathToolResult }>({
+    queryKey: ['shape-path', activeId, fromTable, toTable],
+    queryFn: () => api('/api/agent/call', { name: 'path', arguments: { from: fromTable, to: toTable } }),
+    enabled: tab === 'paths' && Boolean(fromTable && toTable && fromTable !== toTable),
     staleTime: 0,
   });
 
@@ -141,6 +189,18 @@ export function ShapeCheckDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const walkQueryHint = (rawQuery: string) => {
+    const trimmed = rawQuery.trim();
+    if (!trimmed) return;
+    const head = trimmed.split(/\s+/)[0];
+    const target = (findTable(head) as TableMeta | undefined)?.id ?? head;
+    close();
+    const entry = looksLikeBreakdown(trimmed)
+      ? (breakdownView as (t: string, q?: string) => unknown)(target, trimmed)
+      : (tableView as (t: string, q?: string) => unknown)(target, trimmed);
+    go(entry, 'reset');
+  };
+
   const groupFindings = <T extends Finding>(list: T[]) => {
     const map = new Map<string, T[]>();
     for (const f of list) map.set(f.table, [...(map.get(f.table) ?? []), f]);
@@ -157,10 +217,18 @@ export function ShapeCheckDialog({ onClose }: { onClose: () => void }) {
   const rules = result.rules ?? {};
   const counts = result.counts ?? { high: 0, medium: 0, low: 0 };
 
+  const perfResult = perf.data?.structuredContent ?? {};
+  const perfList = perfResult.findings ?? [];
+  const perfRules = perfResult.rules ?? {};
+  const perfCounts = perfResult.counts ?? { high: 0, medium: 0, low: 0 };
+
   const anomalyResult = anomalies.data?.structuredContent ?? {};
   const anomalyList = anomalyResult.findings ?? [];
   const anomalyRules = anomalyResult.rules ?? {};
   const anomalyCounts = anomalyResult.counts ?? { high: 0, medium: 0, low: 0 };
+
+  const pathResult = pathQuery.data?.structuredContent ?? {};
+  const pathsList = pathResult.paths ?? [];
 
   const diffResult = drift.data?.structuredContent ?? {};
   const diffTables = diffResult.tables ?? [];
@@ -194,11 +262,29 @@ export function ShapeCheckDialog({ onClose }: { onClose: () => void }) {
               <button
                 type="button"
                 role="tab"
+                aria-selected={tab === 'perf'}
+                className={`shape-check-tab${tab === 'perf' ? ' active' : ''}`}
+                onClick={() => setTab('perf')}
+              >
+                {say('tabLivePerf')}
+              </button>
+              <button
+                type="button"
+                role="tab"
                 aria-selected={tab === 'anomalies'}
                 className={`shape-check-tab${tab === 'anomalies' ? ' active' : ''}`}
                 onClick={() => setTab('anomalies')}
               >
                 {say('tabAnomalies')}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === 'paths'}
+                className={`shape-check-tab${tab === 'paths' ? ' active' : ''}`}
+                onClick={() => setTab('paths')}
+              >
+                {say('tabJoinPaths')}
               </button>
               {siblingsFirst.length > 0 ? (
                 <button
@@ -275,6 +361,79 @@ export function ShapeCheckDialog({ onClose }: { onClose: () => void }) {
                   );
                 })}
               </>
+            ) : tab === 'perf' ? (
+              perf.isPending ? (
+                <p className="loading">{say('scanningPerfStats')}</p>
+              ) : perf.isError ? (
+                <p className="note">{(perf.error as Error).message}</p>
+              ) : (
+                <>
+                  <p className="find-note">
+                    <span>
+                      {perfList.length
+                        ? say('perfSummary', {
+                            high: perfCounts.high,
+                            medium: perfCounts.medium,
+                            low: perfCounts.low,
+                            tables: formatNumber(perfResult.scannedTables ?? 0),
+                          })
+                        : say('noPerfFindings')}
+                    </span>
+                  </p>
+                  {groupFindings(perfList).map(([table, list]) => {
+                    const meta = findTable(table) as TableMeta | undefined;
+                    const approx = meta?.approxRows ?? list.find((f) => f.approxRows !== undefined)?.approxRows;
+                    return (
+                      <div key={table} className="shape-check-group">
+                        <div className="shape-check-group-head">
+                          <button
+                            type="button"
+                            className="shape-check-table"
+                            title={say('openTable', { table })}
+                            onClick={() => {
+                              close();
+                              go(tableView(meta?.id ?? table), 'reset');
+                            }}
+                          >
+                            <span>{meta?.name ?? table}</span>
+                            <span className="shape-check-count">{`${list.length}`}</span>
+                          </button>
+                          {approx !== undefined ? (
+                            <span className="shape-check-approx">{say('approxRowsTag', { rows: formatNumber(approx) })}</span>
+                          ) : null}
+                        </div>
+                        {byRule(list).map(([rule, found]) => (
+                          <div key={rule} className={`shape-check-rule-group tone-${found[0].severity ?? 'low'}`}>
+                            <p className="shape-check-why">
+                              <span className="shape-check-rule">{rule}</span>
+                              <span>{perfRules[rule]?.why ?? found[0].why ?? ''}</span>
+                            </p>
+                            {found.map((finding, i) => {
+                              const sqlText = finding.suggestedSql;
+                              const key = `perf:${table}:${rule}:${i}`;
+                              return (
+                                <div key={i} className="shape-check-item shape-check-item-row">
+                                  <span>{finding.message}</span>
+                                  {sqlText ? (
+                                    <button
+                                      type="button"
+                                      className="shape-check-inline-btn"
+                                      title={sqlText}
+                                      onClick={() => void copySql(key, sqlText)}
+                                    >
+                                      {copiedKey === key ? say('copiedIndexSql') : say('copySql')}
+                                    </button>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </>
+              )
             ) : tab === 'anomalies' ? (
               anomalies.isPending ? (
                 <p className="loading">{say('scanningDataAnomalies')}</p>
@@ -320,14 +479,7 @@ export function ShapeCheckDialog({ onClose }: { onClose: () => void }) {
                               <div key={i} className="shape-check-item shape-check-item-row">
                                 <span>{finding.message}</span>
                                 {finding.query ? (
-                                  <button
-                                    type="button"
-                                    className="shape-check-inline-btn"
-                                    onClick={() => {
-                                      close();
-                                      go((tableView as (t: string, q?: string) => unknown)(meta?.id ?? table, finding.query), 'reset');
-                                    }}
-                                  >
+                                  <button type="button" className="shape-check-inline-btn" onClick={() => walkQueryHint(finding.query!)}>
                                     {say('walkRows')}
                                   </button>
                                 ) : null}
@@ -338,6 +490,121 @@ export function ShapeCheckDialog({ onClose }: { onClose: () => void }) {
                       </div>
                     );
                   })}
+                </>
+              )
+            ) : tab === 'paths' ? (
+              schemaTables.length < 2 ? (
+                <p className="find-note">{say('needTwoTablesForPath')}</p>
+              ) : (
+                <>
+                  <div className="shape-check-path-bar">
+                    <label className="shape-check-path-field">
+                      <span>{say('pathFromLabel')}</span>
+                      <select
+                        className="shape-check-path-select"
+                        aria-label={say('pathFromLabel')}
+                        value={fromTable}
+                        onChange={(e) => setSelectedFrom(e.currentTarget.value)}
+                      >
+                        {schemaTables.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.id}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="shape-check-inline-btn"
+                      title={say('swapTablesTitle')}
+                      onClick={() => {
+                        setSelectedFrom(toTable);
+                        setSelectedTo(fromTable);
+                      }}
+                    >
+                      {say('swapTables')}
+                    </button>
+                    <label className="shape-check-path-field">
+                      <span>{say('pathToLabel')}</span>
+                      <select
+                        className="shape-check-path-select"
+                        aria-label={say('pathToLabel')}
+                        value={toTable}
+                        onChange={(e) => setSelectedTo(e.currentTarget.value)}
+                      >
+                        {schemaTables.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.id}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  {fromTable === toTable ? (
+                    <p className="find-note">{say('selectDifferentTables')}</p>
+                  ) : pathQuery.isPending ? (
+                    <p className="loading">{say('findingPaths')}</p>
+                  ) : pathQuery.isError ? (
+                    <p className="note">{(pathQuery.error as Error).message}</p>
+                  ) : !pathsList.length ? (
+                    <p className="find-note">{say('noPathsFound', { from: fromTable, to: toTable })}</p>
+                  ) : (
+                    <>
+                      <p className="find-note">{say('pathsSummary', { count: pathsList.length, from: fromTable, to: toTable })}</p>
+                      {pathsList.map((p, idx) => (
+                        <div key={idx} className="shape-check-group">
+                          <div className={`shape-check-rule-group tone-${p.unindexedHops > 0 ? 'medium' : 'low'}`}>
+                            <div className="shape-check-path-head">
+                              <div className="shape-check-path-badges">
+                                <span className="conn-badge">{say('hopsBadge', { count: p.length })}</span>
+                                {p.unindexedHops > 0 ? (
+                                  <span className="conn-badge">{say('unindexedHopsBadge', { count: p.unindexedHops })}</span>
+                                ) : (
+                                  <span className="conn-badge">{say('allHopsIndexed')}</span>
+                                )}
+                              </div>
+                              {p.queryHint ? (
+                                <button type="button" className="shape-check-inline-btn" onClick={() => walkQueryHint(p.queryHint!)}>
+                                  {say('walkRows')}
+                                </button>
+                              ) : null}
+                            </div>
+                            {p.queryHint ? <pre className="shape-check-query-hint">{p.queryHint}</pre> : null}
+                            <div className="shape-check-hop-list">
+                              {p.hops.map((hop, hIdx) => {
+                                const hopKey = `path:${idx}:${hIdx}`;
+                                return (
+                                  <div key={hIdx} className="shape-check-hop">
+                                    <div className="shape-check-hop-main">
+                                      <span>{hop.from}</span>
+                                      <span className="conn-badge">{hop.direction === 'to-one' ? say('hopToOne') : say('hopToMany')}</span>
+                                      <span>{`${hop.to} (${hop.via.join(', ')})`}</span>
+                                      {hop.scannedApproxRows !== undefined ? (
+                                        <span className="shape-check-approx">
+                                          {say('approxRowsTag', { rows: formatNumber(hop.scannedApproxRows) })}
+                                        </span>
+                                      ) : null}
+                                      {hop.indexed === false ? <span className="conn-badge">{say('unindexedBadge')}</span> : null}
+                                    </div>
+                                    {hop.suggestedIndex ? (
+                                      <button
+                                        type="button"
+                                        className="shape-check-inline-btn"
+                                        title={hop.suggestedIndex}
+                                        onClick={() => void copySql(hopKey, hop.suggestedIndex!)}
+                                      >
+                                        {copiedKey === hopKey ? say('copiedIndexSql') : say('copyIndexSql')}
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
                 </>
               )
             ) : (

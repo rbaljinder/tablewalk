@@ -19,10 +19,11 @@ function close() {
   host = null;
 }
 
-export function openShapeCheck() {
-  if (host) return;
+/** @param {import('./components/ShapeCheck.js').ShapeTab} [initialTab] */
+export function openShapeCheck(initialTab = 'lint') {
+  if (host) close();
   host = document.createElement('div');
   host.className = 'host-contents';
   portalRoot().append(host);
-  mount(host, createElement(ShapeCheckDialog, { onClose: close }));
+  mount(host, createElement(ShapeCheckDialog, { onClose: close, initialTab }));
 }

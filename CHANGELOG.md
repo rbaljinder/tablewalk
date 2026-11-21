@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.0.0-rc.20
+
+Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.77`.
+
+- A new read-only MCP tool, `perf` (bringing the server to twenty-eight tools: twenty-two read-only and six writes),
+  inspects live index, scan, bloat and planner-statistics health across PostgreSQL (`pg_stat_user_tables` and
+  `pg_stat_user_indexes`: sequential-scan hotspots, duplicate prefix btree indexes, zero-scan non-constraint indexes,
+  dead-tuple bloat and stale `ANALYZE` statistics with ready-to-run `DROP INDEX CONCURRENTLY`, `VACUUM (ANALYZE)` and
+  `ANALYZE` SQL) and SQLite (`PRAGMA index_list`, `EXPLAIN QUERY PLAN` over views and `sqlite_stat1`), intersecting
+  strictly with the policy-filtered schema and reading zero row values.
+- Cross-environment read fan-out (`envs: "all"` or `envs: ["local", "staging"]` on read-only MCP tools, and `--all-envs`
+  on `--query`, `--call` and `--batch`) executes a read across sibling environments of a logical database in parallel,
+  honoring each environment's `rows`, `redact`, `blocklist`, `maxRows` and `timeoutMs` guardrails.
+- Per-environment and per-connection statement deadlines (`"timeoutMs"`, `--timeout-ms <ms>`, `TABLEWALK_TIMEOUT_MS`)
+  enforce bounded per-call caps across environments, and dynamic vault credential refresh (`"credentialCommand"`,
+  `TABLEWALK_CREDENTIAL_COMMAND`) runs an operator-supplied command to refresh short-lived IAM or Vault secrets in
+  memory before initial open and after idle-lease eviction without touching `process.env` or disk.
+- Schema neighborhood focus (`--focus <tables>`, `--focus-hops <n>`, `"focus"` / `"focusHops"` in config,
+  `TABLEWALK_FOCUS`, `TABLEWALK_FOCUS_HOPS`) scopes a connection's catalog, queries, views, records, exports and writes
+  to the N-hop foreign-key neighborhood of focal tables while withholding unrelated domains and raw SQL.
+- Token-lean CLI output formats (`--format <json|ndjson|tsv|md>` across `--query`, `--call` and `--batch`, including
+  cross-environment fan-out tables) and zero-PII structured JSONL audit logging (`--audit-log <path|stderr>`,
+  `TABLEWALK_AUDIT_LOG`) recording operational call metadata and row-movement receipts without row values, SQL text or
+  secrets.
+- Workbench refinements: **Check the shape** expands to a 5-tab diagnostic and relational cockpit adding **Index & scan
+  health** (`perf` with 1-click **Copy SQL**) and **Join paths** (interactive `From` / `To` foreign-key path explorer
+  with hop index status, **Copy index SQL** and 1-click **Walk rows**, also reachable directly from `⌘K` via **Find path
+  between tables…**), plus `focused` and `timeoutMs` badges in **Connections**.
+
 ## 1.0.0-rc.19
 
 Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.77`.

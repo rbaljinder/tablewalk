@@ -25,6 +25,7 @@ import {
   parseBlocklist,
   type BlocklistRules,
 } from '../blocklist.js';
+import { computeFocusBlocklist, parseFocusSpec, type FocusSpec } from '../focus.js';
 import { applyRedaction } from '../mask.js';
 import { classifyEnvTier, resolveConnectionEnvironment } from '../../shared/environments.js';
 import {
@@ -58,12 +59,17 @@ export interface EnvironmentPolicySpec {
   redact?: boolean;
   redactColumns?: string[];
   maxRows?: number;
+  timeoutMs?: number;
+  focus?: FocusSpec;
 }
 
 export interface CliPolicyOverrides {
   lease?: string;
   maxRows?: string;
   redact?: boolean;
+  timeoutMs?: string;
+  focus?: string;
+  focusHops?: string;
 }
 
 export interface LoadedVaultConfig {
@@ -461,6 +467,115 @@ function minDefined(...nums: Array<number | undefined>): number | undefined {
   return valid.length ? Math.min(...valid) : undefined;
 }
 
+export function parseTimeoutMs(raw: unknown, where: string): number | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  if (typeof raw === 'number') {
+    if (!Number.isFinite(raw) || raw <= 0) {
+      throw new Error(`${where} must be a positive number of milliseconds, not ${JSON.stringify(raw)}.`);
+    }
+    return Math.max(1, Math.round(raw));
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return undefined;
+    if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+      const n = Number(trimmed);
+      if (!Number.isFinite(n) || n <= 0) {
+        throw new Error(`${where} must be greater than zero.`);
+      }
+      return Math.max(1, Math.round(n));
+    }
+    const m = /^(\d+(?:\.\d+)?)\s*(ms|s|sec|secs|m|min|mins)$/i.exec(trimmed);
+    if (!m) {
+      throw new Error(`${where} must be milliseconds (e.g. 2500) or a duration like "500ms" or "5s", not ${JSON.stringify(raw)}.`);
+    }
+    const n = Number(m[1]);
+    const unit = m[2].toLowerCase();
+    const ms = unit === 'ms' ? n : unit.startsWith('m') ? n * 60_000 : n * 1_000;
+    if (!Number.isFinite(ms) || ms <= 0) {
+      throw new Error(`${where} must be greater than zero.`);
+    }
+    return Math.max(1, Math.round(ms));
+  }
+  throw new Error(`${where} must be a positive number of milliseconds or duration string, not ${JSON.stringify(raw)}.`);
+}
+
+function parseCredentialCommand(raw: unknown, where: string): string | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== 'string' || !raw.trim()) {
+    throw new Error(`${where} must be a non-empty shell command string.`);
+  }
+  return raw.trim();
+}
+
+async function executeCredentialCommand(
+  cmd: string,
+  connId: string,
+  connName: string,
+  baseEnv: NodeJS.ProcessEnv | undefined,
+): Promise<Record<string, string>> {
+  const { execFile } = await import('node:child_process');
+  const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
+  const shellArgs = process.platform === 'win32' ? ['/d', '/s', '/c', cmd] : ['-c', cmd];
+  const stdout = await new Promise<string>((resolvePromise, rejectPromise) => {
+    execFile(
+      shell,
+      shellArgs,
+      {
+        timeout: 10_000,
+        maxBuffer: 1024 * 1024,
+        env: {
+          ...process.env,
+          ...(baseEnv ?? {}),
+          TABLEWALK_CONNECTION_ID: connId,
+          TABLEWALK_CONNECTION_NAME: connName,
+        },
+      },
+      (err, out, stderr) => {
+        if (err) {
+          const code = (err as { code?: unknown }).code;
+          const stderrSummary = typeof stderr === 'string' && stderr.trim() ? `: ${stderr.trim().slice(0, 160)}` : '';
+          rejectPromise(
+            new Error(`credentialCommand for "${connName}" failed${code !== undefined ? ` (exit ${String(code)})` : ''}${stderrSummary}`),
+          );
+          return;
+        }
+        resolvePromise(out);
+      },
+    );
+  });
+
+  const trimmed = stdout.trim();
+  if (!trimmed) return {};
+  if (trimmed.startsWith('{')) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (err) {
+      throw new Error(`credentialCommand for "${connName}" returned invalid JSON: ${(err as Error).message}`);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error(`credentialCommand for "${connName}" must return a JSON object or KEY=VALUE lines.`);
+    }
+    const rec = parsed as Record<string, unknown>;
+    const hasNested =
+      (rec.dotenv !== undefined && typeof rec.dotenv === 'string') ||
+      (rec.env !== undefined && typeof rec.env === 'object' && !Array.isArray(rec.env)) ||
+      (rec.secrets !== undefined && typeof rec.secrets === 'object' && !Array.isArray(rec.secrets)) ||
+      (rec.variables !== undefined && typeof rec.variables === 'object' && !Array.isArray(rec.variables));
+    if (hasNested) {
+      return {
+        ...(typeof rec.dotenv === 'string' ? parseDotenvText(rec.dotenv) : {}),
+        ...(rec.variables ? parseEnvObject(rec.variables, 'credentialCommand "variables"') : {}),
+        ...(rec.env ? parseEnvObject(rec.env, 'credentialCommand "env"') : {}),
+        ...(rec.secrets ? parseEnvObject(rec.secrets, 'credentialCommand "secrets"') : {}),
+      };
+    }
+    return parseEnvObject(rec, 'credentialCommand output');
+  }
+  return parseDotenvText(trimmed);
+}
+
 function mergeEnvironmentPolicies(base?: EnvironmentPolicySpec, override?: EnvironmentPolicySpec): EnvironmentPolicySpec | undefined {
   if (!base && !override) return undefined;
   const writable = override?.writable ?? base?.writable;
@@ -470,6 +585,8 @@ function mergeEnvironmentPolicies(base?: EnvironmentPolicySpec, override?: Envir
   const redact = override?.redact ?? base?.redact;
   const redactColumns = mergeRedactColumns(base?.redactColumns, override?.redactColumns);
   const maxRows = minDefined(base?.maxRows, override?.maxRows);
+  const timeoutMs = minDefined(base?.timeoutMs, override?.timeoutMs);
+  const focus = override?.focus ?? base?.focus;
   return {
     ...(writable !== undefined ? { writable } : {}),
     ...(rows !== undefined ? { rows } : {}),
@@ -478,6 +595,8 @@ function mergeEnvironmentPolicies(base?: EnvironmentPolicySpec, override?: Envir
     ...(redact !== undefined ? { redact } : {}),
     ...(redactColumns ? { redactColumns } : {}),
     ...(maxRows !== undefined ? { maxRows } : {}),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(focus ? { focus } : {}),
   };
 }
 
@@ -502,6 +621,11 @@ export function parseEnvironmentPolicies(raw: unknown, where: string): Map<strin
     'redact_columns',
     'maxRows',
     'max_rows',
+    'timeoutMs',
+    'timeout_ms',
+    'focus',
+    'focusHops',
+    'focus_hops',
   ]);
   for (const [rawKey, rawVal] of Object.entries(raw as Record<string, unknown>)) {
     const key = rawKey.trim().toLowerCase();
@@ -514,7 +638,7 @@ export function parseEnvironmentPolicies(raw: unknown, where: string): Map<strin
     if (unknown.length) {
       throw new Error(
         `${where}: unknown key ${unknown.map((k) => `"${k}"`).join(', ')} in environments["${rawKey}"] ` +
-          '(expected writable, rows, lease, blocklist, blockedTables, blockedFields, redact, redactColumns, maxRows).',
+          '(expected writable, rows, lease, blocklist, blockedTables, blockedFields, redact, redactColumns, maxRows, timeoutMs, focus, focusHops).',
       );
     }
     const label = `${where}: environments["${rawKey}"]`;
@@ -537,6 +661,8 @@ export function parseEnvironmentPolicies(raw: unknown, where: string): Map<strin
       parseRedactColumnsSpec(rec.redact_columns, `${label} "redact_columns"`),
     );
     const maxRows = parseMaxRows(rec.maxRows ?? rec.max_rows, `${label} "maxRows"`);
+    const timeoutMs = parseTimeoutMs(rec.timeoutMs ?? rec.timeout_ms, `${label} "timeoutMs"`);
+    const focus = parseFocusSpec(rec.focus, rec.focusHops ?? rec.focus_hops, `${label} "focus"`);
     out.set(key, {
       ...(rec.writable !== undefined ? { writable: rec.writable } : {}),
       ...(rec.rows !== undefined ? { rows: rec.rows } : {}),
@@ -545,6 +671,8 @@ export function parseEnvironmentPolicies(raw: unknown, where: string): Map<strin
       ...(rec.redact !== undefined ? { redact: rec.redact } : {}),
       ...(redactColumns ? { redactColumns } : {}),
       ...(maxRows !== undefined ? { maxRows } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(focus ? { focus } : {}),
     });
   }
   return out;
@@ -595,6 +723,9 @@ function parseEnvAndCliPolicies(
   forceRedact?: boolean;
   envRedactColumns?: string[];
   envMaxRows?: number;
+  envTimeoutMs?: number;
+  cliFocus?: FocusSpec;
+  envCredentialCommand?: string;
 } {
   const source = env ?? process.env;
   let envBlocklist: BlocklistRules | undefined;
@@ -660,12 +791,31 @@ function parseEnvAndCliPolicies(
     cli.maxRows !== undefined ? parseMaxRows(cli.maxRows, '--max-rows') : undefined,
   );
 
+  const envTimeoutMs = minDefined(
+    source.TABLEWALK_TIMEOUT_MS?.trim() ? parseTimeoutMs(source.TABLEWALK_TIMEOUT_MS, 'TABLEWALK_TIMEOUT_MS') : undefined,
+    cli.timeoutMs !== undefined ? parseTimeoutMs(cli.timeoutMs, '--timeout-ms') : undefined,
+  );
+
+  const rawFocus = cli.focus ?? source.TABLEWALK_FOCUS;
+  const rawFocusHops = cli.focusHops ?? source.TABLEWALK_FOCUS_HOPS;
+  if (rawFocus === undefined && cli.focusHops !== undefined) {
+    throw new Error('--focus-hops requires --focus <tables> (or TABLEWALK_FOCUS).');
+  }
+  const cliFocus = rawFocus ? parseFocusSpec(rawFocus, rawFocusHops, cli.focus !== undefined ? '--focus' : 'TABLEWALK_FOCUS') : undefined;
+
+  const envCredentialCommand = source.TABLEWALK_CREDENTIAL_COMMAND?.trim()
+    ? parseCredentialCommand(source.TABLEWALK_CREDENTIAL_COMMAND, 'TABLEWALK_CREDENTIAL_COMMAND')
+    : undefined;
+
   return {
     ...(envBlocklist ? { envBlocklist } : {}),
     ...(envLease ? { envLease } : {}),
     ...(forceRedact ? { forceRedact } : {}),
     ...(envRedactColumns ? { envRedactColumns } : {}),
     ...(envMaxRows !== undefined ? { envMaxRows } : {}),
+    ...(envTimeoutMs !== undefined ? { envTimeoutMs } : {}),
+    ...(cliFocus ? { cliFocus } : {}),
+    ...(envCredentialCommand ? { envCredentialCommand } : {}),
   };
 }
 
@@ -682,6 +832,13 @@ export interface PolicyRegistryOptions {
   connectionRedacts?: Map<string, { enabled: boolean; columns?: string[] }>;
   defaultMaxRows?: number;
   connectionMaxRows?: Map<string, number>;
+  defaultTimeoutMs?: number;
+  connectionTimeouts?: Map<string, number>;
+  defaultFocus?: FocusSpec;
+  cliFocus?: FocusSpec;
+  connectionFocus?: Map<string, FocusSpec>;
+  defaultCredentialCommand?: string;
+  connectionCredentialCommands?: Map<string, string>;
   mcpMode?: boolean;
 }
 
@@ -710,6 +867,8 @@ interface ManagedSlot {
  *   allowlist `Adapter` facades with zero prototype or unlisted-method inheritance.
  */
 export class PolicyRegistry extends Registry {
+  private readonly baseEnvironment?: NodeJS.ProcessEnv;
+  private readonly dynamicCredentials: Record<string, string> = {};
   private readonly defaultBlocklist?: BlocklistRules;
   private readonly blocklists = new Map<string, BlocklistRules>();
   private readonly connectionLeases = new Map<string, LeaseSpec>();
@@ -721,6 +880,14 @@ export class PolicyRegistry extends Registry {
   private readonly connectionRedacts = new Map<string, { enabled: boolean; columns?: string[] }>();
   private readonly defaultMaxRows?: number;
   private readonly connectionMaxRows = new Map<string, number>();
+  private readonly defaultTimeoutMs?: number;
+  private readonly connectionTimeouts = new Map<string, number>();
+  private readonly defaultFocus?: FocusSpec;
+  private readonly cliFocus?: FocusSpec;
+  private readonly connectionFocus = new Map<string, FocusSpec>();
+  private readonly defaultCredentialCommand?: string;
+  private readonly connectionCredentialCommands = new Map<string, string>();
+  private readonly credentialRefreshing = new Map<string, Promise<void>>();
   private readonly mcpMode: boolean;
 
   private readonly slots = new Map<string, ManagedSlot>();
@@ -737,6 +904,7 @@ export class PolicyRegistry extends Registry {
 
   constructor(options: PolicyRegistryOptions = {}) {
     super(options.environment ? { environment: options.environment } : {});
+    this.baseEnvironment = options.environment;
     this.defaultBlocklist = options.defaultBlocklist;
     if (options.blocklists) {
       for (const [id, rules] of options.blocklists) this.blocklists.set(id, rules);
@@ -756,6 +924,19 @@ export class PolicyRegistry extends Registry {
     this.defaultMaxRows = options.defaultMaxRows;
     if (options.connectionMaxRows) {
       for (const [id, max] of options.connectionMaxRows) this.connectionMaxRows.set(id, max);
+    }
+    this.defaultTimeoutMs = options.defaultTimeoutMs;
+    if (options.connectionTimeouts) {
+      for (const [id, ms] of options.connectionTimeouts) this.connectionTimeouts.set(id, ms);
+    }
+    this.defaultFocus = options.defaultFocus;
+    this.cliFocus = options.cliFocus;
+    if (options.connectionFocus) {
+      for (const [id, spec] of options.connectionFocus) this.connectionFocus.set(id, spec);
+    }
+    this.defaultCredentialCommand = options.defaultCredentialCommand;
+    if (options.connectionCredentialCommands) {
+      for (const [id, cmd] of options.connectionCredentialCommands) this.connectionCredentialCommands.set(id, cmd);
     }
     this.sessionLease = options.sessionLease;
     this.mcpMode = options.mcpMode === true;
@@ -817,10 +998,34 @@ export class PolicyRegistry extends Registry {
     this.connectionMaxRows.set(id, maxRows);
   }
 
+  setConnectionTimeoutMs(id: string, timeoutMs: number | undefined): void {
+    if (timeoutMs === undefined) {
+      this.connectionTimeouts.delete(id);
+      return;
+    }
+    this.connectionTimeouts.set(id, timeoutMs);
+  }
+
+  setConnectionFocus(id: string, focus: FocusSpec | undefined): void {
+    if (!focus) {
+      this.connectionFocus.delete(id);
+      return;
+    }
+    this.connectionFocus.set(id, focus);
+  }
+
+  setConnectionCredentialCommand(id: string, cmd: string | undefined): void {
+    if (!cmd) {
+      this.connectionCredentialCommands.delete(id);
+      return;
+    }
+    this.connectionCredentialCommands.set(id, cmd);
+  }
+
   private syncPoolIdle(id: string): void {
     const cfg = this.configOf(id);
     const effIdle = this.leaseFor(id)?.idleSeconds ?? this.leaseFor(id)?.maxSeconds;
-    if (cfg && !cfg.http && effIdle !== undefined && (/^postgres(ql)?:\/\//i.test(cfg.url) || cfg.url.includes('$'))) {
+    if (cfg && !cfg.http && effIdle !== undefined && /^postgres(ql)?:\/\//i.test(cfg.url)) {
       cfg.pool = {
         ...(cfg.pool ?? {}),
         minIdle: 0,
@@ -848,6 +1053,10 @@ export class PolicyRegistry extends Registry {
     return mergeBlocklists(withEnv, this.blocklists.get(id));
   }
 
+  private focusFor(id: string): FocusSpec | undefined {
+    return this.cliFocus ?? this.connectionFocus.get(id) ?? this.envPolicyFor(id)?.focus ?? this.defaultFocus;
+  }
+
   private ownLeaseFor(id: string): LeaseSpec | undefined {
     return mergeLeaseSpecs(this.envPolicyFor(id)?.lease, this.connectionLeases.get(id));
   }
@@ -869,13 +1078,53 @@ export class PolicyRegistry extends Registry {
     return minDefined(this.defaultMaxRows, this.envPolicyFor(id)?.maxRows, this.connectionMaxRows.get(id));
   }
 
+  private timeoutMsFor(id: string): number | undefined {
+    return minDefined(this.defaultTimeoutMs, this.envPolicyFor(id)?.timeoutMs, this.connectionTimeouts.get(id));
+  }
+
+  private credentialCommandFor(id: string): string | undefined {
+    const cfg = this.configOf(id);
+    /* Never run credential commands for browser session-added connections. */
+    if (cfg?.source === 'session') return undefined;
+    return this.connectionCredentialCommands.get(id) ?? this.defaultCredentialCommand;
+  }
+
+  private async refreshCredentialsFor(id: string): Promise<void> {
+    const cmd = this.credentialCommandFor(id);
+    if (!cmd) return;
+    const inflight = this.credentialRefreshing.get(id);
+    if (inflight) {
+      await inflight;
+      return;
+    }
+    const cfg = this.configOf(id);
+    const connName = cfg?.name ?? id;
+    const task = (async () => {
+      const fresh = await executeCredentialCommand(cmd, id, connName, this.baseEnvironment);
+      Object.assign(this.dynamicCredentials, fresh);
+      (this as unknown as { environment?: NodeJS.ProcessEnv }).environment = Object.freeze({
+        ...process.env,
+        ...(this.baseEnvironment ?? {}),
+        ...this.dynamicCredentials,
+      });
+    })().finally(() => {
+      this.credentialRefreshing.delete(id);
+    });
+    this.credentialRefreshing.set(id, task);
+    await task;
+  }
+
   private runtimePolicyFor(id: string): RuntimeConnectionPolicy | undefined {
     const redact = this.redactFor(id);
     const maxRows = this.maxRowsFor(id);
-    if (!redact && maxRows === undefined) return undefined;
+    const timeoutMs = this.timeoutMsFor(id);
+    const focus = this.focusFor(id);
+    if (!redact && maxRows === undefined && timeoutMs === undefined && !focus) return undefined;
     return {
       ...(redact ? { redactsRows: true, ...(redact.columns ? { redactColumns: redact.columns } : {}) } : {}),
       ...(maxRows !== undefined ? { maxRows } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(focus ? { focused: true } : {}),
     };
   }
 
@@ -1041,9 +1290,15 @@ export class PolicyRegistry extends Registry {
 
   private decorateOpened(id: string, rawAdapter: Adapter, rawSchema: DatabaseSchema): { adapter: Adapter; schema: DatabaseSchema } {
     const rules = this.rulesFor(id);
+    const focusSpec = this.focusFor(id);
     const redactSpec = this.redactFor(id);
     const leaseSpec = this.leaseFor(id);
-    const policySignature = JSON.stringify({ rules: rules ?? null, redact: redactSpec ?? null, lease: leaseSpec ?? null });
+    const policySignature = JSON.stringify({
+      rules: rules ?? null,
+      focus: focusSpec ?? null,
+      redact: redactSpec ?? null,
+      lease: leaseSpec ?? null,
+    });
 
     const hit = this.slots.get(id);
     if (hit && !hit.evicted && hit.rawAdapter === rawAdapter && hit.policySignature === policySignature) {
@@ -1067,8 +1322,12 @@ export class PolicyRegistry extends Registry {
 
     const cfg = this.configOf(id);
     const label = cfg?.name ?? id;
-    const blocked =
-      rules && hasBlocklistRules(rules) ? applyBlocklist(rawAdapter, rawSchema, label, rules) : { adapter: rawAdapter, schema: rawSchema };
+    const focusRules = focusSpec ? computeFocusBlocklist(rawSchema, focusSpec).rules : undefined;
+    const effectiveRules = mergeBlocklists(rules, focusRules);
+    const shouldFenceCatalog = Boolean((effectiveRules && hasBlocklistRules(effectiveRules)) || focusSpec);
+    const blocked = shouldFenceCatalog
+      ? applyBlocklist(rawAdapter, rawSchema, label, effectiveRules ?? { tables: [], fields: {} })
+      : { adapter: rawAdapter, schema: rawSchema };
     const redacted = redactSpec ? applyRedaction(blocked.adapter, blocked.schema, label, redactSpec) : blocked;
     const leased = this.wrapLeasedAdapter(id, redacted.adapter);
     this.slots.set(id, { rawAdapter, wrapped: leased, schema: redacted.schema, policySignature, evicted: false });
@@ -1091,14 +1350,14 @@ export class PolicyRegistry extends Registry {
 
   override onAdapterDialed(hook: (id: string, adapter: Adapter) => void): void {
     super.onAdapterDialed((id, rawAdapter) => {
-      /* Never expose an unwrapped adapter beneath a blocklist or redaction policy to dial listeners. */
-      if (this.rulesFor(id) || this.redactFor(id)) return;
+      /* Never expose an unwrapped adapter beneath a blocklist, focus, or redaction policy to dial listeners. */
+      if (this.rulesFor(id) || this.focusFor(id) || this.redactFor(id)) return;
       hook(id, rawAdapter);
     });
   }
 
   override dialedAdapter(id: string): Adapter | undefined {
-    if (this.rulesFor(id) || this.redactFor(id) || this.slots.get(id)?.evicted || this.isExpired(id)) {
+    if (this.rulesFor(id) || this.focusFor(id) || this.redactFor(id) || this.slots.get(id)?.evicted || this.isExpired(id)) {
       return undefined;
     }
     return super.dialedAdapter(id);
@@ -1135,6 +1394,7 @@ export class PolicyRegistry extends Registry {
           this.slots.delete(id);
           this.refreshingFromEvict.add(id);
           try {
+            await this.refreshCredentialsFor(id);
             return await super.refresh(id);
           } finally {
             this.refreshingFromEvict.delete(id);
@@ -1144,6 +1404,9 @@ export class PolicyRegistry extends Registry {
         });
         this.reopening.set(id, reopenPromise);
         return reopenPromise;
+      }
+      if (!currentSlot) {
+        await this.refreshCredentialsFor(id);
       }
     }
 
@@ -1156,6 +1419,7 @@ export class PolicyRegistry extends Registry {
     const pendingEvict = this.evicting.get(id);
     if (pendingEvict) await pendingEvict;
     this.slots.delete(id);
+    await this.refreshCredentialsFor(id);
     return super.refresh(id);
   }
 
@@ -1189,6 +1453,9 @@ export class PolicyRegistry extends Registry {
     this.connectionLeases.delete(id);
     this.connectionRedacts.delete(id);
     this.connectionMaxRows.delete(id);
+    this.connectionTimeouts.delete(id);
+    this.connectionFocus.delete(id);
+    this.connectionCredentialCommands.delete(id);
     await super.remove(id);
   }
 
@@ -1201,8 +1468,10 @@ export class PolicyRegistry extends Registry {
   override list(): ReturnType<Registry['list']> {
     return super.list().map((item) => {
       const rules = this.rulesFor(item.id);
+      const focusSpec = this.focusFor(item.id);
       const redactSpec = this.redactFor(item.id);
       const maxRows = this.maxRowsFor(item.id);
+      const timeoutMs = this.timeoutMsFor(item.id);
       const slot = this.slots.get(item.id);
       const evictedOrExpired = Boolean(slot?.evicted) || this.isExpired(item.id);
       return {
@@ -1212,9 +1481,11 @@ export class PolicyRegistry extends Registry {
           : slot
             ? { connected: true, tables: slot.schema.tables.length }
             : {}),
-        ...(rules || redactSpec ? { hidesColumns: true } : {}),
+        ...(rules || redactSpec || focusSpec ? { hidesColumns: true } : {}),
         ...(redactSpec ? { redactsRows: true } : {}),
+        ...(focusSpec ? { focused: true } : {}),
         ...(maxRows !== undefined ? { maxRows } : {}),
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       } as ReturnType<Registry['list']>[number];
     });
   }
@@ -1260,7 +1531,14 @@ export async function loadPipedVaultConfig(
     const environment = Object.freeze({ ...process.env, ...vars });
     const envPol = parseEnvAndCliPolicies(environment, cli);
     const hasPolicy = Boolean(
-      envPol.envBlocklist || envPol.envLease || envPol.forceRedact || envPol.envRedactColumns || envPol.envMaxRows !== undefined,
+      envPol.envBlocklist ||
+      envPol.envLease ||
+      envPol.forceRedact ||
+      envPol.envRedactColumns ||
+      envPol.envMaxRows !== undefined ||
+      envPol.envTimeoutMs !== undefined ||
+      envPol.cliFocus ||
+      envPol.envCredentialCommand,
     );
     const registry = hasPolicy
       ? new PolicyRegistry({
@@ -1270,6 +1548,9 @@ export async function loadPipedVaultConfig(
           forceRedact: envPol.forceRedact,
           defaultRedactColumns: envPol.envRedactColumns,
           defaultMaxRows: envPol.envMaxRows,
+          defaultTimeoutMs: envPol.envTimeoutMs,
+          cliFocus: envPol.cliFocus,
+          defaultCredentialCommand: envPol.envCredentialCommand,
           mcpMode,
         })
       : new Registry({ environment });
@@ -1319,6 +1600,13 @@ export async function loadPipedVaultConfig(
         ...(doc.redact_columns !== undefined ? { redact_columns: doc.redact_columns } : {}),
         ...(doc.maxRows !== undefined ? { maxRows: doc.maxRows } : {}),
         ...(doc.max_rows !== undefined ? { max_rows: doc.max_rows } : {}),
+        ...(doc.timeoutMs !== undefined ? { timeoutMs: doc.timeoutMs } : {}),
+        ...(doc.timeout_ms !== undefined ? { timeout_ms: doc.timeout_ms } : {}),
+        ...(doc.focus !== undefined ? { focus: doc.focus } : {}),
+        ...(doc.focusHops !== undefined ? { focusHops: doc.focusHops } : {}),
+        ...(doc.focus_hops !== undefined ? { focus_hops: doc.focus_hops } : {}),
+        ...(doc.credentialCommand !== undefined ? { credentialCommand: doc.credentialCommand } : {}),
+        ...(doc.credential_command !== undefined ? { credential_command: doc.credential_command } : {}),
       },
     ];
     if (typeof doc.env === 'string') delete doc.env;
@@ -1355,6 +1643,10 @@ export async function loadPipedVaultConfig(
     envPol.envRedactColumns,
   );
   const defaultMaxRows = minDefined(parseMaxRows(doc.maxRows ?? doc.max_rows, `${where} "maxRows"`), envPol.envMaxRows);
+  const defaultTimeoutMs = minDefined(parseTimeoutMs(doc.timeoutMs ?? doc.timeout_ms, `${where} "timeoutMs"`), envPol.envTimeoutMs);
+  const defaultFocus = parseFocusSpec(doc.focus, doc.focusHops ?? doc.focus_hops, `${where} "focus"`);
+  const defaultCredentialCommand =
+    parseCredentialCommand(doc.credentialCommand ?? doc.credential_command, `${where} "credentialCommand"`) ?? envPol.envCredentialCommand;
 
   const rawConns = doc.connections;
   if (rawConns !== undefined && !Array.isArray(rawConns)) {
@@ -1370,6 +1662,9 @@ export async function loadPipedVaultConfig(
     lease?: LeaseSpec;
     redactSpec?: { enabled: boolean; columns?: string[] };
     maxRows?: number;
+    timeoutMs?: number;
+    focus?: FocusSpec;
+    credentialCommand?: string;
   }> = [];
 
   const cwd = process.cwd();
@@ -1419,7 +1714,12 @@ export async function loadPipedVaultConfig(
           }
         : undefined;
     const ownMaxRows = parseMaxRows(c.maxRows ?? c.max_rows, `${connWhere} "maxRows"`);
-    if (connBlocklist || ownLease || redactSpec || ownMaxRows !== undefined) anyConnPolicy = true;
+    const ownTimeoutMs = parseTimeoutMs(c.timeoutMs ?? c.timeout_ms, `${connWhere} "timeoutMs"`);
+    const ownFocus = parseFocusSpec(c.focus, c.focusHops ?? c.focus_hops, `${connWhere} "focus"`);
+    const ownCredCmd = parseCredentialCommand(c.credentialCommand ?? c.credential_command, `${connWhere} "credentialCommand"`);
+    if (connBlocklist || ownLease || redactSpec || ownMaxRows !== undefined || ownTimeoutMs !== undefined || ownFocus || ownCredCmd) {
+      anyConnPolicy = true;
+    }
 
     const rawPool = c.pool && typeof c.pool === 'object' && !Array.isArray(c.pool) ? { ...(c.pool as Record<string, number>) } : undefined;
     const isHttp = c.kind === 'http' && c.http && typeof c.http === 'object';
@@ -1435,7 +1735,12 @@ export async function loadPipedVaultConfig(
       c.redactColumns !== undefined ||
       c.redact_columns !== undefined ||
       c.maxRows !== undefined ||
-      c.max_rows !== undefined;
+      c.max_rows !== undefined ||
+      c.timeoutMs !== undefined ||
+      c.timeout_ms !== undefined ||
+      c.focus !== undefined ||
+      c.focusHops !== undefined ||
+      c.focus_hops !== undefined;
 
     parsedEntries.push({
       addArg: {
@@ -1465,12 +1770,18 @@ export async function loadPipedVaultConfig(
             ...(c.redactColumns !== undefined ? { redactColumns: c.redactColumns } : {}),
             ...(c.redact_columns !== undefined ? { redact_columns: c.redact_columns } : {}),
             ...(c.maxRows !== undefined ? { maxRows: c.maxRows } : c.max_rows !== undefined ? { maxRows: c.max_rows } : {}),
+            ...(c.timeoutMs !== undefined ? { timeoutMs: c.timeoutMs } : c.timeout_ms !== undefined ? { timeoutMs: c.timeout_ms } : {}),
+            ...(c.focus !== undefined ? { focus: c.focus } : {}),
+            ...(c.focusHops !== undefined ? { focusHops: c.focusHops } : c.focus_hops !== undefined ? { focusHops: c.focus_hops } : {}),
           }
         : undefined,
       blocklist: connBlocklist,
       lease: ownLease,
       redactSpec,
       maxRows: ownMaxRows,
+      timeoutMs: ownTimeoutMs,
+      focus: ownFocus,
+      credentialCommand: ownCredCmd,
     });
   }
 
@@ -1482,6 +1793,10 @@ export async function loadPipedVaultConfig(
     envPol.forceRedact ||
     defaultRedactColumns ||
     defaultMaxRows !== undefined ||
+    defaultTimeoutMs !== undefined ||
+    defaultFocus ||
+    envPol.cliFocus ||
+    defaultCredentialCommand ||
     anyConnPolicy,
   );
   const registry: Registry = usePolicyRegistry
@@ -1494,6 +1809,10 @@ export async function loadPipedVaultConfig(
         forceRedact: envPol.forceRedact,
         defaultRedactColumns,
         defaultMaxRows,
+        defaultTimeoutMs,
+        defaultFocus,
+        cliFocus: envPol.cliFocus,
+        defaultCredentialCommand,
         mcpMode,
       })
     : new Registry(environment ? { environment } : {});
@@ -1506,7 +1825,12 @@ export async function loadPipedVaultConfig(
     doc.redactColumns !== undefined ||
     doc.redact_columns !== undefined ||
     doc.maxRows !== undefined ||
-    doc.max_rows !== undefined
+    doc.max_rows !== undefined ||
+    doc.timeoutMs !== undefined ||
+    doc.timeout_ms !== undefined ||
+    doc.focus !== undefined ||
+    doc.focusHops !== undefined ||
+    doc.focus_hops !== undefined
   ) {
     setTopLevelConfigExtras(registry, {
       ...(doc.blocklist !== undefined ? { blocklist: doc.blocklist } : {}),
@@ -1516,6 +1840,9 @@ export async function loadPipedVaultConfig(
       ...(doc.redactColumns !== undefined ? { redactColumns: doc.redactColumns } : {}),
       ...(doc.redact_columns !== undefined ? { redact_columns: doc.redact_columns } : {}),
       ...(doc.maxRows !== undefined ? { maxRows: doc.maxRows } : doc.max_rows !== undefined ? { maxRows: doc.max_rows } : {}),
+      ...(doc.timeoutMs !== undefined ? { timeoutMs: doc.timeoutMs } : doc.timeout_ms !== undefined ? { timeoutMs: doc.timeout_ms } : {}),
+      ...(doc.focus !== undefined ? { focus: doc.focus } : {}),
+      ...(doc.focusHops !== undefined ? { focusHops: doc.focusHops } : doc.focus_hops !== undefined ? { focusHops: doc.focus_hops } : {}),
     });
   }
 
@@ -1535,6 +1862,9 @@ export async function loadPipedVaultConfig(
       if (entry.lease) registry.setConnectionLease(added.id, entry.lease);
       if (entry.redactSpec) registry.setConnectionRedact(added.id, entry.redactSpec);
       if (entry.maxRows !== undefined) registry.setConnectionMaxRows(added.id, entry.maxRows);
+      if (entry.timeoutMs !== undefined) registry.setConnectionTimeoutMs(added.id, entry.timeoutMs);
+      if (entry.focus) registry.setConnectionFocus(added.id, entry.focus);
+      if (entry.credentialCommand) registry.setConnectionCredentialCommand(added.id, entry.credentialCommand);
       /* Re-sync pool idle now that explicit `env` metadata has been attached to `added.id`. */
       if (entry.database || entry.envName) registry.setConnectionLease(added.id, entry.lease);
     }
@@ -1571,8 +1901,9 @@ export async function loadPipedVaultConfig(
 /**
  * Upgrade a disk-loaded `Registry` (before any connection has been opened) into
  * a `PolicyRegistry` carrying top-level, environment-tier, env-var, and
- * per-connection policies (`blocklist`, `redact`, `maxRows`, `lease`, and
- * isolated `secrets`/`dotenv` variables).
+ * per-connection policies (`blocklist`, `redact`, `maxRows`, `timeoutMs`,
+ * `focus`, `credentialCommand`, `lease`, and isolated `secrets`/`dotenv`
+ * variables).
  */
 export function applyExtendedDiskConfig(
   baseRegistry: Registry,
@@ -1622,11 +1953,18 @@ export function applyExtendedDiskConfig(
     envPol.envRedactColumns,
   );
   const defaultMaxRows = minDefined(parseMaxRows(doc.maxRows ?? doc.max_rows, `${where} "maxRows"`), envPol.envMaxRows);
+  const defaultTimeoutMs = minDefined(parseTimeoutMs(doc.timeoutMs ?? doc.timeout_ms, `${where} "timeoutMs"`), envPol.envTimeoutMs);
+  const defaultFocus = parseFocusSpec(doc.focus, doc.focusHops ?? doc.focus_hops, `${where} "focus"`);
+  const defaultCredentialCommand =
+    parseCredentialCommand(doc.credentialCommand ?? doc.credential_command, `${where} "credentialCommand"`) ?? envPol.envCredentialCommand;
 
   const blocklists = new Map<string, BlocklistRules>();
   const connectionLeases = new Map<string, LeaseSpec>();
   const connectionRedacts = new Map<string, { enabled: boolean; columns?: string[] }>();
   const connectionMaxRows = new Map<string, number>();
+  const connectionTimeouts = new Map<string, number>();
+  const connectionFocus = new Map<string, FocusSpec>();
+  const connectionCredentialCommands = new Map<string, string>();
   const rawConnById = new Map<string, Record<string, unknown>>();
   const existingConfigs = baseRegistry.configs();
   const usedIds = new Set<string>();
@@ -1663,6 +2001,12 @@ export function applyExtendedDiskConfig(
       }
       const ownMax = parseMaxRows(rec.maxRows ?? rec.max_rows, `${connWhere} "maxRows"`);
       if (ownMax !== undefined) connectionMaxRows.set(match.id, ownMax);
+      const ownTimeout = parseTimeoutMs(rec.timeoutMs ?? rec.timeout_ms, `${connWhere} "timeoutMs"`);
+      if (ownTimeout !== undefined) connectionTimeouts.set(match.id, ownTimeout);
+      const ownFocus = parseFocusSpec(rec.focus, rec.focusHops ?? rec.focus_hops, `${connWhere} "focus"`);
+      if (ownFocus) connectionFocus.set(match.id, ownFocus);
+      const ownCredCmd = parseCredentialCommand(rec.credentialCommand ?? rec.credential_command, `${connWhere} "credentialCommand"`);
+      if (ownCredCmd) connectionCredentialCommands.set(match.id, ownCredCmd);
     }
   }
 
@@ -1674,10 +2018,17 @@ export function applyExtendedDiskConfig(
     envPol.forceRedact ||
     defaultRedactColumns ||
     defaultMaxRows !== undefined ||
+    defaultTimeoutMs !== undefined ||
+    defaultFocus ||
+    envPol.cliFocus ||
+    defaultCredentialCommand ||
     blocklists.size > 0 ||
     connectionLeases.size > 0 ||
     connectionRedacts.size > 0 ||
-    connectionMaxRows.size > 0,
+    connectionMaxRows.size > 0 ||
+    connectionTimeouts.size > 0 ||
+    connectionFocus.size > 0 ||
+    connectionCredentialCommands.size > 0,
   );
   let registry: Registry = baseRegistry;
 
@@ -1696,6 +2047,13 @@ export function applyExtendedDiskConfig(
           connectionRedacts,
           defaultMaxRows,
           connectionMaxRows,
+          defaultTimeoutMs,
+          connectionTimeouts,
+          defaultFocus,
+          cliFocus: envPol.cliFocus,
+          connectionFocus,
+          defaultCredentialCommand,
+          connectionCredentialCommands,
           mcpMode,
         })
       : new Registry(environment ? { environment } : {});
@@ -1743,7 +2101,10 @@ export function applyExtendedDiskConfig(
     doc.environments !== undefined ||
     doc.redact !== undefined ||
     doc.redactColumns !== undefined ||
-    doc.maxRows !== undefined
+    doc.maxRows !== undefined ||
+    doc.timeoutMs !== undefined ||
+    doc.focus !== undefined ||
+    doc.focusHops !== undefined
   ) {
     setTopLevelConfigExtras(registry, {
       ...(doc.blocklist !== undefined ? { blocklist: doc.blocklist } : {}),
@@ -1752,6 +2113,9 @@ export function applyExtendedDiskConfig(
       ...(doc.redact !== undefined ? { redact: doc.redact } : {}),
       ...(doc.redactColumns !== undefined ? { redactColumns: doc.redactColumns } : {}),
       ...(doc.maxRows !== undefined ? { maxRows: doc.maxRows } : {}),
+      ...(doc.timeoutMs !== undefined ? { timeoutMs: doc.timeoutMs } : {}),
+      ...(doc.focus !== undefined ? { focus: doc.focus } : {}),
+      ...(doc.focusHops !== undefined ? { focusHops: doc.focusHops } : {}),
     });
   }
 
@@ -1798,15 +2162,34 @@ export async function applyStartupTargetSelection(
 
 /**
  * Execute a fast one-shot `--query <q>` or `--call <tool> [--args '<json>']`
- * against `registry`, print JSON to stdout, and close all connections.
+ * against `registry`, format to stdout (`json` | `ndjson` | `tsv` | `md`), and
+ * close all connections.
  */
 export async function runCliOneShot(
   registry: Registry,
   shelf: { views?: ViewDef[]; queries: SavedQuery[]; pages: PageDef[] },
-  options: { query?: string; call?: string; args?: string; connection?: string; env?: string },
+  options: {
+    query?: string;
+    call?: string;
+    args?: string;
+    connection?: string;
+    env?: string;
+    allEnvs?: boolean;
+    format?: string;
+  },
 ): Promise<void> {
   bindShelf(registry, shelf);
   try {
+    const { formatCliOutput, parseCliOutputFormat } = await import('./outputFormat.js');
+    let outFormat;
+    try {
+      outFormat = parseCliOutputFormat(options.format);
+    } catch (err) {
+      console.error(`tablewalk: ${(err as Error).message}`);
+      process.exitCode = 2;
+      return;
+    }
+
     let toolName: string;
     let toolArgs: Record<string, unknown> = {};
 
@@ -1846,7 +2229,11 @@ export async function runCliOneShot(
     }
 
     if (options.connection && toolArgs.connection === undefined) toolArgs.connection = options.connection;
-    if (options.env && toolArgs.env === undefined) toolArgs.env = options.env;
+    if (options.allEnvs && toolArgs.envs === undefined && toolArgs.env === undefined) {
+      toolArgs.envs = 'all';
+    } else if (options.env && toolArgs.env === undefined && toolArgs.envs === undefined) {
+      toolArgs.env = options.env;
+    }
 
     const answer = await runTool(registry, toolName, toolArgs);
     if (answer.isError) {
@@ -1855,7 +2242,7 @@ export async function runCliOneShot(
       return;
     }
     const payload = answer.structuredContent ?? { text: answer.content[0]?.text ?? '' };
-    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    process.stdout.write(formatCliOutput(toolName, payload, outFormat));
   } finally {
     await registry.closeAll().catch(() => {});
     await registry.closeServices().catch(() => {});
@@ -1878,16 +2265,33 @@ async function readStreamUtf8(stream: NodeJS.ReadableStream): Promise<string> {
 
 /**
  * Execute newline-delimited queries, breakdowns, or JSON tool calls (`--batch <path|->`)
- * over a single connection session, streaming NDJSON lines to stdout and closing all
- * connections when finished.
+ * over a single connection session, streaming NDJSON lines (or formatted output) to stdout
+ * and closing all connections when finished.
  */
 export async function runCliBatch(
   registry: Registry,
   shelf: { views?: ViewDef[]; queries: SavedQuery[]; pages: PageDef[] },
-  options: { batch: string; connection?: string; env?: string; inputStream?: NodeJS.ReadableStream },
+  options: {
+    batch: string;
+    connection?: string;
+    env?: string;
+    allEnvs?: boolean;
+    format?: string;
+    inputStream?: NodeJS.ReadableStream;
+  },
 ): Promise<void> {
   bindShelf(registry, shelf);
   try {
+    const { formatCliOutput, parseCliOutputFormat } = await import('./outputFormat.js');
+    let outFormat;
+    try {
+      outFormat = options.format === undefined ? 'ndjson' : parseCliOutputFormat(options.format);
+    } catch (err) {
+      console.error(`tablewalk: ${(err as Error).message}`);
+      process.exitCode = 2;
+      return;
+    }
+
     let rawText: string;
     try {
       rawText =
@@ -1911,6 +2315,35 @@ export async function runCliBatch(
       return;
     }
 
+    const jsonCollector: Array<Record<string, unknown>> = [];
+    const emitBatchEnvelope = (env: Record<string, unknown>, toolName?: string) => {
+      if (outFormat === 'json') {
+        jsonCollector.push(env);
+        return;
+      }
+      if (outFormat === 'ndjson') {
+        process.stdout.write(`${JSON.stringify(env)}\n`);
+        return;
+      }
+      /* Human/LLM compact `--format tsv` or `--format md` across batch items. */
+      const headerLabel = env.id !== undefined ? `[${String(env.id)}] ${toolName ?? ''}`.trim() : `#${String(env.index)}`;
+      if (env.ok === false) {
+        if (outFormat === 'md') {
+          process.stdout.write(`### ${headerLabel}\n\n_Error (${String(env.code ?? 'error')}): ${String(env.error ?? '')}_\n\n`);
+        } else {
+          process.stdout.write(`# ${headerLabel}\tERROR\t${String(env.code ?? 'error')}\t${String(env.error ?? '')}\n`);
+        }
+        return;
+      }
+      const res = (env.result as Record<string, unknown>) ?? {};
+      const formatted = formatCliOutput(toolName ?? '', res, outFormat);
+      if (outFormat === 'md') {
+        process.stdout.write(`### ${headerLabel}\n\n${formatted}\n`);
+      } else {
+        process.stdout.write(`# ${headerLabel}\n${formatted}`);
+      }
+    };
+
     let anyFailed = false;
     for (const [index, line] of lines.entries()) {
       let toolName = '';
@@ -1923,16 +2356,22 @@ export async function runCliBatch(
           parsed = JSON.parse(line);
         } catch (err) {
           anyFailed = true;
-          process.stdout.write(
-            `${JSON.stringify({ index, ok: false, code: 'invalid_argument', error: `Invalid JSON on line ${index + 1}: ${(err as Error).message}` })}\n`,
-          );
+          emitBatchEnvelope({
+            index,
+            ok: false,
+            code: 'invalid_argument',
+            error: `Invalid JSON on line ${index + 1}: ${(err as Error).message}`,
+          });
           continue;
         }
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
           anyFailed = true;
-          process.stdout.write(
-            `${JSON.stringify({ index, ok: false, code: 'invalid_argument', error: `Line ${index + 1} must be a JSON object or query string.` })}\n`,
-          );
+          emitBatchEnvelope({
+            index,
+            ok: false,
+            code: 'invalid_argument',
+            error: `Line ${index + 1} must be a JSON object or query string.`,
+          });
           continue;
         }
         const rec = parsed as Record<string, unknown>;
@@ -1941,15 +2380,13 @@ export async function runCliBatch(
         if (rawArgs !== undefined) {
           if (!rawArgs || typeof rawArgs !== 'object' || Array.isArray(rawArgs)) {
             anyFailed = true;
-            process.stdout.write(
-              `${JSON.stringify({
-                index,
-                ...(callId !== undefined ? { id: callId } : {}),
-                ok: false,
-                code: 'invalid_argument',
-                error: '"args" must be a JSON object.',
-              })}\n`,
-            );
+            emitBatchEnvelope({
+              index,
+              ...(callId !== undefined ? { id: callId } : {}),
+              ok: false,
+              code: 'invalid_argument',
+              error: '"args" must be a JSON object.',
+            });
             continue;
           }
           toolArgs = { ...(rawArgs as Record<string, unknown>) };
@@ -1967,51 +2404,60 @@ export async function runCliBatch(
           if (rec.offset !== undefined && toolArgs.offset === undefined) toolArgs.offset = rec.offset;
         } else {
           anyFailed = true;
-          process.stdout.write(
-            `${JSON.stringify({
-              index,
-              ...(callId !== undefined ? { id: callId } : {}),
-              ok: false,
-              code: 'invalid_argument',
-              error: 'Batch JSON object must specify "tool" (or "call") or "query".',
-            })}\n`,
-          );
+          emitBatchEnvelope({
+            index,
+            ...(callId !== undefined ? { id: callId } : {}),
+            ok: false,
+            code: 'invalid_argument',
+            error: 'Batch JSON object must specify "tool" (or "call") or "query".',
+          });
           continue;
         }
         if (typeof rec.connection === 'string' && toolArgs.connection === undefined) toolArgs.connection = rec.connection;
         if (typeof rec.env === 'string' && toolArgs.env === undefined) toolArgs.env = rec.env;
+        if (rec.envs !== undefined && toolArgs.envs === undefined) toolArgs.envs = rec.envs;
       } else {
         toolName = looksLikeBreakdown(line) ? 'breakdown' : 'query';
         toolArgs = { q: line };
       }
 
       if (options.connection && toolArgs.connection === undefined) toolArgs.connection = options.connection;
-      if (options.env && toolArgs.env === undefined) toolArgs.env = options.env;
+      if (options.allEnvs && toolArgs.envs === undefined && toolArgs.env === undefined) {
+        toolArgs.envs = 'all';
+      } else if (options.env && toolArgs.env === undefined && toolArgs.envs === undefined) {
+        toolArgs.env = options.env;
+      }
 
       const answer = await runTool(registry, toolName, toolArgs);
       if (answer.isError) {
         anyFailed = true;
-        process.stdout.write(
-          `${JSON.stringify({
+        emitBatchEnvelope(
+          {
             index,
             ...(callId !== undefined ? { id: callId } : {}),
             ok: false,
             tool: toolName,
             code: answer._meta?.['tablewalk/code'] ?? 'internal',
             error: answer.content[0]?.text ?? 'Tool call failed.',
-          })}\n`,
+          },
+          toolName,
         );
       } else {
-        process.stdout.write(
-          `${JSON.stringify({
+        emitBatchEnvelope(
+          {
             index,
             ...(callId !== undefined ? { id: callId } : {}),
             ok: true,
             tool: toolName,
             result: answer.structuredContent ?? { text: answer.content[0]?.text ?? '' },
-          })}\n`,
+          },
+          toolName,
         );
       }
+    }
+
+    if (outFormat === 'json') {
+      process.stdout.write(`${JSON.stringify(jsonCollector, null, 2)}\n`);
     }
 
     if (anyFailed) process.exitCode = 1;

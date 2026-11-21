@@ -46,13 +46,13 @@ npx tablewalk --config <(vault get db/billing) --call schema_summary
 { vault get db/billing; cat calls.jsonl; } | npx tablewalk --config - --batch - --redact --max-rows 5000
 ```
 
-Piped JSON configs can include `"secrets"` (or `.env` text under `"dotenv"`), `"environments"` tier defaults (`"local"`, `"staging"`, `"prod"`), `"active": "billing@staging"`, `"only": true` to expose only the selected target, `"lazy": true` (default for piped `--mcp` configs so `initialize` and `tools/list` answer before dialing the database), `"lease": { "idleSeconds": 30, "maxSeconds": 300 }`, `"redact": true` / `"redactColumns"`, `"maxRows"`, and `"blocklist": { "tables": ["audit_*"], "fields": { "*": ["*_token"], "customer": ["tax_id"] } }`.
+Piped JSON configs can include `"secrets"` (or `.env` text under `"dotenv"`), `"credentialCommand"` to mint short-lived tokens on open and after idle eviction, `"environments"` tier defaults (`"local"`, `"staging"`, `"prod"`), `"active": "billing@staging"`, `"only": true` to expose only the selected target, `"lazy": true` (default for piped `--mcp` configs so `initialize` and `tools/list` answer before dialing the database), `"lease": { "idleSeconds": 30, "maxSeconds": 300 }`, `"timeoutMs"`, `"focus"` / `"focusHops"`, `"redact": true` / `"redactColumns"`, `"maxRows"`, and `"blocklist": { "tables": ["audit_*"], "fields": { "*": ["*_token"], "customer": ["tax_id"] } }`.
 
 ![The Agent console running the record tool on customer 1, with the answer and its cost](/shots/agent.webp?v=2)
 
 ## The tools
 
-Twenty-seven tools: twenty-one read-only, and six writes that are listed only when a connection is `"writable": true`. Every tool also takes `connection` (an id, `"db@env"` such as `"billing@staging"`, or `"@staging"` relative to the active database) and optional `env` (`"local"`, `"staging"`, `"prod"`) when multiple environments are configured. Connections can declare `"database"` and `"env"` in `tablewalk.json` or rely on naming conventions (`billing-local`, `billing_staging`, `billing [prod]`); when a `prod` environment is active, write tools refuse implicit calls unless `connection` or `env: "prod"` is passed explicitly.
+Twenty-eight tools: twenty-two read-only, and six writes that are listed only when a connection is `"writable": true`. Every tool also takes `connection` (an id, `"db@env"` such as `"billing@staging"`, or `"@staging"` relative to the active database) and optional `env` (`"local"`, `"staging"`, `"prod"`) when multiple environments are configured, and single-connection read-only tools accept `envs: "all"` or `envs: ["local", "staging"]` to fan out in parallel across sibling environments while honoring each tier's guardrails. Connections can declare `"database"` and `"env"` in `tablewalk.json` or rely on naming conventions (`billing-local`, `billing_staging`, `billing [prod]`); when a `prod` environment is active, write tools refuse implicit calls unless `connection` or `env: "prod"` is passed explicitly.
 
 ### Reading
 
@@ -76,6 +76,7 @@ Twenty-seven tools: twenty-one read-only, and six writes that are listed only wh
 | `order` | What has to exist first: tables in insert order, and the reverse for teardown. | `{"tables": ["invoice_line", "customer"]}` |
 | `fixture` | One real row and everything it needs to exist (with optional `redact: true` masking), ready for `insert_graph`. | `{"table": "invoice", "key": {"id": 1001}, "children": true, "redact": true}` |
 | `lint` | What the shape will cost: keyless tables, unindexed foreign keys, naive timestamps. | `{"severity": "high"}` |
+| `perf` | Live index, scan, bloat and planner-statistics diagnostics (`pg_stat_user_tables` / `pg_stat_user_indexes` on PostgreSQL; `PRAGMA index_list`, `EXPLAIN QUERY PLAN` and `sqlite_stat1` on SQLite) with ready-to-run remediation SQL. | `{"severity": "medium"}` |
 | `anomalies` | Data-level counterpart to `lint`: temporal inversions, dangling soft-delete lifecycles, and >=95%-populated nullable FKs with null outliers. | `{"severity": "high"}` |
 | `change_impact` | What breaks if a table or column changes, asked before writing the migration. | `{"table": "customer", "column": "email"}` |
 | `verify_ddl` | Runs candidate DDL in an isolated SQLite copy or rolled-back PostgreSQL transaction and returns `diff` plus newly introduced `lint` findings. | `{"sql": "ALTER TABLE invoice ADD COLUMN po_number text"}` |
@@ -114,8 +115,8 @@ Listed only when a connection is `"writable": true`, and refused on any other co
 
 | Profile | Tools |
 | --- | --- |
-| `explore` | connections, refresh, schema_summary, tables, table, path, find, query, breakdown, sql, export, record, explain, profile, anomalies |
-| `migrate` | connections, refresh, schema_summary, tables, table, path, change_impact, lint, anomalies, verify_ddl, order, diff, profile, explain |
+| `explore` | connections, refresh, schema_summary, tables, table, path, find, query, breakdown, sql, export, record, explain, profile, perf, anomalies |
+| `migrate` | connections, refresh, schema_summary, tables, table, path, change_impact, lint, perf, anomalies, verify_ddl, order, diff, profile, explain |
 | `seed` | connections, refresh, schema_summary, tables, table, path, order, fixture, record, query, insert, insert_graph, delete_graph, revert |
 | `full` | all of them (the default) |
 

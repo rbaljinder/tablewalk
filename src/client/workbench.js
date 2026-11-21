@@ -36,10 +36,6 @@ import { canManageConnections, canUseDatabaseTools } from '@mistriwork/kit/clien
 import { sessionIdentity } from '@mistriwork/kit/client/sessionIdentity.js';
 import { addHostListener, shellBody, shellQuery } from '@mistriwork/kit/client/shellHost.js';
 import { say } from './copy/workbench/workbench.js';
-import { openAgentConsole } from './agent.js';
-import { openAsk } from './ask.js';
-import { openFindValue } from './findvalue.js';
-import { openShapeCheck } from './shapecheck.js';
 import { listConnections, showWelcome } from './welcome.js';
 
 /** @type {import('@mistriwork/kit/client/shells.js').KitShell | null} */
@@ -50,6 +46,11 @@ const openConnections = () => (connManagerLoaded ??= import('./connmanager.js'))
 const closeConnectionManagement = () => {
   if (connManagerLoaded) void connManagerLoaded.then((m) => m.closeConnectionManagement());
 };
+const openAsk = (opts) => void import('./ask.js').then((m) => m.openAsk(opts));
+const openFindValue = (val) => void import('./findvalue.js').then((m) => m.openFindValue(val));
+/** @param {import('./components/ShapeCheck.js').ShapeTab} [tab] */
+const openShapeCheck = (tab) => void import('./shapecheck.js').then((m) => m.openShapeCheck(tab));
+const openAgentConsole = () => void import('./agent.js').then((m) => m.openAgentConsole());
 
 /**
  * Run a line of the query language, from wherever it was written.
@@ -316,7 +317,14 @@ function menu(at) {
       label: say('checkTheShape'),
       scope: 'workbench',
       detail: say('whatThisSchemaWill'),
-      onSelect: () => openShapeCheck(),
+      onSelect: () => openShapeCheck('lint'),
+    });
+    addMenuItem({
+      label: say('findPathBetweenTables'),
+      scope: 'workbench',
+      available: () => (state.schema?.tables?.length ?? 0) >= 2,
+      detail: say('shortestForeignKeyWalks'),
+      onSelect: () => openShapeCheck('paths'),
     });
     addMenuItem({
       label: say('common.agentConsole'),

@@ -19,6 +19,7 @@ import {
   getConnectionRuntimePolicy,
   openFor,
   recordAgentActivity,
+  resolveFanoutEntries,
   sessionEgress,
   type Handler,
   ToolError,
@@ -53,6 +54,7 @@ const TOOLS = [
 ];
 const WRITE_TOOLS = [...writeTools.definitions];
 const WRITE_NAMES = new Set<string>(WRITE_TOOLS.map((t) => t.name));
+const NON_FANOUT_TOOLS = new Set<string>([...WRITE_NAMES, 'connections', 'diff', 'export', 'verify_ddl']);
 
 /* Every handler by tool name. A Map, not an object: a tool called
    "toString" is no tool, not Object.prototype's. */
@@ -73,6 +75,7 @@ async function callTool(
   registry: Registry,
   name: string,
   args: Record<string, unknown>,
+  signal: AbortSignal,
   trusted?: boolean,
   fallbackConnection?: string,
 ): Promise<Record<string, unknown>> {
@@ -102,13 +105,13 @@ async function callTool(
     }
     if (name === 'export') {
       const asked = args.limit === undefined || args.limit === null ? Infinity : Math.floor(Number(args.limit));
-      effectiveArgs = { ...args, limit: Math.min(asked, remaining) };
+      effectiveArgs = { ...effectiveArgs, limit: Math.min(asked, remaining) };
     } else if (name === 'sql') {
       const asked = args.limit === undefined || args.limit === null ? 100 : Math.floor(Number(args.limit));
-      effectiveArgs = { ...args, limit: Math.min(asked, remaining) };
+      effectiveArgs = { ...effectiveArgs, limit: Math.min(asked, remaining) };
     } else if (name === 'fixture') {
       const asked = args.max === undefined || args.max === null ? 200 : Math.floor(Number(args.max));
-      effectiveArgs = { ...args, max: Math.min(asked, remaining) };
+      effectiveArgs = { ...effectiveArgs, max: Math.min(asked, remaining) };
     } else if (name === 'record') {
       const keyCount = Array.isArray(args.keys) ? args.keys.length : 1;
       if (keyCount > remaining) {
@@ -118,8 +121,45 @@ async function callTool(
         );
       }
       if (args.expand !== undefined && Number(args.expand) > 0 && remaining <= keyCount) {
-        effectiveArgs = { ...args, expand: 0 };
+        effectiveArgs = { ...effectiveArgs, expand: 0 };
       }
+    }
+  }
+
+  if (policy?.timeoutMs !== undefined) {
+    const capMs = policy.timeoutMs;
+    if (name === 'sql') {
+      const askedTimeout =
+        effectiveArgs.timeout_ms === undefined || effectiveArgs.timeout_ms === null ? capMs : Number(effectiveArgs.timeout_ms);
+      if (Number.isFinite(askedTimeout)) {
+        effectiveArgs = { ...effectiveArgs, timeout_ms: Math.min(askedTimeout, capMs) };
+      }
+    }
+    const timeoutCtrl = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        timeoutCtrl.abort();
+        reject(new StatementStopped('timeout', capMs));
+      }, capMs);
+      timer.unref();
+    });
+    const combined = AbortSignal.any([signal, timeoutCtrl.signal]);
+    try {
+      const work = withCancellation(combined, () => handler({ registry, args: effectiveArgs, trusted, ...opened }));
+      work.catch(() => {});
+      const out = await Promise.race([work, deadline]);
+      if (timeoutCtrl.signal.aborted && !signal.aborted) {
+        throw new StatementStopped('timeout', capMs);
+      }
+      return out;
+    } catch (err) {
+      if (timeoutCtrl.signal.aborted && !signal.aborted) {
+        throw new StatementStopped('timeout', capMs, { cause: err });
+      }
+      throw err;
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
@@ -165,6 +205,7 @@ const TOOL_PROFILES: Record<string, string[] | null> = {
     'record',
     'explain',
     'profile',
+    'perf',
     'anomalies',
   ],
   /* Changing a shape safely: what breaks, what it costs, what order it has to
@@ -177,6 +218,7 @@ const TOOL_PROFILES: Record<string, string[] | null> = {
     'path',
     'change_impact',
     'lint',
+    'perf',
     'anomalies',
     'verify_ddl',
     'order',
@@ -289,9 +331,9 @@ interface InputSchema {
 function argumentProblem(schema: InputSchema, args: Record<string, unknown>): string | null {
   const known = Object.keys(schema.properties ?? {});
   if (schema.additionalProperties === false) {
-    /* `connection` and `env` are every tool's, whether or not the tool's own
-       schema spells them out. */
-    const stray = Object.keys(args).filter((k) => !known.includes(k) && k !== 'connection' && k !== 'env');
+    /* `connection`, `env`, and `envs` are shared target selectors, whether or
+       not the tool's own schema spells them out. */
+    const stray = Object.keys(args).filter((k) => !known.includes(k) && k !== 'connection' && k !== 'env' && k !== 'envs');
     if (stray.length) {
       const hint = stray.map((k) => {
         /* A guess when one is close: a shared prefix (`qeury` → `q`,
@@ -322,6 +364,27 @@ function argumentProblem(schema: InputSchema, args: Record<string, unknown>): st
     if (spec.enum && !spec.enum.includes(value)) return `"${key}" must be one of ${spec.enum.map((v) => JSON.stringify(v)).join(', ')}.`;
   }
   return null;
+}
+
+function countRowsReturned(name: string, answered: Record<string, unknown>): number | undefined {
+  const delivered = (record: Record<string, unknown>) =>
+    (record.found === true ? 1 : 0) +
+    (Array.isArray(record.pointedAtBy)
+      ? (record.pointedAtBy as Array<{ rows?: unknown[] }>).reduce((n, r) => n + (r.rows?.length ?? 0), 0)
+      : 0);
+  return typeof answered.rowsRead === 'number'
+    ? answered.rowsRead
+    : name === 'export' && typeof answered.rows === 'number'
+      ? answered.rows
+      : Array.isArray(answered.rows)
+        ? (answered.rows as unknown[]).length
+        : Array.isArray(answered.matches)
+          ? (answered.matches as unknown[]).length
+          : Array.isArray(answered.records)
+            ? (answered.records as Array<Record<string, unknown>>).reduce((n, r) => n + delivered(r), 0)
+            : answered.found === true || answered.found === false
+              ? delivered(answered)
+              : undefined;
 }
 
 /**
@@ -380,10 +443,94 @@ export async function runTool(
       const problem = argumentProblem(declared.inputSchema as InputSchema, args);
       if (problem) throw new ToolError('invalid_argument', `${name}: ${problem}`);
     }
+    if (!HANDLERS.has(name) && name !== 'connections') {
+      throw new ToolError('not_found', `No tool called "${name}".`);
+    }
     /* A call withdrawn before its turn never starts. */
     throwIfCancelled(signal);
+
+    /* Multi-environment read fan-out (`envs: "all" | ["local", "staging"]`). */
+    if (args.envs !== undefined && args.envs !== null) {
+      if (NON_FANOUT_TOOLS.has(name)) {
+        throw new ToolError(
+          'invalid_argument',
+          `\`envs\` fan-out is supported only on single-connection read-only tools, not \`${name}\`. Target one environment at a time with \`env\` or \`connection\`.`,
+        );
+      }
+      if (args.env !== undefined && args.env !== null && String(args.env).trim() !== '') {
+        throw new ToolError('invalid_argument', 'Pass either `env` (one environment) or `envs` (multiple environments), not both.');
+      }
+      const { envs: rawEnvs, env: _env, connection: askedConn, ...baseArgs } = args;
+      const { database, entries } = resolveFanoutEntries(registry, askedConn, rawEnvs, options.fallbackConnection);
+      const started = Date.now();
+      let totalRowsRead = 0;
+      const perEnvResults = await Promise.all(
+        entries.map(async (entry) => {
+          const envStarted = Date.now();
+          try {
+            const perEnvArgs = { ...baseArgs, connection: entry.id };
+            const answered = await withCancellation(signal, () => callTool(registry, name, perEnvArgs, signal, options.trusted, entry.id));
+            if (signal.aborted) throw new StatementStopped('cancelled');
+            const envRows = countRowsReturned(name, answered);
+            if (envRows && typeof answered.connection === 'string') {
+              sessionEgress.set(answered.connection, (sessionEgress.get(answered.connection) ?? 0) + envRows);
+            }
+            if (envRows) totalRowsRead += envRows;
+            return {
+              connection: entry.id,
+              name: entry.name,
+              ...(entry.env ? { env: entry.env } : {}),
+              tier: entry.tier,
+              ok: true as const,
+              ms: Date.now() - envStarted,
+              result: answered,
+            };
+          } catch (err) {
+            if (signal.aborted) throw err;
+            const code = errorCodeOf(err, false);
+            return {
+              connection: entry.id,
+              name: entry.name,
+              ...(entry.env ? { env: entry.env } : {}),
+              tier: entry.tier,
+              ok: false as const,
+              ms: Date.now() - envStarted,
+              code,
+              error: stoppedText(err, false) ?? (err as Error).message,
+            };
+          }
+        }),
+      );
+      if (signal.aborted) throw new StatementStopped('cancelled');
+      const succeeded = perEnvResults.filter((r) => r.ok).length;
+      const failed = perEnvResults.length - succeeded;
+      const ms = Date.now() - started;
+      const structured = {
+        database,
+        fanout: true,
+        tool: name,
+        count: perEnvResults.length,
+        succeeded,
+        failed,
+        environments: perEnvResults,
+        stats: {
+          ms,
+          ...(totalRowsRead > 0 ? { rowsRead: totalRowsRead } : {}),
+        },
+      };
+      const reply = {
+        content: [{ type: 'text' as const, text: JSON.stringify(structured) }],
+        structuredContent: structured,
+        isError: false,
+      };
+      recordAgentActivity(registry, { via, tool: name, args, ms, answer: reply });
+      return reply;
+    }
+
     const started = Date.now();
-    const answered = await withCancellation(signal, () => callTool(registry, name, args, options.trusted, options.fallbackConnection));
+    const answered = await withCancellation(signal, () =>
+      callTool(registry, name, args, signal, options.trusted, options.fallbackConnection),
+    );
     /* A read the client cancelled answers as cancelled even when its last
        statement beat the cancel home. A write that finished says what it
        did: an agent told "cancelled" about a write that landed would make it
@@ -393,28 +540,7 @@ export async function runTool(
        the data rows it returned, and — on the write tools — the rows
        it changed. The read/write split is deliberate: an update that
        read nothing and wrote one row should say exactly that. */
-    const delivered = (record: Record<string, unknown>) =>
-      (record.found === true ? 1 : 0) +
-      (Array.isArray(record.pointedAtBy)
-        ? (record.pointedAtBy as Array<{ rows?: unknown[] }>).reduce((n, r) => n + (r.rows?.length ?? 0), 0)
-        : 0);
-    const rows =
-      typeof answered.rowsRead === 'number'
-        ? /* A fixture counts what it read, since its rows are grouped by table
-         rather than being one list — and every one of them left the
-         machine. */
-          answered.rowsRead
-        : name === 'export' && typeof answered.rows === 'number'
-          ? answered.rows
-          : Array.isArray(answered.rows)
-            ? (answered.rows as unknown[]).length
-            : Array.isArray(answered.matches)
-              ? (answered.matches as unknown[]).length
-              : Array.isArray(answered.records)
-                ? (answered.records as Array<Record<string, unknown>>).reduce((n, r) => n + delivered(r), 0)
-                : answered.found === true || answered.found === false
-                  ? delivered(answered)
-                  : undefined;
+    const rows = countRowsReturned(name, answered);
     const dryRun = answered.dryRun === true;
     const affected = typeof answered.affected === 'number' ? answered.affected : undefined;
     /* A graph counts its own list rather than an `affected` it never has —

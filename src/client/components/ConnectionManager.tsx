@@ -21,7 +21,9 @@ import {
 export type Connection = Pick<PublicConnection, 'id' | 'name'> &
   Partial<Omit<PublicConnection, 'id' | 'name'>> & {
     redactsRows?: boolean;
+    focused?: boolean;
     maxRows?: number;
+    timeoutMs?: number;
     database?: string;
     env?: string;
     tier?: EnvironmentTier;
@@ -367,14 +369,28 @@ function Row({
           <span className="conn-badge" title={say('maskedRowsTitle')}>
             {say('masked')}
           </span>
+        ) : conn.focused ? (
+          <span className="conn-badge" title={say('focusedTitle')}>
+            {say('focused')}
+          </span>
         ) : conn.hidesColumns ? (
           <span className="conn-badge" title={say('restrictedColumnsTitle')}>
             {say('restricted')}
           </span>
         ) : null}
+        {conn.redactsRows && conn.focused ? (
+          <span className="conn-badge" title={say('focusedTitle')}>
+            {say('focused')}
+          </span>
+        ) : null}
         {typeof conn.maxRows === 'number' ? (
           <span className="conn-badge" title={say('maxRowsTitle', { max: formatNumber(conn.maxRows) })}>
             {say('maxRowsBadge', { max: formatNumber(conn.maxRows) })}
+          </span>
+        ) : null}
+        {typeof conn.timeoutMs === 'number' ? (
+          <span className="conn-badge" title={say('timeoutTitle', { ms: formatNumber(conn.timeoutMs) })}>
+            {say('timeoutBadge', { ms: formatNumber(conn.timeoutMs) })}
           </span>
         ) : null}
       </span>
