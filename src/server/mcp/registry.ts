@@ -15,7 +15,7 @@ import {
   distance,
   type Registry,
 } from '@mistriwork/engine/host';
-import { openFor, sessionEgress, type Handler, ToolError, errorCodeOf, type ErrorCode } from './toolkit.js';
+import { openFor, recordAgentActivity, sessionEgress, type Handler, ToolError, errorCodeOf, type ErrorCode } from './toolkit.js';
 import * as schemaTools from './tools/schema.js';
 import * as queryTools from './tools/query.js';
 import * as sqlTools from './tools/sql.js';
@@ -60,12 +60,17 @@ const HANDLERS = new Map<string, Handler>(
 );
 
 /** One tool's answer, before stats: the connection it names is opened first. */
-async function callTool(registry: Registry, name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function callTool(
+  registry: Registry,
+  name: string,
+  args: Record<string, unknown>,
+  trusted?: boolean,
+): Promise<Record<string, unknown>> {
   if (name === 'connections') return schemaTools.connections(registry);
   const opened = await openFor(registry, name === 'diff' ? (args.from ?? args.connection) : args.connection);
   const handler = HANDLERS.get(name);
   if (!handler) throw new ToolError('not_found', `No tool called "${name}".`);
-  return handler({ registry, args, ...opened });
+  return handler({ registry, args, trusted, ...opened });
 }
 
 /**
@@ -93,10 +98,37 @@ const TOOL_PROFILES: Record<string, string[] | null> = {
   full: null,
   /* Reading a database you did not write: what is here, what points at what,
      what the columns actually hold. */
-  explore: [...ALWAYS, 'schema_summary', 'tables', 'table', 'find', 'query', 'breakdown', 'sql', 'export', 'record', 'explain', 'profile'],
+  explore: [
+    ...ALWAYS,
+    'schema_summary',
+    'tables',
+    'table',
+    'find',
+    'query',
+    'breakdown',
+    'sql',
+    'export',
+    'record',
+    'explain',
+    'profile',
+    'anomalies',
+  ],
   /* Changing a shape safely: what breaks, what it costs, what order it has to
      happen in, and whether it matches somewhere else afterwards. */
-  migrate: [...ALWAYS, 'schema_summary', 'tables', 'table', 'change_impact', 'lint', 'order', 'diff', 'profile', 'explain'],
+  migrate: [
+    ...ALWAYS,
+    'schema_summary',
+    'tables',
+    'table',
+    'change_impact',
+    'lint',
+    'anomalies',
+    'verify_ddl',
+    'order',
+    'diff',
+    'profile',
+    'explain',
+  ],
   /* Test data that respects referential integrity, in and out. */
   seed: [
     ...ALWAYS,
@@ -189,7 +221,7 @@ export function agentTools(registry: Registry, options: { trusted?: boolean } = 
 /** Tools whose whole answer is row data. */
 const ROW_ONLY_TOOLS = new Set(['query', 'sql', 'record', 'breakdown', 'export']);
 /** Tools that hand the database a statement it did not build. */
-const SQL_TOOLS = new Set(['sql', 'explain']);
+const SQL_TOOLS = new Set(['sql', 'explain', 'verify_ddl']);
 
 interface InputSchema {
   properties?: Record<string, { type?: string | string[]; enum?: unknown[] }>;
@@ -251,7 +283,7 @@ export async function runTool(
   registry: Registry,
   name: string,
   args: Record<string, unknown>,
-  options: { signal?: AbortSignal; trusted?: boolean } = {},
+  options: { signal?: AbortSignal; trusted?: boolean; via?: 'mcp' | 'console' } = {},
 ): Promise<{
   content: Array<{ type: 'text'; text: string }>;
   structuredContent?: Record<string, unknown>;
@@ -259,6 +291,8 @@ export async function runTool(
   isError: boolean;
 }> {
   const signal = options.signal ?? new AbortController().signal;
+  const via = options.via ?? 'mcp';
+  const callStarted = Date.now();
   try {
     if (options.trusted === false && name === 'export') {
       throw new ToolError(
@@ -293,7 +327,7 @@ export async function runTool(
     /* A call withdrawn before its turn never starts. */
     throwIfCancelled(signal);
     const started = Date.now();
-    const answered = await withCancellation(signal, () => callTool(registry, name, args));
+    const answered = await withCancellation(signal, () => callTool(registry, name, args, options.trusted));
     /* A read the client cancelled answers as cancelled even when its last
        statement beat the cancel home. A write that finished says what it
        did: an agent told "cancelled" about a write that landed would make it
@@ -325,49 +359,66 @@ export async function runTool(
                 : answered.found === true || answered.found === false
                   ? delivered(answered)
                   : undefined;
+    const dryRun = answered.dryRun === true;
     const affected = typeof answered.affected === 'number' ? answered.affected : undefined;
     /* A graph counts its own list rather than an `affected` it never has —
        and `inserted` is a boolean for `insert` and a list for `insert_graph`,
-       which is what the array check tells apart. */
-    const graphIn = name === 'insert_graph' && Array.isArray(answered.inserted) ? (answered.inserted as unknown[]).length : undefined;
+       which is what the array check tells apart. A rolled-back dry run wrote zero rows. */
+    const graphIn =
+      !dryRun && name === 'insert_graph' && Array.isArray(answered.inserted)
+        ? (answered.inserted as unknown[]).length
+        : dryRun && name === 'insert_graph'
+          ? 0
+          : undefined;
     const graphOut =
       name === 'delete_graph' && Array.isArray(answered.removed)
         ? (answered.removed as Array<{ affected?: number }>).reduce((n, r) => n + (r.affected ?? 0), 0)
         : undefined;
-    const written = name === 'update' ? affected : name === 'delete' && answered.deleted === true ? affected : (graphOut ?? graphIn);
+    const written = dryRun
+      ? 0
+      : name === 'update'
+        ? affected
+        : name === 'delete' && answered.deleted === true
+          ? affected
+          : (graphOut ?? graphIn);
     const removals = name === 'delete' || name === 'delete_graph';
-    const inserted = name === 'insert' && answered.inserted === true ? 1 : graphIn;
+    const inserted = dryRun ? undefined : name === 'insert' && answered.inserted === true ? 1 : graphIn;
     if (rows && typeof answered.connection === 'string') {
       sessionEgress.set(answered.connection, (sessionEgress.get(answered.connection) ?? 0) + rows);
     }
+    const ms = Date.now() - started;
     const structured = {
       ...answered,
       stats: {
-        ms: Date.now() - started,
+        ms,
         ...(rows === undefined ? {} : { rowsRead: rows }),
         ...(written === undefined ? {} : removals ? { rowsDeleted: written } : { rowsWritten: written }),
         ...(inserted === undefined ? {} : { rowsInserted: inserted }),
       },
     };
-    return {
+    const reply = {
       /* Compact. The text is a byte-for-byte duplicate of structuredContent
          for clients that read only text; pretty-printing it was the largest
          avoidable cost in every answer — a quarter again on nested rows —
          spent on whitespace no model reads. */
-      content: [{ type: 'text', text: JSON.stringify(structured) }],
+      content: [{ type: 'text' as const, text: JSON.stringify(structured) }],
       structuredContent: structured,
       isError: false,
     };
+    recordAgentActivity(registry, { via, tool: name, args, ms, answer: reply });
+    return reply;
   } catch (err) {
     /* A tool that fails is a result, not a protocol error — the model
        reads the message and adjusts; a JSON-RPC error would read as
        the server being broken. */
     const code = errorCodeOf(err, signal.aborted);
-    return {
-      content: [{ type: 'text', text: stoppedText(err, signal.aborted) ?? (err as Error).message }],
+    const reply = {
+      content: [{ type: 'text' as const, text: stoppedText(err, signal.aborted) ?? (err as Error).message }],
       _meta: { 'tablewalk/code': code },
       isError: true,
     };
+    recordAgentActivity(registry, { via, tool: name, args, ms: Date.now() - callStarted, answer: reply });
+    return reply;
   }
 }
 

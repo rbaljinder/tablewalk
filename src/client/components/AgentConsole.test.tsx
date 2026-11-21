@@ -1,10 +1,17 @@
-/** The agent console: the tools listed with their badges, a call made by hand, the answer as an agent gets it. */
+/** The agent console: the tools listed with their badges, a call made by hand, and the live MCP trail. */
 import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const calls: Array<Record<string, unknown>> = [];
+let mockActivity: Record<string, unknown> = { seq: 0, calls: [], egress: {}, mcpEndpoint: null };
+const refreshUndo = vi.fn();
+
+vi.mock('@mistriwork/kit/client/shellMode.js', () => ({
+  shell: () => ({ undo: { refresh: refreshUndo } }),
+}));
+
 vi.mock('@mistriwork/kit/client/core.js', () => ({
   state: { activeConnection: 'demo' },
   toast: () => {},
@@ -47,6 +54,7 @@ vi.mock('@mistriwork/kit/client/core.js', () => ({
         ],
       };
     }
+    if (path === '/api/agent/activity') return mockActivity;
     calls.push(body);
     return {
       structuredContent: {
@@ -76,6 +84,8 @@ function draw() {
 afterEach(() => {
   cleanup();
   calls.length = 0;
+  mockActivity = { seq: 0, calls: [], egress: {}, mcpEndpoint: null };
+  refreshUndo.mockClear();
 });
 
 test('lists the tools with what they may do, calls with typed arguments, and links only link fields', async () => {
@@ -130,6 +140,44 @@ test('coerces integer and array arguments and rejects non-JSON objects and array
   await user.click(screen.getByRole('button', { name: 'Call tool' }));
   expect(document.querySelector('.agent-error')).toHaveTextContent('"key" is not JSON: {not json');
   expect(calls).toEqual([]);
+});
+
+test('shows the live MCP trail, endpoint URL, dry-run badge and refreshes Undo on external MCP writes', async () => {
+  mockActivity = {
+    seq: 2,
+    egress: { demo: 3 },
+    mcpEndpoint: 'http://localhost:4111/mcp',
+    calls: [
+      {
+        seq: 2,
+        via: 'mcp',
+        tool: 'insert',
+        args: { table: 'customer', dryRun: true },
+        ms: 6,
+        isError: false,
+        dryRun: true,
+        undoId: 9,
+        answer: {
+          isError: false,
+          structuredContent: {
+            connection: 'demo',
+            dryRun: true,
+            link: '/demo/customer/~42',
+            stats: { ms: 6, rowsWritten: 0 },
+          },
+          content: [{ text: '{"dryRun":true}' }],
+        },
+      },
+    ],
+  };
+  const user = userEvent.setup();
+  draw();
+  await screen.findAllByRole('option');
+  expect(await screen.findByRole('button', { name: 'MCP http://localhost:4111/mcp' })).toBeInTheDocument();
+  expect(document.querySelector('.agent-live-trail h4')).toHaveTextContent('Live MCP trail — 1 call · 3 rows read');
+  expect(refreshUndo).toHaveBeenCalledTimes(1);
+  await user.click(within(document.querySelector('.agent-live-trail') as HTMLElement).getByRole('button'));
+  expect(await screen.findByRole('button', { name: 'open /demo/customer/~42' })).toBeInTheDocument();
 });
 
 function fireEventInput(node: HTMLElement, value: string) {

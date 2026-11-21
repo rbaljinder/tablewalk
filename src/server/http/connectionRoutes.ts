@@ -5,18 +5,70 @@
  */
 import { redact, saveConfig, scrubSecrets, storeSecret, connect, resolveConnection, UNTRUSTED_NETWORK } from '@mistriwork/engine/host';
 import { configLocations } from '@mistriwork/engine/server/config/locations.js';
+import { layoutsFor, pagesPath } from '@mistriwork/engine/server/layouts.js';
+import { productVersion } from '@mistriwork/engine/server/product.js';
 import { untrustedTargetRefusal } from '@mistriwork/engine/server/http/trust.js';
-import { readJson, send } from '@mistriwork/engine/server/http/reply.js';
+import { readBounded, readJson, send } from '@mistriwork/engine/server/http/reply.js';
 import type { RequestContext } from '@mistriwork/engine/server/http/context.js';
-import { agentTools } from '../mcp.js';
+import { agentActivity, agentTools, answerMcpHttp } from '../mcp.js';
 
 /** Session connections added from the page: enough for any real session, bounded so an exposed listener cannot grow the registry forever. */
 const MAX_SESSION_CONNECTIONS = 32;
+const MCP_HTTP_BODY_LIMIT = 4 * 1024 * 1024;
 
 export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
-  const { req, res, path, registry, configPath, bound, identity, trusted } = ctx;
+  const { req, res, url, path, registry, configPath, configViews, configQueries, configPages, bound, mount, identity, trusted } = ctx;
 
-  /* ---------- connection management ---------- */
+  /* ---------- connection management & shared MCP ---------- */
+
+  if (path === '/mcp') {
+    if (!trusted) {
+      send(res, 403, {
+        error:
+          'MCP over HTTP is served only on loopback so an exposed browser listener does not open an unauthenticated agent port. ' +
+          'Bind tablewalk to 127.0.0.1 (the default), or run tablewalk --mcp over stdio.',
+      });
+      return true;
+    }
+    if (req.method !== 'POST') {
+      res.setHeader('allow', 'POST');
+      send(res, 405, { error: 'Method not allowed. Send MCP JSON-RPC requests with POST.' });
+      return true;
+    }
+    const raw = await readBounded(req, MCP_HTTP_BODY_LIMIT);
+    if (!raw) {
+      send(res, 413, { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'MCP request body is too large.' } });
+      return true;
+    }
+    let payload: unknown;
+    try {
+      payload = JSON.parse(raw.toString('utf8'));
+    } catch {
+      send(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Request body is not valid JSON.' } });
+      return true;
+    }
+    const controller = new AbortController();
+    res.once('close', () => {
+      if (!res.writableEnded) controller.abort();
+    });
+    const reply = await answerMcpHttp(
+      registry,
+      {
+        views: configViews,
+        queries: configQueries,
+        pages: configPages,
+        savedPages: (connection) => layoutsFor(connection, pagesPath()),
+      },
+      payload,
+      { version: productVersion() ?? '0.0.0', signal: controller.signal, trusted },
+    );
+    if (reply === undefined) {
+      res.writeHead(202).end();
+      return true;
+    }
+    send(res, 200, reply);
+    return true;
+  }
 
   /**
    * The MCP tools, for the agent console: the Workbench's (an App server
@@ -26,6 +78,21 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
    */
   if (path === '/api/agent/tools' && (req.method === 'GET' || req.method === 'HEAD')) {
     send(res, 200, { tools: agentTools(registry, { trusted }) });
+    return true;
+  }
+  if (path === '/api/agent/activity' && (req.method === 'GET' || req.method === 'HEAD')) {
+    res.setHeader('cache-control', 'no-store');
+    if (!trusted) {
+      send(res, 200, { seq: 0, calls: [], egress: {}, mcpEndpoint: null });
+      return true;
+    }
+    const since = Number(url.searchParams.get('since') ?? '0');
+    const hostShown =
+      bound.host === '127.0.0.1' ? 'localhost' : bound.host.includes(':') && !bound.host.startsWith('[') ? `[${bound.host}]` : bound.host;
+    send(res, 200, {
+      ...agentActivity(registry, Number.isFinite(since) && since > 0 ? Math.floor(since) : 0),
+      mcpEndpoint: `http://${hostShown}:${bound.port}${mount.base}/mcp`,
+    });
     return true;
   }
   if (path === '/api/runtime') {

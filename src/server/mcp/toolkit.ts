@@ -53,6 +53,7 @@ export interface Open {
 export interface ToolCall extends Open {
   registry: Registry;
   args: Record<string, unknown>;
+  trusted?: boolean;
 }
 
 /** What a tool does with a call. The answer is the structured result, before stats. */
@@ -84,6 +85,174 @@ export const linkTo = (conn: string, segment: string) => `/${encodeURIComponent(
  * seen".
  */
 export const sessionEgress = new Map<string, number>();
+
+/**
+ * Thrown inside `adapter.transaction(...)` when `dryRun: true` has measured
+ * the database's response (generated keys, defaults, trigger effects, constraint
+ * checks) and wants the adapter to issue `ROLLBACK` without recording history.
+ */
+export class DryRunRollback<T> extends Error {
+  readonly result: T;
+  constructor(result: T) {
+    super('Dry run rolled back.');
+    this.name = 'DryRunRollback';
+    this.result = result;
+  }
+}
+
+export interface AgentActivityEntry {
+  seq: number;
+  at: string;
+  via: 'mcp' | 'console';
+  tool: string;
+  connection?: string;
+  args: Record<string, unknown>;
+  ms: number;
+  isError: boolean;
+  error?: string;
+  rowsRead?: number;
+  rowsWritten?: number;
+  rowsDeleted?: number;
+  dryRun?: boolean;
+  undoId?: number;
+  links: string[];
+  answer: {
+    isError: boolean;
+    structuredContent?: Record<string, unknown>;
+    content: Array<{ type: 'text'; text: string }>;
+  };
+}
+
+const MAX_ACTIVITY = 50;
+const MAX_ANSWER_TEXT = 32_768;
+
+interface ActivityState {
+  seq: number;
+  entries: AgentActivityEntry[];
+  egress: Map<string, number>;
+}
+
+const activityByRegistry = new WeakMap<Registry, ActivityState>();
+
+function stateFor(registry: Registry): ActivityState {
+  let st = activityByRegistry.get(registry);
+  if (!st) {
+    st = { seq: 0, entries: [], egress: new Map() };
+    activityByRegistry.set(registry, st);
+  }
+  return st;
+}
+
+function compactArg(value: unknown, depth = 0): unknown {
+  if (value === null || value === undefined || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'string') return value.length > 240 ? `${value.slice(0, 240)}…` : value;
+  if (depth >= 2) return Array.isArray(value) ? `[${value.length}]` : '{…}';
+  if (Array.isArray(value)) {
+    const head = value.slice(0, 8).map((item) => compactArg(item, depth + 1));
+    return value.length > 8 ? [...head, `…+${value.length - 8}`] : head;
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>);
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of entries.slice(0, 12)) out[k] = compactArg(v, depth + 1);
+    return out;
+  }
+  return String(value);
+}
+
+function collectLinks(structured: Record<string, unknown> | undefined): string[] {
+  if (!structured) return [];
+  const seen = new Set<string>();
+  const walk = (value: unknown, key?: string) => {
+    if (seen.size >= 8) return;
+    if (key === 'link' && typeof value === 'string' && /^[#/]\/?\w/.test(value) && !value.startsWith('//')) {
+      seen.add(value);
+    } else if (Array.isArray(value)) {
+      for (const item of value) walk(item);
+    } else if (value && typeof value === 'object') {
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) walk(v, k);
+    }
+  };
+  walk(structured);
+  return [...seen];
+}
+
+export function recordAgentActivity(
+  registry: Registry,
+  entry: {
+    via: 'mcp' | 'console';
+    tool: string;
+    args: Record<string, unknown>;
+    ms: number;
+    answer: {
+      isError: boolean;
+      structuredContent?: Record<string, unknown>;
+      content: Array<{ type: 'text'; text: string }>;
+    };
+  },
+): void {
+  const st = stateFor(registry);
+  const structured = entry.answer.structuredContent;
+  const stats = (structured?.stats ?? {}) as Record<string, unknown>;
+  const conn =
+    typeof structured?.connection === 'string'
+      ? structured.connection
+      : typeof entry.args.connection === 'string'
+        ? entry.args.connection
+        : (registry.active ?? undefined);
+  const rowsRead = typeof stats.rowsRead === 'number' ? stats.rowsRead : undefined;
+  if (rowsRead && conn) st.egress.set(conn, (st.egress.get(conn) ?? 0) + rowsRead);
+  const rawText = entry.answer.content[0]?.text ?? '';
+  const boundedAnswer =
+    rawText.length <= MAX_ANSWER_TEXT
+      ? entry.answer
+      : {
+          isError: entry.answer.isError,
+          content: [{ type: 'text' as const, text: `${rawText.slice(0, MAX_ANSWER_TEXT)}\n… (truncated in activity trail)` }],
+          ...(structured
+            ? {
+                structuredContent: {
+                  ...(conn ? { connection: conn } : {}),
+                  ...(structured.link ? { link: structured.link } : {}),
+                  stats,
+                },
+              }
+            : {}),
+        };
+  const item: AgentActivityEntry = {
+    seq: ++st.seq,
+    at: new Date().toISOString(),
+    via: entry.via,
+    tool: entry.tool,
+    ...(conn ? { connection: conn } : {}),
+    args: (compactArg(entry.args) as Record<string, unknown>) ?? {},
+    ms: entry.ms,
+    isError: entry.answer.isError,
+    ...(entry.answer.isError ? { error: rawText.slice(0, 300) } : {}),
+    ...(rowsRead !== undefined ? { rowsRead } : {}),
+    ...(typeof stats.rowsWritten === 'number' ? { rowsWritten: stats.rowsWritten } : {}),
+    ...(typeof stats.rowsDeleted === 'number' ? { rowsDeleted: stats.rowsDeleted } : {}),
+    ...(structured?.dryRun === true ? { dryRun: true } : {}),
+    ...(typeof structured?.undoId === 'number' ? { undoId: structured.undoId } : {}),
+    links: collectLinks(structured),
+    answer: boundedAnswer,
+  };
+  st.entries.unshift(item);
+  if (st.entries.length > MAX_ACTIVITY) st.entries.length = MAX_ACTIVITY;
+}
+
+export function agentActivity(
+  registry: Registry,
+  sinceSeq = 0,
+): { seq: number; calls: AgentActivityEntry[]; egress: Record<string, number> } {
+  const st = stateFor(registry);
+  const calls = sinceSeq > 0 ? st.entries.filter((e) => e.seq > sinceSeq) : st.entries.slice();
+  return {
+    seq: st.seq,
+    calls,
+    egress: Object.fromEntries(st.egress),
+  };
+}
 
 /**
  * The bound a count in an answer stops at: the one App menus count to. A

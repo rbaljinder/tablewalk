@@ -17,6 +17,21 @@ Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly
   and preserves `${ENV}` in database names; the Agent console coerces integer and array arguments (`revert`,
   `insert_graph`, `delete_graph`, `record.keys`, `explain.params`) and links only `link` fields; raw SQL writes refresh
   cached views and Undo; `?look=` links can pick built-in kit looks as well as host looks.
+- Loopback browser sessions now serve Streamable HTTP MCP directly at `POST /mcp` (and `tablewalk --mcp` bridges stdio
+  to a running server when `TABLEWALK_MCP_URL` is set), sharing one `Registry`, Undo stack, row-egress counter and live
+  MCP activity trail inside the Agent console.
+- Two new read-only MCP tools bring the server to twenty-six tools: `anomalies` scans stored rows using bounded counts
+  (working on `"rows": false` connections too) for temporal inversions, dangling soft-delete lifecycles and nullable FKs
+  populated on >=95% of rows with null outliers; `verify_ddl` runs candidate migration DDL in an isolated SQLite copy or
+  rolled-back PostgreSQL transaction and returns the resulting schema `diff` and newly introduced `lint` findings.
+- `insert`, `update` and `insert_graph` accept `dryRun: true` to execute inside `BEGIN … ROLLBACK` and return coerced
+  values, defaults, generated keys or real constraint errors without committing or recording Undo history.
+- `fixture` and `export` accept `redact: true` (and `redact_columns`) to deterministically mask emails, phones, names,
+  addresses and secrets while preserving primary keys, foreign keys, `CHECK` vocabularies and `varchar` lengths.
+- Configured multi-table `views` and `queries` in `tablewalk.json` are exposed on the MCP shelf
+  (`tablewalk://{connection}/views`, `tablewalk://{connection}/page/{page}`) and runnable by name in `query`, `sql` and
+  `export` (with `views` working across `"hidden"`-column connections); **Copy brief for agent** (`⌘K` / `···`) copies a
+  Markdown handoff of the current record, query or schema to the clipboard.
 - `tablewalk journal` resolves credentials and refuses in-memory SQLite and unsupported schemes before touching the
   filesystem; `--diff` and `--lint` close their connections and let stdout drain before exiting; the desktop app
   replaces its server and updates `lastDatabase` only after the new database opens, falling back to Welcome if a

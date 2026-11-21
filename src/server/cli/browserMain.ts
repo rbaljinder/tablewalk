@@ -117,6 +117,11 @@ export const main: Main = async () => {
      redirected here once rather than guarded at each call site. */
   const printing = opts.mcp || opts.export || opts.lint || opts.diff;
   if (printing) console.log = (...args: unknown[]) => console.error(...args);
+  if (opts.mcp && process.env.TABLEWALK_MCP_URL?.trim()) {
+    const { bridgeMcpToHttp } = await import('./mcpMode.js');
+    bridgeMcpToHttp(process.env.TABLEWALK_MCP_URL.trim());
+    return;
+  }
 
   const [{ Registry, redact }, { readStartupConfig }, { configLocations }, { configureWriteOrder }] = await Promise.all([
     import('@mistriwork/engine/host'),
@@ -241,7 +246,7 @@ export const main: Main = async () => {
   if (opts.mcp) {
     const { serveMcpMode } = await import('./mcpMode.js');
     const { packageVersion } = await import('@mistriwork/engine/server/cli/usage.js');
-    return serveMcpMode(opts, registry, { queries: config.queries, pages: config.pages }, packageVersion);
+    return serveMcpMode(opts, registry, { views: config.views, queries: config.queries, pages: config.pages }, packageVersion);
   }
   const { serveBrowser } = await import('./browserServe.js');
   await serveBrowser(opts, registry, config, nothingToOpen);

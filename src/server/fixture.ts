@@ -29,6 +29,10 @@ interface FixtureOptions {
   perChild?: number;
   /** A ceiling on the whole fixture. */
   max?: number;
+  /** Deterministically scrub PII and secrets while keeping keys, FKs and CHECK vocabularies intact. */
+  redact?: boolean;
+  /** Extra columns (`notes` or `customer.notes`) to mask when `redact` is on. */
+  redactColumns?: readonly string[];
 }
 
 interface FixtureResult {
@@ -40,6 +44,9 @@ interface FixtureResult {
   order: string[];
   /** Ready to paste. Values are literals, because this is a document. */
   sql: string;
+  /** Present when `redact: true` scrubbed columns before returning. */
+  redacted?: boolean;
+  redactedColumns?: string[];
   /** What was left out, and why. Absent when nothing was. */
   truncated?: string[];
   rowsRead: number;
@@ -168,12 +175,22 @@ export async function extractFixture(
      the end is the honest place for it — the cycle is named in `order`. */
   const ordered = [...plan.insert, ...plan.cycles.flat()];
 
-  const tables = ordered
+  let tables = ordered
     .filter((id) => collected.has(id))
     .map((id) => ({
       table: id,
       rows: sortWithin(schema, id, [...collected.get(id)!.values()]),
     }));
+
+  const redactedColumns: string[] = [];
+  if (options.redact) {
+    const { maskTableRows } = await import('./mask.js');
+    tables = tables.map(({ table, rows }) => {
+      const masked = maskTableRows(schema, table, rows, { columns: options.redactColumns });
+      for (const col of masked.maskedColumns) redactedColumns.push(`${table}.${col}`);
+      return { table, rows: masked.rows };
+    });
+  }
 
   if (plan.cycles.length) {
     truncated.push(`a cycle between ${plan.cycles.flat().join(', ')} — those inserts need a nullable column set afterwards`);
@@ -185,6 +202,7 @@ export async function extractFixture(
     tables,
     order: tables.map((t) => t.table),
     sql: toSql(schema, tables),
+    ...(options.redact ? { redacted: true, redactedColumns } : {}),
     truncated: truncated.length ? truncated : undefined,
     rowsRead,
   };

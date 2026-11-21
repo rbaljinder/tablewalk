@@ -204,8 +204,12 @@ npx tablewalk --mcp --config ./tablewalk.json   # speaks MCP on stdio
 ```
 
 Or point it at a database instead of a config file: `"args": ["tablewalk",
-"--mcp", "--db", "postgres://localhost/app"]`. **Twenty-four tools** —
-eighteen read-only, and six writes offered only when a connection is
+"--mcp", "--db", "postgres://localhost/app"]` — or connect straight to a
+running loopback browser session over Streamable HTTP at
+`http://localhost:4111/mcp` (or set `TABLEWALK_MCP_URL=http://localhost:4111/mcp`
+for stdio-only clients) so the browser and the agent share one connection pool,
+Undo stack, row-egress counter, and live activity trail. **Twenty-six tools** —
+twenty read-only, and six writes offered only when a connection is
 `"writable": true`. Every answer carries a deep link the human beside the
 agent can open in the UI, and says what it cost in rows and milliseconds.
 
@@ -216,18 +220,20 @@ agent can open in the UI, and says what it cost in rows and milliseconds.
 | `schema_summary` | orientation in a few hundred tokens — hubs, event tables, the deepest reference chain |
 | `tables` / `table` | the list; then a table's columns, DDL, and foreign keys in **both** directions |
 | `find` | where a name lives, across every table and column |
-| `query` | the query language; its errors carry suggestions and the table's real columns, so a mistake is fixed in one retry |
+| `query` | the query language, or a named `view` from `tablewalk.json` (even on `"hidden"`-column connections); errors carry suggestions and the table's real columns |
 | `breakdown` | counts and sums grouped by something — `invoice count by month invoice_date` |
 | `record` | one row, its human name, and everything that points at it |
-| `sql` | read-only, for whatever the language cannot say; never over tablewalk's own tables |
-| `export` | a result written to a file (csv, ndjson, json; optionally gzip) in the temp directory, not into the reply — for more rows than fit in context; `query` exports are unbounded, `sql` exports stop at 100,000 |
+| `sql` | read-only `SELECT` or a named `saved` query from `tablewalk.json`; never over tablewalk's own tables |
+| `export` | a `query`, named `view`, `sql` or `saved` query written to a file (csv, ndjson, json; optionally gzip and `redact: true`) in the temp directory, not into the reply |
 | `explain` | the planner's account of a statement without running it — feed a `query` answer's `sql` back |
 | `profile` | what a column actually holds: null share, distinct count, range, the values that repeat |
 | `lint` | what the shape will cost: keyless tables, unindexed references, naive timestamps |
+| `anomalies` | data-level counterpart to `lint`: temporal inversions, dangling soft-delete lifecycles, and nullable FKs that are >=95% populated with null outliers (counts only, works on `"rows": false` too) |
 | `change_impact` | what breaks if you change a table or column — asked *before* the migration is written |
+| `verify_ddl` | runs candidate DDL in a disposable copy (SQLite) or `BEGIN … ROLLBACK` (writable Postgres) and returns the schema `diff` and newly introduced `lint` findings without altering the database |
 | `diff` | whether two connections are still the same shape |
 | `order` | what has to exist before what, and the reverse for teardown |
-| `fixture` | a real row and the graph it belongs to, ready to replay into a test database |
+| `fixture` | a real row and the graph it belongs to (with optional `redact: true` deterministic PII masking), ready to replay into a test database |
 | `refresh` | re-read the catalog after a migration |
 | `connections` | list them; the call to start with |
 
@@ -236,10 +242,10 @@ read-only server does not list tools it would refuse.
 
 | tool | what it does |
 |---|---|
-| `insert` | one row; answers with what the database stored, defaults filled and key assigned |
-| `update` | one row, by its primary key |
+| `insert` | one row; answers with what the database stored, defaults filled and key assigned (`dryRun: true` checks constraints and defaults inside `BEGIN … ROLLBACK`) |
+| `update` | one row, by its primary key (`dryRun: true` checks constraints and type coercion inside `BEGIN … ROLLBACK`) |
 | `delete` | reports its impact first — every table pointing at the row, counts, `ON DELETE` rules — and removes nothing until the person says yes: a client that supports elicitation asks them every time (a model-supplied `confirm: true` is ignored); otherwise call it again with `confirm: true` |
-| `insert_graph` / `delete_graph` | several related rows in one all-or-nothing transaction. `delete_graph` asks the same way `delete` does. Graph writes are not journaled: they return no `undoId` and `revert` cannot undo them |
+| `insert_graph` / `delete_graph` | several related rows in one all-or-nothing transaction (`insert_graph` also accepts `dryRun: true`). `delete_graph` asks the same way `delete` does. Graph writes are not journaled: they return no `undoId` and `revert` cannot undo them |
 | `revert` | preview the last write, then confirm with `confirm: true` and that preview's `next.id` as `expectedId`; raw `sql` writes have no general inverse |
 
 Write answers carry `rowsInserted` / `rowsWritten` / `rowsDeleted`.
@@ -269,8 +275,8 @@ real row out of development, put it into a test database, tear it down after.
 
 Rows entering an agent's context leave the machine — point it at development
 databases. Where you want that enforced rather than remembered, mark a
-connection `"rows": false`: the catalog, row counts, null fractions, plans and
-`lint` still answer, and everything that would return a value out of a row
+connection `"rows": false`: the catalog, row counts, null fractions, plans,
+`lint` and `anomalies` still answer, and everything that would return a value out of a row
 refuses — at the adapter, so every endpoint and every tool at once. A server
 whose connections are all shape-only does not list `query`, `sql`, `record`,
 `breakdown` or `export` at all.
@@ -278,7 +284,7 @@ whose connections are all shape-only does not list `query`, `sql`, `record`,
 Where only some columns must stay behind (a password hash, an API token), give
 the connection `"hidden": { "account": ["password_hash"], "*": ["*_token"] }`
 instead: the catalog and every answer leave those columns out, a query that
-names one is refused, and raw SQL is refused on that connection. A database
+names one is refused, and raw SQL and `verify_ddl` are refused on that connection. A database
 role without `SELECT` on them is stronger still.
 
 A call is bounded in time and in what it counts. Statements run under a
@@ -297,17 +303,20 @@ schema, and the `__tablewalk_` and `tablewalk_auth` names they carried before
 mistri — whether the statement names them, reaches them
 through a view, or could only name a table when it runs.
 
-The shelf your team already keeps is readable too. Named queries and page
-definitions from your `tablewalk.json`, and pages saved from the browser, are
-served as MCP **resources** — `tablewalk://{connection}/queries` and
-`tablewalk://{connection}/pages` — beside the schema brief. Reading them does
-not run them; they are the questions your team decided were worth asking, in
-front of an agent that would otherwise re-derive them badly.
+The shelf your team already keeps is readable and runnable too. Named views,
+named queries and page definitions from your `tablewalk.json`, and pages saved
+from the browser, are served as MCP **resources** —
+`tablewalk://{connection}/views`, `tablewalk://{connection}/queries`,
+`tablewalk://{connection}/pages` and `tablewalk://{connection}/page/{page}` —
+beside the schema brief. Reading them does not run them; `query`, `sql` and
+`export` run named `view` and `saved` entries on demand. From the browser,
+**Copy brief for agent** (`⌘K` or `···`) copies a compact Markdown handoff of
+the current record, query or schema with its deep link and exact MCP call.
 
 And you can watch all of it: the **Agent console** (⌘K → "Agent console")
-drives the same tools by hand through the same code path, showing each
-answer exactly as an agent receives it — stats, token cost, and the deep
-links back into the UI.
+drives the same tools by hand through the same code path and streams a live
+trail of external MCP calls hitting the shared server — stats, token cost, Undo
+sync, and one-click deep links back into the UI.
 
 ## A config file, and a team's surfaces
 
@@ -679,7 +688,7 @@ as given, from the current directory.
 An option it does not recognize is an error, not a shrug: `tablewalk --prot
 4111` says so rather than quietly serving the default port.
 
-`--tools` offers one job's worth of tools instead of all twenty-four. Most
+`--tools` offers one job's worth of tools instead of all twenty-six. Most
 sessions are one job — an agent reading a schema does not need the graph
 writers, one seeding a fixture does not need `explain` — and the listing is a
 fixed cost paid on connect, before anything is asked. `connections` and

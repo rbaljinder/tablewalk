@@ -304,6 +304,13 @@ function menu(at) {
       detail: say('driveTheMcpTools'),
       onSelect: () => openAgentConsole(),
     });
+    addMenuItem({
+      label: say('copyBriefForAgent'),
+      scope: 'workbench',
+      available: () => Boolean(state.schema),
+      detail: say('copyContextForAgent'),
+      onSelect: () => void import('./agentBrief.js').then((m) => m.copyAgentBrief()),
+    });
   }
 }
 

@@ -14,7 +14,7 @@ import { attributeWrites, type Registry } from '@mistriwork/engine/host';
 import { inSpan, parseTraceparent, tracing } from '@mistriwork/engine/adapters/telemetry/trace.js';
 import { agentTools, runTool } from './registry.js';
 import { setElicitor } from './tools/write.js';
-import { completeArgument, listResources, listResourceTemplates, readResource, type Shelf } from './shelf.js';
+import { bindShelf, completeArgument, listResources, listResourceTemplates, readResource, type Shelf } from './shelf.js';
 import { getPrompt, listPrompts } from './prompts.js';
 
 /** Protocol revisions this server knows. Answered back when the client asks
@@ -32,6 +32,23 @@ interface Rpc {
 /** A reply to the request being answered: its result, or its error. */
 export type Answer = (reply: { result: unknown } | { error: { code: number; message: string } }) => void;
 
+function instructionsFor(registry: Registry): string {
+  return (
+    (registry.list().some((c) => c.writable)
+      ? `tablewalk exposes relational databases; ${registry
+          .list()
+          .filter((c) => c.writable)
+          .map((c) => c.id)
+          .join(', ')} ` + 'accept writes (insert, update, delete, insert_graph, delete_graph, revert), the rest are read-only. '
+      : 'tablewalk exposes relational databases read-only. ') +
+    'Call `schema_summary` first ' +
+    'to orient, `table` for definitions and both directions of foreign keys, ' +
+    '`query` for rows (its language is documented on the tool), and `record` to ' +
+    'see one row with everything that points at it. Results carry a `link` a ' +
+    'human can open in the tablewalk UI.'
+  );
+}
+
 /**
  * Speak MCP over stdio until stdin closes.
  *
@@ -39,7 +56,8 @@ export type Answer = (reply: { result: unknown } | { error: { code: number; mess
  * already pointed every log at stderr. One JSON message per line, both ways,
  * which is the whole framing.
  */
-export function serveMcp(registry: Registry, version: string, shelf: Shelf = { queries: [], pages: [] }): void {
+export function serveMcp(registry: Registry, version: string, shelf: Shelf = { views: [], queries: [], pages: [] }): void {
+  bindShelf(registry, shelf);
   const write = (message: Record<string, unknown>) => {
     process.stdout.write(`${JSON.stringify(message)}\n`);
   };
@@ -171,19 +189,7 @@ export function serveMcp(registry: Registry, version: string, shelf: Shelf = { q
             /* Said as it is: a server listing six write tools that calls itself
                read-only hands the model a system-level sentence its own tool
                list contradicts. */
-            instructions:
-              (registry.list().some((c) => c.writable)
-                ? `tablewalk exposes relational databases; ${registry
-                    .list()
-                    .filter((c) => c.writable)
-                    .map((c) => c.id)
-                    .join(', ')} ` + 'accept writes (insert, update, delete, insert_graph, delete_graph, revert), the rest are read-only. '
-                : 'tablewalk exposes relational databases read-only. ') +
-              'Call `schema_summary` first ' +
-              'to orient, `table` for definitions and both directions of foreign keys, ' +
-              '`query` for rows (its language is documented on the tool), and `record` to ' +
-              'see one row with everything that points at it. Results carry a `link` a ' +
-              'human can open in the tablewalk UI.',
+            instructions: instructionsFor(registry),
           },
         });
       }
@@ -200,7 +206,7 @@ export function serveMcp(registry: Registry, version: string, shelf: Shelf = { q
         return write({ jsonrpc: '2.0', id, result: {} });
       }
 
-      if (method === 'completion/complete') return await completeArgument(registry, params, answer);
+      if (method === 'completion/complete') return await completeArgument(registry, params, answer, shelf);
       if (method === 'resources/read') return await readResource(registry, shelf, params, answer);
       if (method === 'tools/list') {
         return write({ jsonrpc: '2.0', id, result: { tools: agentTools(registry) } });
@@ -227,10 +233,12 @@ export function serveMcp(registry: Registry, version: string, shelf: Shelf = { q
           },
           (span) => {
             span.detail(() => ({ arguments: args }));
-            return attributeWrites({ via: 'agent' }, () => runTool(registry, name, args, { signal: controller.signal })).then((answer) => {
-              if (answer.isError) span.fail('tool_error');
-              return answer;
-            });
+            return attributeWrites({ via: 'agent' }, () => runTool(registry, name, args, { signal: controller.signal, via: 'mcp' })).then(
+              (answer) => {
+                if (answer.isError) span.fail('tool_error');
+                return answer;
+              },
+            );
           },
         ).finally(() => {
           running = undefined;
@@ -252,4 +260,117 @@ export function serveMcp(registry: Registry, version: string, shelf: Shelf = { q
       return write({ jsonrpc: '2.0', id, error: { code: -32603, message: (err as Error).message } });
     }
   }
+}
+
+/**
+ * Streamable HTTP MCP (`POST /mcp` on the running browser server).
+ *
+ * Shares the browser's `Registry`, Undo journal, `sessionEgress` and live
+ * activity trail, so an external agent and the human in the browser look at
+ * one session instead of two processes. Returns `undefined` when every message
+ * in the payload is a notification (`202 Accepted`).
+ */
+export async function answerMcpHttp(
+  registry: Registry,
+  shelf: Shelf,
+  payload: unknown,
+  options: { version: string; signal?: AbortSignal; trusted?: boolean },
+): Promise<Record<string, unknown> | Array<Record<string, unknown>> | undefined> {
+  bindShelf(registry, shelf);
+
+  const one = async (raw: unknown): Promise<Record<string, unknown> | undefined> => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid JSON-RPC request.' } };
+    }
+    const msg = raw as Rpc;
+    const { id, method, params = {} } = msg;
+    if (id === undefined || id === null) return undefined;
+    let captured: Record<string, unknown> | undefined;
+    const answer: Answer = (reply) => {
+      captured = { jsonrpc: '2.0', id, ...reply };
+    };
+    try {
+      if (method === 'initialize') {
+        const asked = String((params as { protocolVersion?: string }).protocolVersion ?? '');
+        return {
+          jsonrpc: '2.0',
+          id,
+          result: {
+            protocolVersion: KNOWN_VERSIONS.includes(asked) ? asked : DEFAULT_VERSION,
+            capabilities: { tools: {}, resources: {}, completions: {}, prompts: {} },
+            serverInfo: { name: 'tablewalk', version: options.version },
+            instructions: instructionsFor(registry),
+          },
+        };
+      }
+      if (method === 'ping' || method === 'resources/subscribe' || method === 'resources/unsubscribe') {
+        return { jsonrpc: '2.0', id, result: {} };
+      }
+      if (method === 'resources/list') {
+        listResources(registry, shelf, answer);
+        return captured;
+      }
+      if (method === 'resources/templates/list') {
+        listResourceTemplates(answer);
+        return captured;
+      }
+      if (method === 'prompts/list') {
+        listPrompts(answer);
+        return captured;
+      }
+      if (method === 'prompts/get') {
+        await getPrompt(registry, params, answer);
+        return captured;
+      }
+      if (method === 'completion/complete') {
+        await completeArgument(registry, params, answer, shelf);
+        return captured;
+      }
+      if (method === 'resources/read') {
+        await readResource(registry, shelf, params, answer);
+        return captured;
+      }
+      if (method === 'tools/list') {
+        return { jsonrpc: '2.0', id, result: { tools: agentTools(registry, { trusted: options.trusted }) } };
+      }
+      if (method === 'tools/call') {
+        const name = String((params as { name?: string }).name ?? '');
+        const args = (params as { arguments?: Record<string, unknown> }).arguments ?? {};
+        const meta = (params as { _meta?: { traceparent?: unknown; tracestate?: unknown } })._meta;
+        const known = tracing() && agentTools(registry, { trusted: options.trusted }).some((tool) => tool.name === name);
+        const result = await inSpan(
+          `tools/call ${known ? name : '_OTHER'}`,
+          {
+            kind: 'server',
+            remote: parseTraceparent(meta?.traceparent, meta?.tracestate),
+            attributes: { 'mcp.method.name': 'tools/call', 'gen_ai.tool.name': known ? name : undefined },
+          },
+          (span) => {
+            span.detail(() => ({ arguments: args }));
+            return attributeWrites({ via: 'agent' }, () =>
+              runTool(registry, name, args, { signal: options.signal, trusted: options.trusted, via: 'mcp' }),
+            ).then((out) => {
+              if (out.isError) span.fail('tool_error');
+              return out;
+            });
+          },
+        );
+        return { jsonrpc: '2.0', id, result };
+      }
+      return { jsonrpc: '2.0', id, error: { code: -32601, message: `No such method: ${method}` } };
+    } catch (err) {
+      return { jsonrpc: '2.0', id, error: { code: -32603, message: (err as Error).message } };
+    }
+  };
+
+  if (Array.isArray(payload)) {
+    if (!payload.length) return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Empty JSON-RPC batch.' } };
+    const replies: Array<Record<string, unknown>> = [];
+    for (const item of payload) {
+      const r = await one(item);
+      if (r !== undefined) replies.push(r);
+    }
+    return replies.length ? replies : undefined;
+  }
+  return one(payload);
 }

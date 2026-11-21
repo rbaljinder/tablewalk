@@ -7,6 +7,7 @@
  * table" has nothing in it to retry with.
  */
 import { Refusal, clampLimit, STATEMENT_TIMEOUT_MS, distance, type DatabaseSchema } from '@mistriwork/engine/host';
+import { resolveSavedQuery, shelfOf } from '../shelf.js';
 import { READS, STATS, type Handler, ToolError } from '../toolkit.js';
 
 export const definitions = [
@@ -14,10 +15,12 @@ export const definitions = [
     name: 'sql',
     description:
       'Run a read-only SQL SELECT when the query language cannot say it — window functions, ' +
-      'CTEs, self-joins. Ordinary grouping is `breakdown` now, and that is the one to reach ' +
-      'for first: it binds every value and checks every path against the catalog, where this ' +
-      'hands the database text it did not build. The connection is read-only: writes fail at the database. ' +
-      'Results are row-limited; say LIMIT yourself for anything else. For more rows than fit in a reply, use `export`, which writes them to a file. ' +
+      'CTEs, self-joins — or pass `saved` to run a named statement from tablewalk.json ' +
+      '(see `tablewalk://{connection}/queries`). Ordinary grouping is `breakdown` now, and that ' +
+      'is the one to reach for first: it binds every value and checks every path against the ' +
+      'catalog, where this hands the database text it did not build. The connection is read-only: ' +
+      'writes fail at the database. Results are row-limited; say LIMIT yourself for anything else. ' +
+      'For more rows than fit in a reply, use `export`, which writes them to a file. ' +
       `Every statement runs under a ${STATEMENT_TIMEOUT_MS / 1000}-second cap, and \`timeout_ms\` lowers it for this ` +
       'one — probing five query shapes wants fast failure. A statement that touches tablewalk’s own ' +
       'runtime or sign-in tables (the `__mistri_` prefix, the `mistri` schema, and their `__tablewalk_` and `tablewalk_auth` names before mistri) is refused, and so is ' +
@@ -25,7 +28,11 @@ export const definitions = [
     inputSchema: {
       type: 'object',
       properties: {
-        statement: { type: 'string' },
+        statement: { type: 'string', description: 'A read-only SELECT. Exclusive with `saved`.' },
+        saved: {
+          type: 'string',
+          description: 'Name of a saved query in tablewalk.json (`tablewalk://{connection}/queries`). Exclusive with `statement`.',
+        },
         limit: { type: 'number' },
         timeout_ms: {
           type: 'number',
@@ -33,7 +40,6 @@ export const definitions = [
         },
         connection: { type: 'string' },
       },
-      required: ['statement'],
       additionalProperties: false,
     },
     annotations: { title: 'Read-only SQL', ...READS },
@@ -41,6 +47,7 @@ export const definitions = [
       type: 'object',
       properties: {
         connection: { type: 'string' },
+        saved: { type: 'string' },
         columns: { type: 'array', items: { type: 'string' } },
         rows: { type: 'array', items: { type: 'object' } },
         truncated: { type: 'boolean' },
@@ -94,11 +101,24 @@ export const definitions = [
 type Name = (typeof definitions)[number]['name'];
 
 export const handlers = {
-  sql: async ({ args, adapter, schema, id }) => {
+  sql: async ({ registry, args, adapter, schema, id }) => {
     if (!adapter.runSql) {
       throw new ToolError('forbidden', `${schema.dialect} connections cannot run SQL in this build. Use \`query\`.`);
     }
-    const statement = String(args.statement ?? '').trim();
+    const rawStatement = args.statement === undefined || args.statement === null ? undefined : String(args.statement).trim();
+    const rawSaved = typeof args.saved === 'string' ? args.saved.trim() : '';
+    if (rawStatement && rawSaved) {
+      throw new ToolError('invalid_argument', 'sql: give either `statement` or `saved`, not both.');
+    }
+    if (args.statement !== undefined && !rawStatement && !rawSaved) {
+      throw new ToolError('invalid_argument', 'Nothing to run.');
+    }
+    if (!rawStatement && !rawSaved) {
+      throw new ToolError('invalid_argument', 'sql: missing "statement", which is required unless "saved" names a configured query.');
+    }
+    const connName = registry.list().find((c) => c.id === id)?.name;
+    const picked = rawSaved ? resolveSavedQuery(shelfOf(registry).queries, id, connName, rawSaved) : undefined;
+    const statement = picked ? picked.sql.trim() : rawStatement!;
     if (!statement) throw new ToolError('invalid_argument', 'Nothing to run.');
     // Never a write. The read-only handle refuses one anyway; not asking is
     // what makes this tool safe to hand to something that retries.
@@ -111,7 +131,7 @@ export const handlers = {
         refuseReserved: true,
       }),
     );
-    return { connection: id, ...result };
+    return { connection: id, ...(picked ? { saved: picked.name } : {}), ...result };
   },
   explain: async ({ args, adapter, schema, id }) => {
     if (!adapter.explainSql) {

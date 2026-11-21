@@ -15,13 +15,14 @@ import {
   looksLikeBreakdown,
   textToBreakdown,
 } from '@mistriwork/engine/host';
+import { resolveNamedView, shelfOf } from '../shelf.js';
 import { COUNT_LIMIT, COUNT_LIMIT_WORDS as bound, linkTo, READS, STATS, type Handler, ToolError } from '../toolkit.js';
 
 export const definitions = [
   {
     name: 'query',
     description:
-      `Run a query in tablewalk’s query language and get rows, a total counted up to ${bound}, and ` +
+      `Run a query in tablewalk’s query language — or a named \`view\` from tablewalk.json — and get rows, a total counted up to ${bound}, and ` +
       'the SQL it compiled to. The language: table first, then filters — ' +
       '`invoice total >= 500 and status != paid sort total desc limit 20`. Operators: ' +
       '= != < <= > >= contains startswith endswith in, `is empty`/`is not empty`; dates as ' +
@@ -33,6 +34,7 @@ export const definitions = [
       '`customer show name count invoice via customer_id as invoices sum invoice.total via customer_id as revenue` ' +
       '— count/sum/min/max/avg, `via` names the child\u2019s reference column, and `sort invoices desc` ' +
       'sorts by the alias. Filtering or projecting by an alias is not supported and says so. ' +
+      'Or pass `view` to run a named multi-table view from tablewalk.json (works on `"hidden"`-column connections too). ' +
       'Errors come back with suggestions — a misspelled column names its nearest match, and ' +
       'an unknown column answers with the table\u2019s real columns — so fix and retry. Prefer ' +
       '`show` on wide tables: sixteen columns of every row is tokens spent on nothing. ' +
@@ -40,12 +42,15 @@ export const definitions = [
     inputSchema: {
       type: 'object',
       properties: {
-        q: { type: 'string', description: 'The query text, starting with a table name.' },
+        q: { type: 'string', description: 'The query text, starting with a table name. Exclusive with `view`.' },
+        view: {
+          type: 'string',
+          description: 'Name or id of a configured view in tablewalk.json (see `tablewalk://{connection}/views`). Exclusive with `q`.',
+        },
         limit: { type: 'number', description: 'Rows to return (default 20, clamped).' },
         offset: { type: 'number' },
         connection: { type: 'string' },
       },
-      required: ['q'],
       additionalProperties: false,
     },
     annotations: { title: 'Query rows', ...READS },
@@ -53,6 +58,7 @@ export const definitions = [
       type: 'object',
       properties: {
         connection: { type: 'string' },
+        view: { type: 'string' },
         rows: { type: 'array', items: { type: 'object' } },
         columns: { type: 'array', items: { type: 'string' } },
         total: { type: 'number', description: `Rows matching the filter, not just the page, counted up to ${bound}.` },
@@ -173,7 +179,47 @@ export const handlers = {
       sql: result.sql,
     };
   },
-  query: async ({ args, adapter, schema, id }) => {
+  query: async ({ registry, args, adapter, schema, id }) => {
+    const hasQ = typeof args.q === 'string' && args.q.trim() !== '';
+    const hasView = typeof args.view === 'string' && args.view.trim() !== '';
+    if (hasQ && hasView) {
+      throw new ToolError(
+        'invalid_argument',
+        'query: give either `q` (query text) or `view` (a named view from tablewalk.json), not both.',
+      );
+    }
+    if (!hasQ && !hasView) {
+      throw new ToolError('invalid_argument', 'query: missing "q", which is required unless "view" names a configured view.');
+    }
+    if (hasView) {
+      if (!adapter.runView) {
+        throw new ToolError('forbidden', `${schema.dialect} connections cannot run views in this build.`);
+      }
+      const connName = registry.list().find((c) => c.id === id)?.name;
+      const viewDef = resolveNamedView(schema, shelfOf(registry).views, id, connName, String(args.view));
+      const { result, total, capped } = await readView(
+        adapter,
+        schema,
+        viewDef,
+        {
+          limit: args.limit ?? viewDef.limit ?? 20,
+          offset: args.offset,
+        },
+        'exact',
+        COUNT_LIMIT,
+      );
+      return {
+        connection: id,
+        view: viewDef.name || viewDef.id,
+        rows: result.rows,
+        columns: result.columns,
+        total,
+        ...(capped ? { cappedTotal: true } : {}),
+        sql: result.sql,
+        link: linkTo(id, encodeURIComponent(viewDef.text ?? viewDef.base).replace(/!/g, '%21')),
+      };
+    }
+
     const text = String(args.q ?? '');
     const parsed = parseQuery(text, { schema });
     /* The query's own `limit 3` wins over the tool's default, exactly as the

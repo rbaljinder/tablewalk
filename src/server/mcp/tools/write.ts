@@ -25,7 +25,7 @@ import {
   type UpdateRequest,
 } from '@mistriwork/engine/host';
 import { deleteGraph, flattenTables, insertGraph, type GraphRow } from '../../graph.js';
-import { linkTo, STATS, wholeKeyOrThrow, type Handler, type ToolCall, ToolError } from '../toolkit.js';
+import { DryRunRollback, linkTo, STATS, wholeKeyOrThrow, type Handler, type ToolCall, ToolError } from '../toolkit.js';
 
 /**
  * Offered only when some connection's config says `"writable": true` — the
@@ -40,8 +40,9 @@ export const definitions = [
       'Set columns on exactly one row, identified by its whole primary key: ' +
       '`{table, key: {id: 7}, set: {status: "closed", priority: 2}}`. Several columns go ' +
       'in one statement — three fields as three calls is three chances to fail half way. ' +
-      'The connection must be marked writable in tablewalk.json; values are bound, coerced ' +
-      'to their column types, and echoed back as applied.',
+      'Pass `dryRun: true` to check constraints, triggers and type coercion inside a rolled-back ' +
+      'transaction without committing. The connection must be marked writable in tablewalk.json; ' +
+      'values are bound, coerced to their column types, and echoed back as applied.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -57,6 +58,10 @@ export const definitions = [
           description: 'Original values for exactly the fields being set; checked atomically.',
           additionalProperties: { type: ['string', 'number', 'boolean', 'null'] },
         },
+        dryRun: {
+          type: 'boolean',
+          description: 'Run inside BEGIN … ROLLBACK: check constraints and return coerced values without committing.',
+        },
         connection: { type: 'string' },
       },
       required: ['table', 'key', 'set'],
@@ -71,11 +76,13 @@ export const definitions = [
         connection: { type: 'string' },
         table: { type: 'string' },
         key: { type: 'object' },
+        dryRun: { type: 'boolean' },
         affected: { type: 'number' },
         applied: { type: 'object', description: 'The values as the column types coerced them.' },
         outcome: { type: 'string', enum: ['unknown'] },
         errors: { type: 'array', items: { type: 'string' } },
         undoId: { type: 'number' },
+        note: { type: 'string' },
         sql: { type: 'object' },
         link: { type: 'string' },
         stats: STATS,
@@ -87,9 +94,10 @@ export const definitions = [
     description:
       'Add one row: `{table, values: {status: "open", customer_id: 7}}`. Leave out what ' +
       'the database should fill — defaults and auto-assigned keys — and it answers with ' +
-      'the row as stored, defaults included, plus its new key. A constraint the database ' +
-      'refuses comes back in its own words as `errors`; fix and retry. The connection ' +
-      'must be marked writable in tablewalk.json.',
+      'the row as stored, defaults included, plus its new key. Pass `dryRun: true` to run ' +
+      'inside a rolled-back transaction and inspect defaults, generated keys and constraint ' +
+      'errors without committing. A constraint the database refuses comes back in its own ' +
+      'words as `errors`; fix and retry. The connection must be marked writable in tablewalk.json.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -98,6 +106,10 @@ export const definitions = [
           type: 'object',
           description: 'Column name to value for the new row.',
           additionalProperties: { type: ['string', 'number', 'boolean', 'null'] },
+        },
+        dryRun: {
+          type: 'boolean',
+          description: 'Run inside BEGIN … ROLLBACK: check constraints and return defaults/key without committing.',
         },
         connection: { type: 'string' },
       },
@@ -114,10 +126,12 @@ export const definitions = [
         connection: { type: 'string' },
         table: { type: 'string' },
         inserted: { type: ['boolean', 'null'], description: 'Null means the write outcome is unknown; reconcile before retrying.' },
+        dryRun: { type: 'boolean' },
         outcome: { type: 'string', enum: ['rejected', 'unknown'] },
         undoId: { type: 'number' },
         key: { type: 'object', description: "The new row's primary key, read back from the database." },
         row: { type: 'object', description: 'The row as stored — defaults filled, types settled.' },
+        note: { type: 'string' },
         sql: { type: 'object' },
         errors: { type: 'array', description: "The database's own words for a constraint it refused." },
         link: { type: 'string' },
@@ -181,7 +195,8 @@ export const definitions = [
       'parent `as: "c1"` and write `{"customer_id": {"ref": "c1"}}` on the child — that ' +
       'resolves to the parent\u2019s new primary key, or to `{"ref": "c1", "column": "code"}` ' +
       'for any other column of the row as stored. `fixture`\u2019s `tables` can be passed ' +
-      'straight through as `tables`. The answer carries a `teardown` list, in reverse ' +
+      'straight through as `tables`. Pass `dryRun: true` to validate the whole graph inside ' +
+      'BEGIN … ROLLBACK without committing. The answer carries a `teardown` list, in reverse ' +
       'order, ready for `delete_graph`. The connection must be marked writable. A graph ' +
       'insert is not journaled: `revert` cannot undo it, and the result carries no `undoId` — ' +
       'the `teardown` list is the way back.',
@@ -213,6 +228,10 @@ export const definitions = [
             required: ['table', 'rows'],
           },
         },
+        dryRun: {
+          type: 'boolean',
+          description: 'Run the whole graph inside BEGIN … ROLLBACK without committing.',
+        },
         connection: { type: 'string' },
       },
       additionalProperties: false,
@@ -230,6 +249,7 @@ export const definitions = [
       type: 'object',
       properties: {
         connection: { type: 'string' },
+        dryRun: { type: 'boolean' },
         inserted: {
           type: 'array',
           description: 'Each row as stored, with its label and new key.',
@@ -248,6 +268,7 @@ export const definitions = [
           description: 'The same rows reversed — children first — for `delete_graph`.',
           items: { type: 'object', properties: { table: { type: 'string' }, key: { type: 'object' } } },
         },
+        note: { type: 'string' },
         errors: { type: 'array', items: { type: 'string' } },
         stats: STATS,
       },
@@ -439,19 +460,53 @@ export const handlers = {
     wholeKeyOrThrow(schema, table, key);
     const values = (args.set ?? {}) as Record<string, string | number | boolean | null>;
     if (!Object.keys(values).length) throw new ToolError('invalid_argument', 'Nothing to set.');
+    const dryRun = args.dryRun === true || args.dryRun === 'true';
+    const request: UpdateRequest = {
+      table: table.id,
+      key,
+      values,
+      ...(args.expected === undefined ? {} : { expected: args.expected as UpdateRequest['expected'] }),
+    };
+    const body =
+      Object.keys(key).length === 1
+        ? String(Object.values(key)[0])
+        : Object.entries(key)
+            .map(([c, v]) => `${c}=${v}`)
+            .join(',');
+    const link = linkTo(id, `${encodeURIComponent(table.id)}/~${encodeURIComponent(body)}`);
+    if (dryRun) {
+      if (!adapter.transaction) {
+        throw new ToolError('forbidden', `${schema.dialect} connections cannot run a dry-run transaction in this build.`);
+      }
+      try {
+        await adapter.transaction(async (tx) => {
+          const result = await tx.update(request);
+          throw new DryRunRollback(result);
+        });
+      } catch (err) {
+        if (err instanceof DryRunRollback) {
+          const result = err.result as Awaited<ReturnType<NonNullable<typeof adapter.update>>>;
+          return {
+            connection: id,
+            table: table.id,
+            key,
+            dryRun: true,
+            affected: 0,
+            applied: result.applied,
+            sql: result.sql,
+            note: 'Dry run rolled back; nothing was written.',
+            link,
+          };
+        }
+        if (err instanceof Refusal) throw err;
+        throw new ToolError('invalid_argument', await explainWriteFailure(adapter, schema, table.id, values, (err as Error).message));
+      }
+    }
     /* The adapter independently verifies the key matches exactly one row and
        refuses anything else — the same guarantee the browser's edits get. */
     let stored;
     try {
-      stored = await recordedUpdate(
-        { adapter, connection: id },
-        {
-          table: table.id,
-          key,
-          values,
-          ...(args.expected === undefined ? {} : { expected: args.expected as UpdateRequest['expected'] }),
-        },
-      );
+      stored = await recordedUpdate({ adapter, connection: id }, request);
     } catch (err) {
       if (err instanceof TransactionOutcomeUnknown) {
         return { connection: id, table: table.id, key, outcome: 'unknown', errors: [err.message] };
@@ -460,12 +515,6 @@ export const handlers = {
       throw new ToolError('invalid_argument', await explainWriteFailure(adapter, schema, table.id, values, (err as Error).message));
     }
     const { result, undoId } = stored;
-    const body =
-      Object.keys(key).length === 1
-        ? String(Object.values(key)[0])
-        : Object.entries(key)
-            .map(([c, v]) => `${c}=${v}`)
-            .join(',');
     return {
       connection: id,
       table: table.id,
@@ -474,7 +523,7 @@ export const handlers = {
       applied: result.applied,
       sql: result.sql,
       ...(undoId === undefined ? {} : { undoId }),
-      link: linkTo(id, `${encodeURIComponent(table.id)}/~${encodeURIComponent(body)}`),
+      link,
     };
   },
   insert: async (call) => {
@@ -488,6 +537,35 @@ export const handlers = {
         `Unknown table "${String(args.table)}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`,
       );
     const values = (args.values ?? {}) as Record<string, string | number | boolean | null>;
+    const dryRun = args.dryRun === true || args.dryRun === 'true';
+    if (dryRun) {
+      if (!adapter.transaction) {
+        throw new ToolError('forbidden', `${schema.dialect} connections cannot run a dry-run transaction in this build.`);
+      }
+      try {
+        await adapter.transaction(async (tx) => {
+          const result = await tx.insert({ table: table.id, values });
+          throw new DryRunRollback(result);
+        });
+      } catch (err) {
+        if (err instanceof DryRunRollback) {
+          const result = err.result as Awaited<ReturnType<NonNullable<typeof adapter.insert>>>;
+          return {
+            connection: id,
+            table: table.id,
+            inserted: false,
+            dryRun: true,
+            key: result.key,
+            row: result.row,
+            sql: result.sql,
+            note: 'Dry run rolled back; nothing was written.',
+          };
+        }
+        if (err instanceof Refusal) throw err;
+        const message = await explainWriteFailure(adapter, schema, table.id, values, (err as Error).message);
+        return { connection: id, table: table.id, inserted: false, dryRun: true, outcome: 'rejected', errors: [message] };
+      }
+    }
     try {
       const { result, undoId } = await recordedInsert({ adapter, connection: id }, { table: table.id, values });
       const body =
@@ -596,18 +674,29 @@ export const handlers = {
     if (listed && grouped) throw new ToolError('invalid_argument', 'Give either `rows` or `tables`, not both.');
     const rows = listed ?? grouped;
     if (!rows) throw new ToolError('invalid_argument', 'Give the rows to insert, as `rows` or as `fixture`\u2019s `tables`.');
+    const dryRun = args.dryRun === true || args.dryRun === 'true';
 
     try {
       /* `rowsWritten` is dropped here on purpose: every tool reports what it
          cost through `stats`, and a count in two places is a count that will
          one day disagree with itself. */
-      const { rowsWritten: _written, ...result } = await insertGraph(adapter, schema, rows);
-      return { connection: id, ...result };
+      const { rowsWritten: _written, ...result } = await insertGraph(adapter, schema, rows, { dryRun });
+      return {
+        connection: id,
+        ...result,
+        ...(dryRun ? { note: 'Dry run rolled back; nothing was written.' } : {}),
+      };
     } catch (err) {
       /* A refusal about the request is a message; a refusal from the database
          is also a message — and both arrive having written nothing, which is
          the fact worth reporting either way. */
-      return { connection: id, inserted: [], teardown: [], errors: [(err as Error).message] };
+      return {
+        connection: id,
+        ...(dryRun ? { dryRun: true } : {}),
+        inserted: [],
+        teardown: [],
+        errors: [(err as Error).message],
+      };
     }
   },
   revert: async (call) => {

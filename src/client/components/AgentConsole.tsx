@@ -1,7 +1,8 @@
 /**
- * The agent console: the MCP tools, driven by hand. Answers are exactly
- * what an agent receives — same code path, stats and all — which is how
- * a tool's description and its shape get tuned.
+ * The agent console: the MCP tools, driven by hand, plus the live activity
+ * trail of external MCP clients sharing this browser server (`POST /mcp`).
+ * Answers are byte-identical to what an agent receives — same code path,
+ * stats and all.
  */
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -10,6 +11,7 @@ import { formatNumber } from '@mistriwork/kit/client/locale.js';
 import { say } from '../copy/workbench/components/AgentConsole.js';
 import { shown } from '@mistriwork/kit/client/addressMount.js';
 import { addHostListener, navFollow, removeHostListener } from '@mistriwork/kit/client/shellHost.js';
+import { shell } from '@mistriwork/kit/client/shellMode.js';
 
 interface Spec {
   type?: string | string[];
@@ -32,6 +34,26 @@ interface Call {
   args: Record<string, unknown>;
   answer: Answer;
 }
+interface LiveCall {
+  seq: number;
+  via: 'mcp' | 'console';
+  tool: string;
+  args: Record<string, unknown>;
+  ms: number;
+  isError: boolean;
+  rowsRead?: number;
+  rowsWritten?: number;
+  rowsDeleted?: number;
+  dryRun?: boolean;
+  undoId?: number;
+  answer: Answer;
+}
+interface ActivityPayload {
+  seq?: number;
+  calls?: LiveCall[];
+  egress?: Record<string, number>;
+  mcpEndpoint?: string | null;
+}
 
 /** ~4 characters per token is the rule of thumb the readout says it is. */
 const cost = (text: string) => say('charsTokens', { chars: formatNumber(text.length), tokens: formatNumber(Math.ceil(text.length / 4)) });
@@ -51,11 +73,19 @@ function Badges({ tool }: { tool: Tool }) {
 
 export function AgentConsole({ onClose }: { onClose: () => void }) {
   const panel = useRef<HTMLDivElement>(null);
+  const seenWriteSeq = useRef(0);
   const tools = useQuery<Tool[]>({
     queryKey: ['agent-tools'],
     queryFn: async () => (await api('/api/agent/tools')).tools ?? [],
     retry: false,
     staleTime: Infinity,
+  });
+  const activity = useQuery<ActivityPayload>({
+    queryKey: ['agent-activity'],
+    queryFn: async () => (await api('/api/agent/activity' as never)) as ActivityPayload,
+    retry: false,
+    refetchInterval: 2_000,
+    refetchIntervalInBackground: false,
   });
   const [selected, setSelected] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<Call[]>([]);
@@ -87,6 +117,15 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
     }
   }, [tools.isError]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const externalCalls = Array.isArray(activity.data?.calls) ? activity.data!.calls.filter((c) => c.via === 'mcp') : [];
+  useEffect(() => {
+    const newestUndo = externalCalls.find((c) => c.undoId !== undefined || (c.rowsWritten ?? 0) > 0 || (c.rowsDeleted ?? 0) > 0);
+    if (newestUndo && newestUndo.seq > seenWriteSeq.current) {
+      seenWriteSeq.current = newestUndo.seq;
+      void shell().undo?.refresh?.();
+    }
+  }, [externalCalls]);
+
   if (!tools.data)
     return (
       <div className="conn-inner" ref={panel}>
@@ -108,8 +147,19 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
       setAnswer({ kind: 'error', message: (err as Error).message });
       return;
     }
+    if (got.structuredContent?.undoId !== undefined) void shell().undo?.refresh?.();
     setTranscript((was) => [{ tool: tool.name, args, answer: got }, ...was]);
     setAnswer({ kind: 'answer', answer: got });
+  };
+  const mcpUrl = typeof activity.data?.mcpEndpoint === 'string' ? activity.data.mcpEndpoint : null;
+  const copyMcpUrl = async () => {
+    if (!mcpUrl) return;
+    try {
+      await navigator.clipboard.writeText(mcpUrl);
+      toast(say('copiedMcpEndpoint'));
+    } catch {
+      /* Clipboard denied. */
+    }
   };
   return (
     <div className="conn-inner" ref={panel}>
@@ -123,6 +173,11 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
           <p className="conn-lede">{say('theMcpToolsDriven')}</p>
         </div>
         <div className="conn-head-actions">
+          {mcpUrl ? (
+            <button type="button" className="ghost" onClick={() => void copyMcpUrl()}>
+              {say('copyMcpEndpoint', { url: mcpUrl })}
+            </button>
+          ) : null}
           <button type="button" onClick={onClose}>
             {say('common.done')}
           </button>
@@ -161,6 +216,11 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
                   <AnswerView answer={answer.answer} onClose={onClose} />
                 ) : null}
               </div>
+              <LiveActivityTrail
+                calls={externalCalls}
+                egress={activity.data?.egress}
+                onShow={(a) => setAnswer({ kind: 'answer', answer: a })}
+              />
               <Transcript calls={transcript} onShow={(a) => setAnswer({ kind: 'answer', answer: a })} />
             </>
           ) : (
@@ -297,6 +357,7 @@ function AnswerView({ answer, onClose }: { answer: Answer; onClose: () => void }
     <>
       <div className="agent-stats">
         {answer.isError ? <span className="agent-badge tone-bad">isError</span> : null}
+        {answer.structuredContent?.dryRun === true ? <span className="agent-badge">{say('dryRunBadge')}</span> : null}
         {Object.entries(stats).map(([k, v]) => (
           <span key={k} className="stat">{`${k} ${v}`}</span>
         ))}
@@ -322,6 +383,38 @@ function AnswerView({ answer, onClose }: { answer: Answer; onClose: () => void }
         </div>
       ) : null}
     </>
+  );
+}
+
+function LiveActivityTrail({
+  calls,
+  egress,
+  onShow,
+}: {
+  calls: LiveCall[];
+  egress?: Record<string, number>;
+  onShow: (answer: Answer) => void;
+}) {
+  if (!calls.length) return null;
+  const totalEgress = egress
+    ? Object.values(egress).reduce((n, v) => n + (Number(v) || 0), 0)
+    : calls.reduce((n, c) => n + (c.rowsRead ?? 0), 0);
+  return (
+    <div className="agent-transcript agent-live-trail">
+      <h4>{say('liveMcpHeading', { calls: say('calls', { count: calls.length }), rows: say('rows', { count: totalEgress }) })}</h4>
+      {calls.slice(0, 12).map((entry) => {
+        const size = entry.answer.content?.[0]?.text?.length ?? 0;
+        return (
+          <button key={entry.seq} type="button" className="agent-past" onClick={() => onShow(entry.answer)}>
+            <span className="agent-badge tone-ok">{say('viaMcp')}</span>
+            {entry.dryRun ? <span className="agent-badge">{say('dryRunBadge')}</span> : null}
+            <span className="agent-past-tool">{entry.tool}</span>
+            <span className="agent-past-args">{JSON.stringify(entry.args).slice(0, 60)}</span>
+            <span className="agent-past-cost">{say('callCost', { ms: String(entry.ms), size: formatNumber(size) })}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

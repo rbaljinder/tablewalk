@@ -16,6 +16,8 @@ export const say = defineMessages({
   checkTheShape: 'Check the shape…',
   whatThisSchemaWill: 'what this schema will cost',
   driveTheMcpTools: 'drive the MCP tools by hand, see what an agent sees',
+  copyBriefForAgent: 'Copy brief for agent',
+  copyContextForAgent: 'copy this view, key and MCP call as Markdown',
   fromTablewalkJson: 'from tablewalk.json',
   savedSql: 'saved SQL',
 });

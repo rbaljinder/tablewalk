@@ -18,7 +18,7 @@
  */
 import { primaryKey, referencesFrom, type DatabaseSchema } from '@mistriwork/engine/shared/schema.js';
 
-type Severity = 'high' | 'medium' | 'low';
+export type Severity = 'high' | 'medium' | 'low';
 
 export interface Finding {
   rule: string;
@@ -179,7 +179,7 @@ export function lintReport(findings: Finding[]): string {
 }
 
 /** How many of each, for a caller deciding whether to fail a build. */
-export function lintCounts(findings: Finding[]): Record<Severity, number> {
+export function lintCounts(findings: ReadonlyArray<{ severity: Severity }>): Record<Severity, number> {
   return {
     high: findings.filter((f) => f.severity === 'high').length,
     medium: findings.filter((f) => f.severity === 'medium').length,

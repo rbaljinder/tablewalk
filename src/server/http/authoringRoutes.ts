@@ -96,7 +96,7 @@ export async function authoringRoutes(post: PostContext, trusted = true): Promis
         ? { ...raw, connection }
         : raw;
     // The console's writes are an agent's, made in the operator's name.
-    send(res, 200, await attributeWrites({ via: 'agent' }, () => runTool(registry, name, args, { trusted })));
+    send(res, 200, await attributeWrites({ via: 'agent' }, () => runTool(registry, name, args, { trusted, via: 'console' })));
     return true;
   }
 
