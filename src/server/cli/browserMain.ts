@@ -59,9 +59,15 @@ interface BrowserExtraArgs {
   rest: string[];
   connection?: string;
   env?: string;
+  allEnvs?: boolean;
   lease?: string;
   maxRows?: string;
+  timeoutMs?: string;
   redact?: boolean;
+  focus?: string;
+  focusHops?: string;
+  format?: string;
+  auditLog?: string;
   lazy?: boolean;
   query?: string;
   call?: string;
@@ -90,6 +96,8 @@ function extractBrowserExtraArgs(argv: readonly string[]): BrowserExtraArgs {
       out.lazy = true;
     } else if (arg === '--redact') {
       out.redact = true;
+    } else if (arg === '--all-envs') {
+      out.allEnvs = true;
     } else if (arg === '--connection') {
       const got = takeValue(arg, argv[i + 1], i);
       if (got) [out.connection, i] = got;
@@ -102,6 +110,21 @@ function extractBrowserExtraArgs(argv: readonly string[]): BrowserExtraArgs {
     } else if (arg === '--max-rows') {
       const got = takeValue(arg, argv[i + 1], i);
       if (got) [out.maxRows, i] = got;
+    } else if (arg === '--timeout-ms') {
+      const got = takeValue(arg, argv[i + 1], i);
+      if (got) [out.timeoutMs, i] = got;
+    } else if (arg === '--focus') {
+      const got = takeValue(arg, argv[i + 1], i);
+      if (got) [out.focus, i] = got;
+    } else if (arg === '--focus-hops') {
+      const got = takeValue(arg, argv[i + 1], i);
+      if (got) [out.focusHops, i] = got;
+    } else if (arg === '--format') {
+      const got = takeValue(arg, argv[i + 1], i);
+      if (got) [out.format, i] = got;
+    } else if (arg === '--audit-log') {
+      const got = takeValue(arg, argv[i + 1], i);
+      if (got) [out.auditLog, i] = got;
     } else if (arg === '--query') {
       const got = takeValue(arg, argv[i + 1], i);
       if (got) [out.query, i] = got;
@@ -129,6 +152,15 @@ function extractBrowserExtraArgs(argv: readonly string[]): BrowserExtraArgs {
   }
   if (out.args !== undefined && out.call === undefined && out.query === undefined) {
     out.error ??= '--args goes with --call (or --query).';
+  }
+  if (out.allEnvs && out.env !== undefined) {
+    out.error ??= 'Pass either --env <env> or --all-envs, not both.';
+  }
+  if (out.allEnvs && modes === 0) {
+    out.error ??= '--all-envs goes with --query, --call, or --batch.';
+  }
+  if (out.format !== undefined && modes === 0) {
+    out.error ??= '--format goes with --query, --call, or --batch.';
   }
   return out;
 }
@@ -235,7 +267,14 @@ export const main: Main = async () => {
   let config: Awaited<ReturnType<typeof readStartupConfig>>;
   let mcpInputStream: NodeJS.ReadableStream | undefined;
   let startupMeta: { active?: string; only?: boolean; lazy?: boolean } = {};
-  const cliOverrides = { lease: extra.lease, maxRows: extra.maxRows, redact: extra.redact };
+  const cliOverrides = {
+    lease: extra.lease,
+    maxRows: extra.maxRows,
+    redact: extra.redact,
+    timeoutMs: extra.timeoutMs,
+    focus: extra.focus,
+    focusHops: extra.focusHops,
+  };
 
   if (maybePiped) {
     const { loadPipedVaultConfig } = await import('./vaultConfig.js');
@@ -281,13 +320,25 @@ export const main: Main = async () => {
       process.env.TABLEWALK_REDACT?.trim() ||
       process.env.TABLEWALK_REDACT_COLUMNS?.trim() ||
       process.env.TABLEWALK_MAX_ROWS?.trim() ||
-      process.env.TABLEWALK_LEASE?.trim(),
+      process.env.TABLEWALK_LEASE?.trim() ||
+      process.env.TABLEWALK_TIMEOUT_MS?.trim() ||
+      process.env.TABLEWALK_FOCUS?.trim() ||
+      process.env.TABLEWALK_FOCUS_HOPS?.trim() ||
+      process.env.TABLEWALK_CREDENTIAL_COMMAND?.trim(),
     );
     const needsExtended =
-      Boolean(extra.lease || extra.maxRows !== undefined || extra.redact || hasPolicyEnvVars) ||
+      Boolean(
+        extra.lease ||
+        extra.maxRows !== undefined ||
+        extra.redact ||
+        extra.timeoutMs !== undefined ||
+        extra.focus !== undefined ||
+        extra.focusHops !== undefined ||
+        hasPolicyEnvVars,
+      ) ||
       Boolean(
         config.loadedConfigText &&
-        /"(?:blocklist|blockedTables|blockedFields|blockedColumns|lease|environments|redact|redactColumns|redact_columns|maxRows|max_rows|secrets|dotenv|defaultConnection|active|lazy|only)"/.test(
+        /"(?:blocklist|blockedTables|blockedFields|blockedColumns|lease|environments|redact|redactColumns|redact_columns|maxRows|max_rows|timeoutMs|timeout_ms|focus|focusHops|focus_hops|credentialCommand|credential_command|secrets|dotenv|defaultConnection|active|lazy|only)"/.test(
           config.loadedConfigText,
         ),
       );
@@ -308,6 +359,19 @@ export const main: Main = async () => {
         await registry.closeAll().catch(() => {});
         process.exit(1);
       }
+    }
+  }
+
+  /* Optional zero-PII JSONL audit log (`--audit-log <path|stderr>` or `TABLEWALK_AUDIT_LOG`), loaded on demand. */
+  const auditLogSpec = extra.auditLog ?? process.env.TABLEWALK_AUDIT_LOG?.trim();
+  if (auditLogSpec) {
+    try {
+      const [{ createAuditLogger }, { setAuditSink }] = await Promise.all([import('../auditLog.js'), import('../mcp/toolkit.js')]);
+      setAuditSink(createAuditLogger(auditLogSpec), registry);
+    } catch (err) {
+      console.error(`tablewalk: ${(err as Error).message}`);
+      await registry.closeAll().catch(() => {});
+      process.exit(1);
     }
   }
 
@@ -416,7 +480,14 @@ export const main: Main = async () => {
     return runCliBatch(
       registry,
       { views: config.views, queries: config.queries, pages: config.pages },
-      { batch: extra.batch, connection: extra.connection, env: extra.env, inputStream: mcpInputStream },
+      {
+        batch: extra.batch,
+        connection: extra.connection,
+        env: extra.env,
+        allEnvs: extra.allEnvs,
+        format: extra.format,
+        inputStream: mcpInputStream,
+      },
     );
   }
 
@@ -425,7 +496,15 @@ export const main: Main = async () => {
     return runCliOneShot(
       registry,
       { views: config.views, queries: config.queries, pages: config.pages },
-      { query: extra.query, call: extra.call, args: extra.args, connection: extra.connection, env: extra.env },
+      {
+        query: extra.query,
+        call: extra.call,
+        args: extra.args,
+        connection: extra.connection,
+        env: extra.env,
+        allEnvs: extra.allEnvs,
+        format: extra.format,
+      },
     );
   }
 

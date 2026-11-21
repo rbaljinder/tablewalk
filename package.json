@@ -1,6 +1,6 @@
 {
   "name": "tablewalk",
-  "version": "1.0.0-rc.19",
+  "version": "1.0.0-rc.20",
   "description": "Follow the data. A database browser built around the walk: a foreign key is a place you can go.",
   "keywords": [
     "browser",

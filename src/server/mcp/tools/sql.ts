@@ -8,7 +8,7 @@
  */
 import { Refusal, clampLimit, STATEMENT_TIMEOUT_MS, distance, type DatabaseSchema } from '@mistriwork/engine/host';
 import { resolveSavedQuery, shelfOf } from '../shelf.js';
-import { ENV_ARG, READS, STATS, type Handler, ToolError } from '../toolkit.js';
+import { ENV_ARG, getConnectionRuntimePolicy, READS, STATS, type Handler, ToolError } from '../toolkit.js';
 
 export const definitions = [
   {
@@ -122,6 +122,10 @@ export const handlers = {
     const picked = rawSaved ? resolveSavedQuery(shelfOf(registry).queries, id, connName, rawSaved) : undefined;
     const statement = picked ? picked.sql.trim() : rawStatement!;
     if (!statement) throw new ToolError('invalid_argument', 'Nothing to run.');
+    const connTimeout = getConnectionRuntimePolicy(registry, id)?.timeoutMs;
+    const askedTimeout = args.timeout_ms === undefined ? undefined : Number(args.timeout_ms);
+    const effectiveTimeout =
+      connTimeout !== undefined && askedTimeout !== undefined ? Math.min(connTimeout, askedTimeout) : (askedTimeout ?? connTimeout);
     // Never a write. The read-only handle refuses one anyway; not asking is
     // what makes this tool safe to hand to something that retries.
     const result = await teaching(schema, () =>
@@ -129,7 +133,7 @@ export const handlers = {
         text: statement,
         limit: clampLimit(args.limit ?? 100),
         write: false,
-        timeoutMs: args.timeout_ms === undefined ? undefined : Number(args.timeout_ms),
+        timeoutMs: effectiveTimeout,
         refuseReserved: true,
       }),
     );

@@ -183,6 +183,7 @@ describe('the MCP server', () => {
       'lint',
       'change_impact',
       'anomalies',
+      'perf',
       'verify_ddl',
       'record',
       'update',

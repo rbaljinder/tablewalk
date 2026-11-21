@@ -208,10 +208,12 @@ Or point it at a database instead of a config file: `"args": ["tablewalk",
 running loopback browser session over Streamable HTTP at
 `http://localhost:4111/mcp` (or set `TABLEWALK_MCP_URL=http://localhost:4111/mcp`
 for stdio-only clients) so the browser and the agent share one connection pool,
-Undo stack, row-egress counter, and live activity trail. **Twenty-seven tools** —
-twenty-one read-only, and six writes offered only when a connection is
-`"writable": true`. Every answer carries a deep link the human beside the
-agent can open in the UI, and says what it cost in rows and milliseconds.
+Undo stack, row-egress counter, and live activity trail. **Twenty-eight tools** —
+twenty-two read-only, and six writes offered only when a connection is
+`"writable": true`. Single-connection read-only tools also accept `envs: "all"`
+or `envs: ["local", "staging"]` to fan out across sibling environments in
+parallel. Every answer carries a deep link the human beside the agent can open
+in the UI, and says what it cost in rows and milliseconds.
 
 **Reading**
 
@@ -229,6 +231,7 @@ agent can open in the UI, and says what it cost in rows and milliseconds.
 | `explain` | the planner's account of a statement without running it — feed a `query` answer's `sql` back |
 | `profile` | what a column actually holds: null share, distinct count, range, the values that repeat |
 | `lint` | what the shape will cost: keyless tables, unindexed references, naive timestamps |
+| `perf` | live index, scan, bloat and planner-statistics diagnostics (`pg_stat_user_tables` / `pg_stat_user_indexes` on PostgreSQL; `PRAGMA index_list`, `EXPLAIN QUERY PLAN` and `sqlite_stat1` on SQLite) with ready-to-run remediation SQL |
 | `anomalies` | data-level counterpart to `lint`: temporal inversions, dangling soft-delete lifecycles, and nullable FKs that are >=95% populated with null outliers (counts only, works on `"rows": false` too) |
 | `change_impact` | what breaks if you change a table or column — asked *before* the migration is written |
 | `verify_ddl` | runs candidate DDL in a disposable copy (SQLite) or `BEGIN … ROLLBACK` (writable Postgres) and returns the schema `diff` and newly introduced `lint` findings without altering the database |
@@ -649,6 +652,14 @@ mistri --app <dir>            an App, served: the App framework's, npx @mistriwo
       --redact                deterministically mask sensitive PII and secret
                               columns on every row read, withholding raw SQL
       --max-rows <n>          cap total rows read per connection in this session
+      --timeout-ms <ms>       per-call statement deadline in milliseconds
+      --focus <tables>        scope the catalog and queries to these tables and
+                              their foreign-key neighborhood
+      --focus-hops <n>        with --focus: foreign-key hops to include, 0 to 5
+                              (default 1)
+      --audit-log <path|stderr>
+                              append zero-PII JSONL audit receipts for every
+                              tool call
       --base-path <path>      the path a reverse proxy serves this server
                               under, like /tools: every address, asset, API
                               call, cookie and link carries it. Or "basePath"
@@ -667,13 +678,17 @@ mistri --app <dir>            an App, served: the App framework's, npx @mistriwo
                               database (automatic for piped --config -)
       --tools <name>          explore, migrate, seed, or full (the default)
       --output-schema         advertise each tool's output shape in tools/list
-      --query <q>             run one query or breakdown, print JSON, close all
-                              connections, and exit
-      --call <tool>           run one MCP tool by name, print JSON, close all
-                              connections, and exit
+      --query <q>             run one query or breakdown, print the result,
+                              close all connections, and exit
+      --call <tool>           run one MCP tool by name, print the result, close
+                              all connections, and exit
       --args <json>           with --call or --query: JSON object of arguments
       --batch [path|-]        run newline-delimited queries or JSON {"tool","args"}
                               calls over one session, print NDJSON, and exit
+      --all-envs              with --query, --call or --batch: run a read-only
+                              call across every environment in parallel
+      --format <fmt>          with --query, --call or --batch: json, ndjson, tsv
+                              or md
       --export <fmt>          print the schema as md, mermaid or json, then exit
                               (an App's brief, types, openapi and asyncapi are
                               mistri's)

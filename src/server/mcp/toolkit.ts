@@ -116,6 +116,11 @@ export interface ConnectionConfigExtras {
   redactColumns?: unknown;
   redact_columns?: unknown;
   maxRows?: unknown;
+  timeoutMs?: unknown;
+  timeout_ms?: unknown;
+  focus?: unknown;
+  focusHops?: unknown;
+  focus_hops?: unknown;
 }
 
 export interface TopLevelConfigExtras {
@@ -126,12 +131,19 @@ export interface TopLevelConfigExtras {
   redactColumns?: unknown;
   redact_columns?: unknown;
   maxRows?: unknown;
+  timeoutMs?: unknown;
+  timeout_ms?: unknown;
+  focus?: unknown;
+  focusHops?: unknown;
+  focus_hops?: unknown;
 }
 
 export interface RuntimeConnectionPolicy {
   redactsRows?: boolean;
   redactColumns?: readonly string[];
   maxRows?: number;
+  timeoutMs?: number;
+  focused?: boolean;
 }
 
 const configExtrasByRegistry = new WeakMap<Registry, Map<string, ConnectionConfigExtras>>();
@@ -198,7 +210,12 @@ export function loadConfigEnvMeta(registry: Registry, rawConfigJsonText: string)
     parsed.redact !== undefined ||
     parsed.redactColumns !== undefined ||
     parsed.redact_columns !== undefined ||
-    parsed.maxRows !== undefined
+    parsed.maxRows !== undefined ||
+    parsed.timeoutMs !== undefined ||
+    parsed.timeout_ms !== undefined ||
+    parsed.focus !== undefined ||
+    parsed.focusHops !== undefined ||
+    parsed.focus_hops !== undefined
   ) {
     setTopLevelConfigExtras(registry, {
       ...(parsed.blocklist !== undefined ? { blocklist: parsed.blocklist } : {}),
@@ -208,6 +225,11 @@ export function loadConfigEnvMeta(registry: Registry, rawConfigJsonText: string)
       ...(parsed.redactColumns !== undefined ? { redactColumns: parsed.redactColumns } : {}),
       ...(parsed.redact_columns !== undefined ? { redact_columns: parsed.redact_columns } : {}),
       ...(parsed.maxRows !== undefined ? { maxRows: parsed.maxRows } : {}),
+      ...(parsed.timeoutMs !== undefined ? { timeoutMs: parsed.timeoutMs } : {}),
+      ...(parsed.timeout_ms !== undefined ? { timeout_ms: parsed.timeout_ms } : {}),
+      ...(parsed.focus !== undefined ? { focus: parsed.focus } : {}),
+      ...(parsed.focusHops !== undefined ? { focusHops: parsed.focusHops } : {}),
+      ...(parsed.focus_hops !== undefined ? { focus_hops: parsed.focus_hops } : {}),
     });
   }
   if (!Array.isArray(parsed.connections)) return;
@@ -229,7 +251,12 @@ export function loadConfigEnvMeta(registry: Registry, rawConfigJsonText: string)
       rec.redact !== undefined ||
       rec.redactColumns !== undefined ||
       rec.redact_columns !== undefined ||
-      rec.maxRows !== undefined;
+      rec.maxRows !== undefined ||
+      rec.timeoutMs !== undefined ||
+      rec.timeout_ms !== undefined ||
+      rec.focus !== undefined ||
+      rec.focusHops !== undefined ||
+      rec.focus_hops !== undefined;
     if (!database && !env && !hasExtras) continue;
     const match =
       configs.find((c) => c.source === 'config' && c.name === name && !usedIds.has(c.id)) ??
@@ -253,6 +280,11 @@ export function loadConfigEnvMeta(registry: Registry, rawConfigJsonText: string)
           ...(rec.redactColumns !== undefined ? { redactColumns: rec.redactColumns } : {}),
           ...(rec.redact_columns !== undefined ? { redact_columns: rec.redact_columns } : {}),
           ...(rec.maxRows !== undefined ? { maxRows: rec.maxRows } : {}),
+          ...(rec.timeoutMs !== undefined ? { timeoutMs: rec.timeoutMs } : {}),
+          ...(rec.timeout_ms !== undefined ? { timeout_ms: rec.timeout_ms } : {}),
+          ...(rec.focus !== undefined ? { focus: rec.focus } : {}),
+          ...(rec.focusHops !== undefined ? { focusHops: rec.focusHops } : {}),
+          ...(rec.focus_hops !== undefined ? { focus_hops: rec.focus_hops } : {}),
         });
       }
     }
@@ -420,6 +452,91 @@ export async function openFor(
   return { adapter, schema, id: entry.id };
 }
 
+/**
+ * Resolve sibling environments of a logical database for read-only multi-environment fan-out (`envs: "all" | string[]`).
+ */
+export function resolveFanoutEntries(
+  registry: Registry,
+  asked: unknown,
+  envsRaw: unknown,
+  fallbackConnection?: string,
+): { database: string; entries: Array<EnrichedConnection<PublicConnection>> } {
+  let wantedEnvs: 'all' | string[];
+  if (envsRaw === 'all' || envsRaw === '*') {
+    wantedEnvs = 'all';
+  } else if (typeof envsRaw === 'string') {
+    const parts = envsRaw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!parts.length) {
+      throw new ToolError('invalid_argument', '`envs` must be "all" or a non-empty list of environment names (e.g. ["local", "staging"]).');
+    }
+    wantedEnvs = parts.length === 1 && (parts[0] === 'all' || parts[0] === '*') ? 'all' : parts;
+  } else if (Array.isArray(envsRaw)) {
+    const parts = envsRaw.map((v) => (typeof v === 'string' ? v.trim() : '')).filter(Boolean);
+    if (!parts.length || parts.length !== envsRaw.length) {
+      throw new ToolError('invalid_argument', '`envs` must be "all" or a non-empty array of environment name strings.');
+    }
+    wantedEnvs = parts.length === 1 && (parts[0] === 'all' || parts[0] === '*') ? 'all' : parts;
+  } else {
+    throw new ToolError('invalid_argument', '`envs` must be "all" or an array of environment names (e.g. ["local", "staging"]).');
+  }
+
+  const enriched = listEnrichedConnections(registry);
+  if (!enriched.length) {
+    throw new ToolError('not_found', 'No connections are configured.');
+  }
+  const known = enriched.map((c) => c.id).join(', ');
+
+  const rawAsked = typeof asked === 'string' ? asked.trim() : '';
+  let dbPool: Array<EnrichedConnection<PublicConnection>> = [];
+
+  if (rawAsked) {
+    const selector = parseEnvironmentSelector(rawAsked);
+    const dbLookup = (selector?.database ?? rawAsked).trim().toLowerCase();
+    if (dbLookup) {
+      dbPool = enriched.filter((c) => c.database.toLowerCase() === dbLookup);
+      if (!dbPool.length) {
+        const named = enriched.find((c) => c.id === rawAsked || c.name.toLowerCase() === dbLookup);
+        if (named) {
+          dbPool = enriched.filter((c) => c.database.toLowerCase() === named.database.toLowerCase());
+        }
+      }
+      if (!dbPool.length) {
+        throw new ToolError('not_found', `No database or connection called "${selector?.database || rawAsked}". Known: ${known}.`);
+      }
+    }
+  }
+
+  if (!dbPool.length) {
+    const anchorId = fallbackConnection ?? registry.active;
+    const anchor = (anchorId ? enriched.find((c) => c.id === anchorId || c.name === anchorId) : undefined) ?? enriched[0];
+    dbPool = enriched.filter((c) => c.database.toLowerCase() === anchor.database.toLowerCase());
+  }
+
+  const database = dbPool[0].database;
+  if (wantedEnvs === 'all') {
+    return { database, entries: dbPool };
+  }
+
+  const selected: Array<EnrichedConnection<PublicConnection>> = [];
+  const seenIds = new Set<string>();
+  for (const wanted of wantedEnvs) {
+    const matches = filterConnectionsByEnv(dbPool, wanted);
+    if (!matches.length) {
+      throw new ToolError('not_found', `Database "${database}" has no "${wanted}" environment. Available: ${describeEnvList(dbPool)}.`);
+    }
+    for (const m of matches) {
+      if (!seenIds.has(m.id)) {
+        seenIds.add(m.id);
+        selected.push(m);
+      }
+    }
+  }
+  return { database, entries: selected };
+}
+
 /** The deep link a result can be opened at, for the human beside the agent. */
 export const linkTo = (conn: string, segment: string) => `/${encodeURIComponent(conn)}/${segment}`;
 
@@ -468,6 +585,38 @@ export interface AgentActivityEntry {
     structuredContent?: Record<string, unknown>;
     content: Array<{ type: 'text'; text: string }>;
   };
+}
+
+export interface AuditSinkEntry {
+  ts: string;
+  via: 'mcp' | 'console';
+  tool: string;
+  connection?: string;
+  database?: string;
+  env?: string;
+  tier?: string;
+  fanout?: number;
+  ok: boolean;
+  errorCode?: string;
+  ms: number;
+  rowsRead?: number;
+  rowsWritten?: number;
+  rowsDeleted?: number;
+  rowsRemaining?: number;
+  redacted?: boolean;
+  dryRun?: boolean;
+}
+
+let globalAuditSink: ((entry: AuditSinkEntry) => void) | undefined;
+const auditSinkByRegistry = new WeakMap<Registry, (entry: AuditSinkEntry) => void>();
+
+export function setAuditSink(sink: ((entry: AuditSinkEntry) => void) | undefined, registry?: Registry): void {
+  if (registry) {
+    if (sink) auditSinkByRegistry.set(registry, sink);
+    else auditSinkByRegistry.delete(registry);
+    return;
+  }
+  globalAuditSink = sink;
 }
 
 const MAX_ACTIVITY = 50;
@@ -533,6 +682,7 @@ export function recordAgentActivity(
     answer: {
       isError: boolean;
       structuredContent?: Record<string, unknown>;
+      _meta?: { 'tablewalk/code': ErrorCode };
       content: Array<{ type: 'text'; text: string }>;
     };
   },
@@ -547,6 +697,8 @@ export function recordAgentActivity(
         ? entry.args.connection
         : (registry.active ?? undefined);
   const rowsRead = typeof stats.rowsRead === 'number' ? stats.rowsRead : undefined;
+  const rowsWritten = typeof stats.rowsWritten === 'number' ? stats.rowsWritten : undefined;
+  const rowsDeleted = typeof stats.rowsDeleted === 'number' ? stats.rowsDeleted : undefined;
   const rawText = entry.answer.content[0]?.text ?? '';
   const boundedAnswer =
     rawText.length <= MAX_ANSWER_TEXT
@@ -564,9 +716,10 @@ export function recordAgentActivity(
               }
             : {}),
         };
+  const nowIso = new Date().toISOString();
   const item: AgentActivityEntry = {
     seq: ++st.seq,
-    at: new Date().toISOString(),
+    at: nowIso,
     via: entry.via,
     tool: entry.tool,
     ...(conn ? { connection: conn } : {}),
@@ -575,8 +728,8 @@ export function recordAgentActivity(
     isError: entry.answer.isError,
     ...(entry.answer.isError ? { error: rawText.slice(0, 300) } : {}),
     ...(rowsRead !== undefined ? { rowsRead } : {}),
-    ...(typeof stats.rowsWritten === 'number' ? { rowsWritten: stats.rowsWritten } : {}),
-    ...(typeof stats.rowsDeleted === 'number' ? { rowsDeleted: stats.rowsDeleted } : {}),
+    ...(rowsWritten !== undefined ? { rowsWritten } : {}),
+    ...(rowsDeleted !== undefined ? { rowsDeleted } : {}),
     ...(structured?.dryRun === true ? { dryRun: true } : {}),
     ...(typeof structured?.undoId === 'number' ? { undoId: structured.undoId } : {}),
     links: collectLinks(structured),
@@ -584,6 +737,36 @@ export function recordAgentActivity(
   };
   st.entries.unshift(item);
   if (st.entries.length > MAX_ACTIVITY) st.entries.length = MAX_ACTIVITY;
+
+  const sink = auditSinkByRegistry.get(registry) ?? globalAuditSink;
+  if (sink) {
+    const enriched = conn ? listEnrichedConnections(registry).find((c) => c.id === conn) : undefined;
+    const policy = conn ? getConnectionRuntimePolicy(registry, conn) : undefined;
+    const egress = conn ? (sessionEgress.get(conn) ?? 0) : undefined;
+    const rowsRemaining = policy?.maxRows !== undefined && egress !== undefined ? Math.max(0, policy.maxRows - egress) : undefined;
+    const redacted = Boolean(policy?.redactsRows || structured?.redacted === true);
+    const fanoutCount = structured?.fanout === true && typeof structured.count === 'number' ? structured.count : undefined;
+    const dbName = typeof structured?.database === 'string' ? structured.database : enriched?.database;
+    sink({
+      ts: nowIso,
+      via: entry.via,
+      tool: entry.tool,
+      ...(conn && !fanoutCount ? { connection: conn } : {}),
+      ...(dbName ? { database: dbName } : {}),
+      ...(enriched?.env ? { env: enriched.env } : {}),
+      ...(enriched?.tier ? { tier: enriched.tier } : {}),
+      ...(fanoutCount !== undefined ? { fanout: fanoutCount } : {}),
+      ok: !entry.answer.isError,
+      ...(entry.answer.isError ? { errorCode: entry.answer._meta?.['tablewalk/code'] ?? 'internal' } : {}),
+      ms: entry.ms,
+      ...(rowsRead !== undefined ? { rowsRead } : {}),
+      ...(rowsWritten !== undefined ? { rowsWritten } : {}),
+      ...(rowsDeleted !== undefined ? { rowsDeleted } : {}),
+      ...(rowsRemaining !== undefined ? { rowsRemaining } : {}),
+      ...(redacted ? { redacted: true } : {}),
+      ...(structured?.dryRun === true ? { dryRun: true } : {}),
+    });
+  }
 }
 
 export function agentActivity(

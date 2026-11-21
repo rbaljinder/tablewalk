@@ -41,6 +41,10 @@ export const say = defineMessages({
   maskedRowsTitle: 'Sensitive columns are deterministically masked on every row read.',
   restricted: 'restricted',
   restrictedColumnsTitle: 'Blocked or hidden tables and columns are withheld from this connection.',
+  focused: 'focused',
+  focusedTitle: 'Scoped to a foreign-key table neighborhood (--focus).',
   maxRowsBadge: '≤ {max} rows',
   maxRowsTitle: 'Session row budget: at most {max} rows per session.',
+  timeoutBadge: '≤ {ms} ms',
+  timeoutTitle: 'Per-call statement deadline: {ms} ms.',
 });
