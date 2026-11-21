@@ -204,8 +204,12 @@ npx tablewalk --mcp --config ./tablewalk.json   # speaks MCP on stdio
 ```
 
 Or point it at a database instead of a config file: `"args": ["tablewalk",
-"--mcp", "--db", "postgres://localhost/app"]`. **Twenty-four tools** —
-eighteen read-only, and six writes offered only when a connection is
+"--mcp", "--db", "postgres://localhost/app"]` — or connect straight to a
+running loopback browser session over Streamable HTTP at
+`http://localhost:4111/mcp` (or set `TABLEWALK_MCP_URL=http://localhost:4111/mcp`
+for stdio-only clients) so the browser and the agent share one connection pool,
+Undo stack, row-egress counter, and live activity trail. **Twenty-six tools** —
+twenty read-only, and six writes offered only when a connection is
 `"writable": true`. Every answer carries a deep link the human beside the
 agent can open in the UI, and says what it cost in rows and milliseconds.
 
@@ -216,30 +220,32 @@ agent can open in the UI, and says what it cost in rows and milliseconds.
 | `schema_summary` | orientation in a few hundred tokens — hubs, event tables, the deepest reference chain |
 | `tables` / `table` | the list; then a table's columns, DDL, and foreign keys in **both** directions |
 | `find` | where a name lives, across every table and column |
-| `query` | the query language; its errors carry suggestions and the table's real columns, so a mistake is fixed in one retry |
+| `query` | the query language, or a named `view` from `tablewalk.json` (even on `"hidden"`-column connections); errors carry suggestions and the table's real columns |
 | `breakdown` | counts and sums grouped by something — `invoice count by month invoice_date` |
 | `record` | one row, its human name, and everything that points at it |
-| `sql` | read-only, for whatever the language cannot say; never over tablewalk's own tables |
-| `export` | a result written to a file (csv, ndjson, json; optionally gzip) in the temp directory, not into the reply — for more rows than fit in context; `query` exports are unbounded, `sql` exports stop at 100,000 |
+| `sql` | read-only `SELECT` or a named `saved` query from `tablewalk.json`; never over tablewalk's own tables |
+| `export` | a `query`, named `view`, `sql` or `saved` query written to a file (csv, ndjson, json; optionally gzip and `redact: true`) in the temp directory, not into the reply |
 | `explain` | the planner's account of a statement without running it — feed a `query` answer's `sql` back |
 | `profile` | what a column actually holds: null share, distinct count, range, the values that repeat |
 | `lint` | what the shape will cost: keyless tables, unindexed references, naive timestamps |
+| `anomalies` | data-level counterpart to `lint`: temporal inversions, dangling soft-delete lifecycles, and nullable FKs that are >=95% populated with null outliers (counts only, works on `"rows": false` too) |
 | `change_impact` | what breaks if you change a table or column — asked *before* the migration is written |
-| `diff` | whether two connections are still the same shape |
+| `verify_ddl` | runs candidate DDL in a disposable copy (SQLite) or `BEGIN … ROLLBACK` (writable Postgres) and returns the schema `diff` and newly introduced `lint` findings without altering the database |
+| `diff` | whether two connections or environments (`{"from": "@local", "to": "@prod"}`) are still the same shape |
 | `order` | what has to exist before what, and the reverse for teardown |
-| `fixture` | a real row and the graph it belongs to, ready to replay into a test database |
+| `fixture` | a real row and the graph it belongs to (with optional `redact: true` deterministic PII masking), ready to replay into a test database |
 | `refresh` | re-read the catalog after a migration |
-| `connections` | list them; the call to start with |
+| `connections` | list connections, logical database groups, environments, and sibling postures; the call to start with |
 
 **Writing** — offered only when a connection is marked `"writable": true`; a
 read-only server does not list tools it would refuse.
 
 | tool | what it does |
 |---|---|
-| `insert` | one row; answers with what the database stored, defaults filled and key assigned |
-| `update` | one row, by its primary key |
+| `insert` | one row; answers with what the database stored, defaults filled and key assigned (`dryRun: true` checks constraints and defaults inside `BEGIN … ROLLBACK`) |
+| `update` | one row, by its primary key (`dryRun: true` checks constraints and type coercion inside `BEGIN … ROLLBACK`) |
 | `delete` | reports its impact first — every table pointing at the row, counts, `ON DELETE` rules — and removes nothing until the person says yes: a client that supports elicitation asks them every time (a model-supplied `confirm: true` is ignored); otherwise call it again with `confirm: true` |
-| `insert_graph` / `delete_graph` | several related rows in one all-or-nothing transaction. `delete_graph` asks the same way `delete` does. Graph writes are not journaled: they return no `undoId` and `revert` cannot undo them |
+| `insert_graph` / `delete_graph` | several related rows in one all-or-nothing transaction (`insert_graph` also accepts `dryRun: true`). `delete_graph` asks the same way `delete` does. Graph writes are not journaled: they return no `undoId` and `revert` cannot undo them |
 | `revert` | preview the last write, then confirm with `confirm: true` and that preview's `next.id` as `expectedId`; raw `sql` writes have no general inverse |
 
 Write answers carry `rowsInserted` / `rowsWritten` / `rowsDeleted`.
@@ -269,17 +275,32 @@ real row out of development, put it into a test database, tear it down after.
 
 Rows entering an agent's context leave the machine — point it at development
 databases. Where you want that enforced rather than remembered, mark a
-connection `"rows": false`: the catalog, row counts, null fractions, plans and
-`lint` still answer, and everything that would return a value out of a row
+connection `"rows": false`: the catalog, row counts, null fractions, plans,
+`lint` and `anomalies` still answer, and everything that would return a value out of a row
 refuses — at the adapter, so every endpoint and every tool at once. A server
-whose connections are all shape-only does not list `query`, `sql` or `record`
-at all.
+whose connections are all shape-only does not list `query`, `sql`, `record`,
+`breakdown` or `export` at all.
 
-Where only some columns must stay behind (a password hash, an API token), give
-the connection `"hidden": { "account": ["password_hash"], "*": ["*_token"] }`
-instead: the catalog and every answer leave those columns out, a query that
-names one is refused, and raw SQL is refused on that connection. A database
-role without `SELECT` on them is stronger still.
+Where only some columns or tables must stay behind (a password hash, an API
+token, an internal audit or secrets table), give the connection
+`"hidden": { "account": ["password_hash"], "*": ["*_token"] }` or a
+`"blocklist": { "tables": ["audit_*", "*_secrets"], "fields": { "*": ["*_token"], "customer": ["tax_id"] } }`
+(top-level or per connection): the catalog, foreign-key graph and every answer
+leave blocked tables, database SQL views (`CREATE VIEW`) and blocked fields out,
+a query or configured view that names or traverses one is refused, and raw SQL
+(`sql`, `explain`, `verify_ddl`) is withheld and refused on that connection. A
+database role without `SELECT` on them is stronger still.
+
+For a local secret vault or ephemeral agent session, pipe the config in memory
+instead of writing secrets to disk — `--config <(vault read db/staging)`,
+`{ vault read db/staging; cat; } | npx tablewalk --mcp --config -`, or
+`TABLEWALK_CONFIG_JSON` — with inline `"secrets"` / `"dotenv"` variables
+resolved only inside `Registry.environment`, `"active": "billing@staging"` and
+`"only": true` to expose one target, `--lazy` so MCP handshake answers before
+the database is dialed, `"lease": { "idleSeconds": 30, "maxSeconds": 300 }` (or
+`--lease 5m`) to evict idle sockets and close connections when the lease ends,
+or `--query "invoice status = open"` / `--call schema_summary` for a single
+fast JSON lookup that closes its connection on exit.
 
 A call is bounded in time and in what it counts. Statements run under a
 30-second cap, and `sql` takes `timeout_ms` to lower it for one statement:
@@ -297,17 +318,20 @@ schema, and the `__tablewalk_` and `tablewalk_auth` names they carried before
 mistri — whether the statement names them, reaches them
 through a view, or could only name a table when it runs.
 
-The shelf your team already keeps is readable too. Named queries and page
-definitions from your `tablewalk.json`, and pages saved from the browser, are
-served as MCP **resources** — `tablewalk://{connection}/queries` and
-`tablewalk://{connection}/pages` — beside the schema brief. Reading them does
-not run them; they are the questions your team decided were worth asking, in
-front of an agent that would otherwise re-derive them badly.
+The shelf your team already keeps is readable and runnable too. Named views,
+named queries and page definitions from your `tablewalk.json`, and pages saved
+from the browser, are served as MCP **resources** —
+`tablewalk://{connection}/views`, `tablewalk://{connection}/queries`,
+`tablewalk://{connection}/pages` and `tablewalk://{connection}/page/{page}` —
+beside the schema brief. Reading them does not run them; `query`, `sql` and
+`export` run named `view` and `saved` entries on demand. From the browser,
+**Copy brief for agent** (`⌘K` or `···`) copies a compact Markdown handoff of
+the current record, query or schema with its deep link and exact MCP call.
 
 And you can watch all of it: the **Agent console** (⌘K → "Agent console")
-drives the same tools by hand through the same code path, showing each
-answer exactly as an agent receives it — stats, token cost, and the deep
-links back into the UI.
+drives the same tools by hand through the same code path and streams a live
+trail of external MCP calls hitting the shared server — stats, token cost, Undo
+sync, and one-click deep links back into the UI.
 
 ## A config file, and a team's surfaces
 
@@ -318,16 +342,28 @@ on should live in version control rather than in one person's browser.
 ```json
 {
   "connections": [
-    { "name": "app (local)", "url": "postgres://localhost/app", "schemas": ["public"] },
-    { "name": "production",  "url": "postgres://reader@prod/app", "rows": false },
+    { "name": "app-local",   "url": "postgres://localhost/app", "database": "app", "env": "local", "writable": true, "schemas": ["public"] },
+    { "name": "app-staging", "url": "postgres://reader@staging/app", "database": "app", "env": "staging" },
+    { "name": "production",  "url": "postgres://reader@prod/app", "database": "app", "env": "prod", "rows": false },
     { "name": "analytics",   "url": "postgres://user:pass@warehouse/an" },
     { "name": "cache",       "url": "./var/cache.sqlite" }
   ]
 }
 ```
 
-A PostgreSQL entry can size its read pool, `"pool": { "read": 16 }` (1 to 64;
-the default is 4, or `--read-pool`). The database browser writes through one
+Connections that share a logical `database` (either declared explicitly with
+`"database"` and `"env"`, or inferred from names like `app-local`, `app_staging`,
+`app (prod)`, or `app-replica`) appear as one promotion pipeline across the top
+bar, the SQL editor, and the Connections screen — switching environments keeps
+your current table, query, or record open when that table exists on the other
+side. In MCP, every tool accepts `"connection": "app@staging"`, `"@staging"`, or
+`"env": "staging"`, and implicit writes while a `prod` environment is active are
+refused unless `"connection"` or `"env": "prod"` is named explicitly.
+
+A PostgreSQL entry can size its read pool and idle window,
+`"pool": { "read": 16, "idleSeconds": 300, "minIdle": 2 }` (`read` 1 to 64, default
+4 or `--read-pool`; `idleSeconds` 1 to 86400, default 300 or `TABLEWALK_POOL_IDLE`;
+`minIdle` 0 to 64, default 2 warm readers). The database browser writes through one
 connection, one write at a time, which its Undo needs. A write waits at most
 `--lock-timeout` (5 s) for a row another transaction holds, and is then
 refused with a retry. `--pooler transaction` is for a deployment behind
@@ -576,19 +612,28 @@ mistri --app <dir>            an App, served: the App framework's, npx @mistriwo
       --auth-proxy-header <name>
                               behind a proxy that signs people in: the header
                               it sets with the user (X-Forwarded-User). Requests
-                              from beyond loopback must carry it; it is
-                              believed only from loopback and --auth-proxy-from
-                              peers. Every write is journaled with it
+                              from beyond loopback (or proxied on loopback) must
+                              carry it; it is believed only from loopback and
+                              --auth-proxy-from peers. Every write is journaled
+                              with it
       --auth-proxy-from <address|CIDR>
                               a peer, beside loopback, whose
                               --auth-proxy-header value is believed: the
                               proxy's own address (10.0.0.7). A separate list
                               from --trust-proxy; repeatable or
                               comma-separated, or set TABLEWALK_AUTH_PROXY_FROM
-      --config <path>         read connections from this file; the paths in
-                              it are relative to its folder. A file that lists
-                              Apps is mistri's to serve, and is refused
+      --config <path|->       read connections from this file, or - for piped
+                              vault JSON or .env lines on stdin (or set
+                              TABLEWALK_CONFIG_JSON); paths in a file are
+                              relative to its folder. A file that lists Apps is
+                              mistri's to serve, and is refused
       --no-config             ignore any config file
+      --connection <name>     select the active connection at startup (id, name,
+                              or db@env)
+      --env <name>            select the active environment at startup (local,
+                              staging, prod)
+      --lease <duration>      bound connection lifetime (e.g. 120, 5m): close
+                              idle connections and expire when the lease ends
       --base-path <path>      the path a reverse proxy serves this server
                               under, like /tools: every address, asset, API
                               call, cookie and link carries it. Or "basePath"
@@ -603,8 +648,15 @@ mistri --app <dir>            an App, served: the App framework's, npx @mistriwo
       --open                  open a browser once the server is up
       --mcp                   speak MCP on stdio instead of serving HTTP
                               (the database browser's tools; no App)
+      --lazy                  with --mcp: answer handshake before dialing the
+                              database (automatic for piped --config -)
       --tools <name>          explore, migrate, seed, or full (the default)
       --output-schema         advertise each tool's output shape in tools/list
+      --query <q>             run one query or breakdown, print JSON, close all
+                              connections, and exit
+      --call <tool>           run one MCP tool by name, print JSON, close all
+                              connections, and exit
+      --args <json>           with --call or --query: JSON object of arguments
       --export <fmt>          print the schema as md, mermaid or json, then exit
                               (an App's brief, types, openapi and asyncapi are
                               mistri's)
@@ -676,7 +728,7 @@ as given, from the current directory.
 An option it does not recognize is an error, not a shrug: `tablewalk --prot
 4111` says so rather than quietly serving the default port.
 
-`--tools` offers one job's worth of tools instead of all twenty-four. Most
+`--tools` offers one job's worth of tools instead of all twenty-six. Most
 sessions are one job — an agent reading a schema does not need the graph
 writers, one seeding a fixture does not need `explain` — and the listing is a
 fixed cost paid on connect, before anything is asked. `connections` and
@@ -727,9 +779,11 @@ private network belongs behind a proxy that authenticates.
 
 When the database browser is behind one — Cloudflare Access, oauth2-proxy, Tailscale's identity
 headers — say so: `--auth-proxy-header X-Forwarded-User` (or the header your
-proxy sets). Every request from beyond loopback must then carry it, so a
-request that skipped the proxy is refused at the door, and every write in the
-journal says who made it. That is the proxy's decision carried into this
+proxy sets). Every request from beyond loopback — or on loopback when forwarded
+headers, a non-loopback `Host`, or `--trust-proxy` show a proxy is in front —
+must then carry it, so a request that skipped the proxy is refused at the door,
+and every write in the journal says who made it (`/healthz` and `/readyz`
+answer ahead of the door). That is the proxy's decision carried into this
 process, not a login of tablewalk's own; per-user tabs, pins and history are
 still the browser's. The header is believed only from loopback and from the
 peers `--auth-proxy-from` names: give it the proxy's own address
@@ -755,7 +809,7 @@ loopback, and `--allowed-host` for reaching it by a name other than
 
 **Desktop** — a native app (macOS, Windows, Linux) is built with every
 release; its downloads open to the public with the source repository.
-macOS is signed and notarised, so it opens normally; Windows is not signed
+macOS is signed and notarized, so it opens normally; Windows is not signed
 yet, so its first open needs an "open anyway" past SmartScreen; `npx tablewalk`
 and the container need no such thing.
 
@@ -781,8 +835,8 @@ cannot drift out of reach of the person who needs it.
 Single keys work when the caret is not in a text field, and never through a
 dialog: the page under a modal is not taking keys.
 
-The `···` menu carries **Theme** — match the system, always light, always
-dark — and the rows-per-page control lives with the pager.
+The `···` menu carries **Preferences** and **Dark mode** — visual theme, color
+mode, density — and the rows-per-page control lives with the pager.
 
 In a result grid: arrows move a cell cursor, `Enter` opens that row's record,
 `Space` glances at it without leaving the list, `⌘C` copies the cell,
@@ -794,7 +848,9 @@ name, and `j`/`k` or the arrows there step through that list, past its page too.
 
 ```bash
 npm install
-npm test          # typecheck, lint, client checks, the unit suite, the component tests
+npm run check     # typecheck, lint, client checks, boundary, formatting
+npm test          # the Node test suite
+npm run test:components  # Vitest component tests
 npm run demo      # build a demo database and open it
 npm run build     # emit dist/, runnable by plain node
 ```

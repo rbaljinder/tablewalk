@@ -42,6 +42,8 @@ import { noteAuthorRequest } from '@mistriwork/engine/server/http/refusalReport.
 import { send } from '@mistriwork/engine/server/http/reply.js';
 import { route, type Route } from '@mistriwork/engine/server/http/router.js';
 import { clientTrusted, type Bound } from '@mistriwork/engine/server/http/trust.js';
+import { layoutsFor, pagesPath } from '@mistriwork/engine/server/layouts.js';
+import { bindShelf } from '../mcp.js';
 import { workbenchReads } from './workbenchReads.js';
 
 /**
@@ -85,7 +87,10 @@ const ROUTES: readonly Route<RequestContext>[] = [
   /* Everything else that takes a body, on the source the body names (dataRoutes.ts). */
   async (ctx) => {
     if (ctx.req.method !== 'POST' || !ctx.path.startsWith('/api/')) return false;
-    await postData(ctx, BROWSER_DATA);
+    await postData(ctx, {
+      ...BROWSER_DATA,
+      routes: async (post) => (await httpOperationRoutes(post)) || (await authoringRoutes(post, ctx.trusted)),
+    });
     return true;
   },
   /* Only the API needs a database: the page itself is served with nothing open, so the one screen that can ask for a connection is not behind the requirement. */
@@ -118,9 +123,9 @@ export async function handleBrowser(req: IncomingMessage, res: ServerResponse, u
       req,
       res,
       bound,
-      /* The API in JSON; a page in a line of text, since no script is there to read JSON. A write's Origin is only ever asked of the API. */
+      /* The API and MCP in JSON; a page in a line of text, since no script is there to read JSON. */
       refuse: (check, status, error) => {
-        if (check === 'origin' || path.startsWith('/api/')) send(res, status, { error });
+        if (check === 'origin' || path.startsWith('/api/') || path === '/mcp') send(res, status, { error });
         else {
           res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8' });
           res.end(`${error}\n`);
@@ -165,6 +170,12 @@ export async function handleBrowser(req: IncomingMessage, res: ServerResponse, u
     trusted: clientTrusted(bound),
     appConfigured: false,
   };
+  bindShelf(registry, {
+    views: ctx.configViews,
+    queries: ctx.configQueries,
+    pages: ctx.configPages,
+    savedPages: (connection) => layoutsFor(connection, pagesPath()),
+  });
   if (closedToCrawlers(req, res, path)) return;
   /* Who this request's writes are, for the record history: the operator's proxy header, never a body. */
   const attribution = { actor: identity.who?.trim() || undefined, via: 'workbench' as const };

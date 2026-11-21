@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.0.0-rc.18
+
+Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.77`.
+
+- PostgreSQL pools keep two warm reader connections by default (`"pool": { "minIdle": 2, "idleSeconds": 300 }` or
+  `TABLEWALK_POOL_IDLE`), and `--auth-proxy-header` refuses proxied loopback requests that carry no user header while
+  keeping `/healthz` and `/readyz` open ahead of the door.
+- `POST /api/agent/call` defaults `connection` to the tab's resolved connection instead of `registry.active`, so Find a
+  value, Check the shape and Agent console calls act on the database open in that tab, and `diff` honors `from`.
+- On an HTTP listener reachable beyond loopback, `export` is withheld from `/api/agent/tools` and refused over
+  `/api/agent/call`, `/api/connections/demo` is refused, and session connections are bounded.
+- `export` reports `stats.rowsRead` and advances `rowsReadThisSession`; `fixture` and `record` refuse keyless tables,
+  and `fixture` SQL qualifies non-default schemas and formats dates, byte arrays and JSON documents cleanly.
+- The connection dialog's URL preview masks literal passwords even when host or port uses `${ENV}` or the user is empty,
+  and preserves `${ENV}` in database names; the Agent console coerces integer and array arguments (`revert`,
+  `insert_graph`, `delete_graph`, `record.keys`, `explain.params`) and links only `link` fields; raw SQL writes refresh
+  cached views and Undo; `?look=` links can pick built-in kit looks as well as host looks.
+- Loopback browser sessions now serve Streamable HTTP MCP directly at `POST /mcp` (and `tablewalk --mcp` bridges stdio
+  to a running server when `TABLEWALK_MCP_URL` is set), sharing one `Registry`, Undo stack, row-egress counter and live
+  MCP activity trail inside the Agent console.
+- Two new read-only MCP tools bring the server to twenty-six tools: `anomalies` scans stored rows using bounded counts
+  (working on `"rows": false` connections too) for temporal inversions, dangling soft-delete lifecycles and nullable FKs
+  populated on >=95% of rows with null outliers; `verify_ddl` runs candidate migration DDL in an isolated SQLite copy or
+  rolled-back PostgreSQL transaction and returns the resulting schema `diff` and newly introduced `lint` findings.
+- `insert`, `update` and `insert_graph` accept `dryRun: true` to execute inside `BEGIN … ROLLBACK` and return coerced
+  values, defaults, generated keys or real constraint errors without committing or recording Undo history.
+- `fixture` and `export` accept `redact: true` (and `redact_columns`) to deterministically mask emails, phones, names,
+  addresses and secrets while preserving primary keys, foreign keys, `CHECK` vocabularies and `varchar` lengths.
+- Configured multi-table `views` and `queries` in `tablewalk.json` are exposed on the MCP shelf
+  (`tablewalk://{connection}/views`, `tablewalk://{connection}/page/{page}`) and runnable by name in `query`, `sql` and
+  `export` (with `views` working across `"hidden"`-column connections); **Copy brief for agent** (`⌘K` / `···`) copies a
+  Markdown handoff of the current record, query or schema to the clipboard.
+- Connections sharing a logical database across environments (`"database"` and `"env"` in `tablewalk.json`, or inferred
+  from names like `billing-local`, `billing-staging`, `billing-prod`) group together in Connections, switch in place
+  from the topbar, `⌘K` palette, SQL editor and Agent console while keeping the open table, query or record, and can be
+  targeted by MCP tools with `env` or `db@env` / `@env` selectors (with implicit unaddressed writes to `prod` refused
+  when non-production siblings exist).
+- Piped vault configs (`--config -`, process-substitution FIFOs, `TABLEWALK_CONFIG_JSON`) load connections and inline
+  `"secrets"` / `"dotenv"` variables in memory without writing to disk, support `--lazy` MCP handshake and fast one-shot
+  `--query <q>` / `--call <tool> [--args <json>]` CLI lookups, enforce `"lease"` (`idleSeconds`, `maxSeconds`, `--lease`)
+  with deterministic connection teardown on idle/expiry/EOF, and enforce top-level or per-connection `"blocklist"` rules
+  (`tables` and `fields` wildcards) across every catalog, query, view, profile, export and write while refusing raw SQL.
+- `tablewalk journal` resolves credentials and refuses in-memory SQLite and unsupported schemes before touching the
+  filesystem; `--diff` and `--lint` close their connections and let stdout drain before exiting; the desktop app
+  replaces its server and updates `lastDatabase` only after the new database opens, falling back to Welcome if a
+  remembered file later fails.
+
 ## 1.0.0-rc.17
 
 - A new MCP tool, `export`, writes a query or a read-only `SELECT` to a file (csv, ndjson or json, optionally gzipped)

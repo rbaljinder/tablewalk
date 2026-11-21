@@ -28,4 +28,7 @@ export const say = defineMessages({
   thisRunsOnTheWrite: 'This runs on the write connection. It is not undoable from here.',
   runAsWriteConfirm: 'Run as write',
   msMs: '{ms} ms',
+  sqlEnvironmentsLabel: '{database} SQL target environments',
+  switchSqlToName: 'Switch SQL editor to {name}',
+  productionWriteWarning: 'Production environment ({target}) — this write executes directly against production and cannot be undone here.',
 });

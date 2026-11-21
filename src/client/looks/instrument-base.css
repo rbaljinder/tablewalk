@@ -82,7 +82,9 @@
     /* ---------- figures elsewhere ---------- */
 
     /* A start's row count stays in the interface face: the chip is a sentence ("30 rows"), not a readout. */
-    & :is(.stat, .pager-range, .conn-meta, .detail-count) { font-family: var(--figures); font-size: var(--text-xs); }
+    & :is(.stat, .pager-range, .conn-meta, .detail-count, .env-pill-mode, .agent-target-posture) {
+      font-family: var(--figures); font-size: var(--text-xs);
+    }
     & .result-head .stat-order { font-family: var(--face-ui); font-size: var(--text-sm); }
   }
 }

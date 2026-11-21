@@ -97,13 +97,11 @@ export async function reintrospect(id = state.activeConnection) {
    shell loads this module (connectionList.js). */
 whenConnectionControls({
   draw(picker) {
-    const connections = state.connections ?? [];
-    // A lone connection with no config file is not worth a picker.
-    picker.hidden = connections.length < 2 && !connections.some((c) => c.source === 'config');
-    /* The picker and the plain `name · dialect` label answer the same question,
-       so exactly one of them is on screen. With a single unconfigured database
-       there is nothing to pick between and the label is the honest form — and
-       it still opens Connections, which is how a second one gets added. */
+    const connections = /** @type {any[]} */ (state.connections ?? []);
+    const activeConn = connections.find((c) => c.id === state.activeConnection);
+    const showPosture = Boolean(activeConn && (activeConn.tier === 'prod' || activeConn.tier === 'staging' || activeConn.explicit));
+    // A lone connection with no config file and no risk posture is not worth a picker.
+    picker.hidden = connections.length < 2 && !connections.some((c) => c.source === 'config') && !showPosture;
     $('db-label').hidden = !picker.hidden;
     if (picker.hidden) {
       unmount(picker);
@@ -116,6 +114,7 @@ whenConnectionControls({
         connections,
         active: state.activeConnection,
         onSelect: (id) => void selectConnection(id),
+        onSelectSibling: (id) => void selectConnection(id, { preserveContext: true }),
         onReintrospect: reintrospect,
         onManage: () => void manage?.(),
       }),
@@ -124,20 +123,40 @@ whenConnectionControls({
   retire: unmount,
 });
 
-export async function selectConnection(id, { reload = false } = {}) {
+export async function selectConnection(id, { reload = false, preserveContext = false } = {}) {
   if (!canManageConnections()) return;
   if (!reload && id === state.activeConnection && !connectionTransitionPending()) return;
+  const priorTop = preserveContext && Array.isArray(state.stack) ? state.stack.at(-1) : undefined;
+  const priorQuery = preserveContext ? ($('query')?.value ?? '') : '';
   const transition = beginConnectionTransition();
   try {
     const { schema } = await api('/api/connections/select', { id });
     if (!transition.isCurrent()) return;
     state.schema = schema;
     state.activeConnection = id;
-    /* Switching database invalidates the trail entirely: a crumb naming a
-       table in the old one would look like a step you could walk back to. */
-    state.stack = [];
-    state.page = 0;
-    $('query').value = '';
+    /* Switching across unrelated databases invalidates the trail; switching
+       between sibling environments of one logical database preserves the room
+       when the target table exists in the new environment's schema. */
+    let missingTable = '';
+    if (priorTop && typeof priorTop.table === 'string' && priorTop.table) {
+      const matched = (schema.tables ?? []).find(
+        (t) => t.id === priorTop.table || t.name === priorTop.table || t.id.toLowerCase() === priorTop.table.toLowerCase(),
+      );
+      if (matched) {
+        state.stack = [{ ...priorTop, table: matched.id }];
+        state.page = 0;
+        $('query').value = priorQuery;
+      } else {
+        state.stack = [];
+        state.page = 0;
+        $('query').value = '';
+        missingTable = priorTop.table;
+      }
+    } else {
+      state.stack = [];
+      state.page = 0;
+      $('query').value = '';
+    }
     $('db-label').textContent = `${schema.label} · ${schema.dialect}`;
     setTabTitle(say('common.documentTitle', { title: schema.label }));
     await refreshConnections();
@@ -157,6 +176,7 @@ export async function selectConnection(id, { reload = false } = {}) {
        schema and the per-connection loads have landed. */
     connectionChanged();
     render();
+    if (missingTable) toast(say('tableNotInEnvironment', { table: missingTable, name: schema.label }), 'ok');
   } catch (err) {
     if (!transition.isCurrent()) return;
     toast(err.message, 'error');

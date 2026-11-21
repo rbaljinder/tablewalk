@@ -9,10 +9,10 @@ import { randomUUID } from 'node:crypto';
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { PostgresAdapter } from '@mistriwork/engine/adapters/postgres.js';
-import type { DatabaseSchema } from '@mistriwork/engine/host';
+import { Registry, type DatabaseSchema } from '@mistriwork/engine/host';
 import { liveSkip } from './live.js';
 import { buildFixture, dropFixture } from './support/postgresFixture.js';
-import { findValue } from '../src/server/mcp.js';
+import { findValue, runTool } from '../src/server/mcp.js';
 import { deleteGraph, insertGraph } from '../src/server/graph.js';
 import { changeImpact } from '../src/server/changeimpact.js';
 
@@ -170,6 +170,60 @@ describe("the database browser's tools, against a real Postgres", { skip: liveSk
         if (dep.indexed === undefined) {
           assert.ok(!impact.notes.some((n) => n.includes(`No index leads on ${dep.table}`)));
         }
+      }
+    });
+  });
+
+  describe('verify_ddl', () => {
+    test('requires writable: true on Postgres, rolls back transactional DDL, and catches live row violations', async (t) => {
+      const registry = new Registry();
+      registry.add({ id: 'pg_ro', name: 'pg_ro', url: LIVE!, schemas: [FIXTURE], writable: false, source: 'config' });
+      registry.add({ id: 'pg_rw', name: 'pg_rw', url: LIVE!, schemas: [FIXTURE], writable: true, source: 'config' });
+      t.after(() => registry.closeAll());
+
+      const roDenied = await runTool(registry, 'verify_ddl', {
+        connection: 'pg_ro',
+        sql: `CREATE TABLE ${FIXTURE}.tw_verify_probe (id serial primary key)`,
+      });
+      assert.equal(roDenied.isError, true);
+      assert.equal(roDenied._meta?.['tablewalk/code'], 'read_only');
+
+      const rwOk = await runTool(registry, 'verify_ddl', {
+        connection: 'pg_rw',
+        sql: `CREATE TABLE ${FIXTURE}.tw_verify_probe (id serial primary key, created_at timestamp)`,
+      });
+      assert.equal(rwOk.isError, false, rwOk.content[0]?.text);
+      assert.equal(rwOk.structuredContent?.valid, true);
+      assert.equal(rwOk.structuredContent?.mode, 'rollback');
+      const diff = (rwOk.structuredContent?.diff ?? []) as Array<{ table: string }>;
+      assert.ok(diff.some((d) => d.table === at('tw_verify_probe')));
+      const intro = rwOk.structuredContent?.introducedLint as { findings: Array<{ rule: string; table: string }> };
+      assert.ok(intro.findings.some((f) => f.rule === 'timestamp-without-zone' && f.table === at('tw_verify_probe')));
+
+      /* Rolled back cleanly: nothing persisted in the schema. */
+      const refreshed = await runTool(registry, 'refresh', { connection: 'pg_rw' });
+      assert.equal(refreshed.isError, false);
+      const tables = await runTool(registry, 'tables', { connection: 'pg_rw' });
+      assert.ok(!((tables.structuredContent?.tables ?? []) as Array<{ id: string }>).some((tbl) => tbl.id === at('tw_verify_probe')));
+
+      /* Existing null in customer.country_code rejects SET NOT NULL cleanly inside the rolled-back check. */
+      const nullFail = await runTool(registry, 'verify_ddl', {
+        connection: 'pg_rw',
+        sql: `ALTER TABLE ${FIXTURE}.customer ALTER COLUMN country_code SET NOT NULL`,
+      });
+      assert.equal(nullFail.isError, false);
+      assert.equal(nullFail.structuredContent?.valid, false);
+
+      /* Transaction escapes, session timeout overrides, and non-transactional sequence calls are refused upfront. */
+      for (const badPgSql of [
+        `PREPARE TRANSACTION 'tw_escape'; DROP TABLE ${FIXTURE}.customer; CREATE TABLE ${FIXTURE}.escaped(id int)`,
+        `SET LOCAL statement_timeout = 0; SELECT pg_sleep(8)`,
+        `SELECT setval('${FIXTURE}.customer_id_seq', 999)`,
+        `ALTER TABLE ${FIXTURE}.customer ADD COLUMN seq_leak int DEFAULT setval('${FIXTURE}.customer_id_seq', 999)`,
+      ]) {
+        const refused = await runTool(registry, 'verify_ddl', { connection: 'pg_rw', sql: badPgSql });
+        assert.equal(refused.isError, true, `Expected Postgres verify_ddl to refuse: ${badPgSql}`);
+        assert.equal(refused._meta?.['tablewalk/code'], 'invalid_argument');
       }
     });
   });

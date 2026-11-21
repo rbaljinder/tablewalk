@@ -72,6 +72,7 @@ export async function openConnections() {
       onClose: close,
       onOpen: (conn) => void selectConnection(conn.id),
       onAdd: (refresh) => addDialog(undefined, refresh),
+      onCloneEnv: (conn, refresh) => cloneEnvDialog(conn, refresh),
       onEdit: (conn, refresh) => editDialog(conn, refresh),
       onRemove: (conn, refresh) => void removeConnection(conn, refresh),
       onSaveFile: (count) => void saveDialog(count),
@@ -163,16 +164,27 @@ export function addConnection(onAdded) {
   addDialog(onAdded);
 }
 
-function addDialog(onAdded, refresh) {
+function addDialog(onAdded, refresh, preset) {
   const current = workspaceOwner();
   connectionDialog({
-    title: say('addAConnection'),
+    title: preset?.title ?? say('addAConnection'),
+    name: preset?.name,
+    schemas: preset?.schemas,
+    database: preset?.database,
+    env: preset?.env,
     verb: say('addAndOpen'),
-    run: async ({ url, name, schemas }) => {
+    run: async ({ url, name, schemas, database, env }) => {
       if (!current()) return { error: say('theWorkspaceChangedClose') };
       if (!url) return { error: say('aConnectionStringOrFile') };
       try {
-        const data = await api('/api/connections', { url, name, schemas });
+        const payload = {
+          url,
+          name,
+          schemas,
+          ...(database ? { database } : {}),
+          ...(env ? { env } : {}),
+        };
+        const data = await api('/api/connections', payload);
         if (typeof data.added !== 'string') return { error: say('additionWasNotConfirmed') };
         toast(say('added', { name: name || 'connection' }), 'ok');
         if (!current()) return null;
@@ -201,6 +213,19 @@ function addDialog(onAdded, refresh) {
   });
 }
 
+function cloneEnvDialog(conn, refresh) {
+  const baseDb = conn.database || conn.name;
+  const taken = new Set([conn.tier, ...(conn.siblings ?? []).map((s) => s.tier)].filter(Boolean));
+  const nextEnv = ['local', 'staging', 'prod', 'dev', 'replica', 'test'].find((tier) => !taken.has(tier)) ?? 'staging';
+  addDialog(undefined, refresh, {
+    title: say('addEnvironmentForDatabase', { database: baseDb }),
+    name: `${baseDb}-${nextEnv}`,
+    schemas: conn.schemas,
+    database: baseDb,
+    env: nextEnv,
+  });
+}
+
 function editDialog(conn, refresh) {
   const current = workspaceOwner();
   connectionDialog({
@@ -210,14 +235,20 @@ function editDialog(conn, refresh) {
        the box starts empty and a blank URL means "keep it". */
     url: '',
     schemas: conn.schemas,
+    database: conn.explicit ? conn.database : undefined,
+    env: conn.explicit ? conn.env : undefined,
     verb: say('common.saveChanges'),
-    run: async ({ url, name, schemas }) => {
+    run: async ({ url, name, schemas, database, env }) => {
       if (!current()) return { error: say('theWorkspaceChangedClose') };
       if (pending.has(conn.id)) return { error: say('aChangeToThisConnection') };
       const body = { id: conn.id };
       if (url) body.url = url;
       if (name && name !== conn.name) body.name = name;
       if (JSON.stringify(schemas) !== JSON.stringify(conn.schemas ?? [])) body.schemas = schemas;
+      const prevDb = conn.explicit ? (conn.database ?? '') : '';
+      const prevEnv = conn.explicit ? (conn.env ?? '') : '';
+      if (database !== undefined && database !== prevDb) body.database = database;
+      if (env !== undefined && env !== prevEnv) body.env = env;
       if (Object.keys(body).length === 1) return { error: say('nothingToChange') };
       pending.add(conn.id);
       try {

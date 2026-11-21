@@ -1,7 +1,8 @@
 /**
- * The agent console: the MCP tools, driven by hand. Answers are exactly
- * what an agent receives — same code path, stats and all — which is how
- * a tool's description and its shape get tuned.
+ * The agent console: the MCP tools, driven by hand, plus the live activity
+ * trail of external MCP clients sharing this browser server (`POST /mcp`).
+ * Answers are byte-identical to what an agent receives — same code path,
+ * stats and all.
  */
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -10,10 +11,13 @@ import { formatNumber } from '@mistriwork/kit/client/locale.js';
 import { say } from '../copy/workbench/components/AgentConsole.js';
 import { shown } from '@mistriwork/kit/client/addressMount.js';
 import { addHostListener, navFollow, removeHostListener } from '@mistriwork/kit/client/shellHost.js';
+import { shell } from '@mistriwork/kit/client/shellMode.js';
+import { enrichConnectionsWithEnvironments, type EnvironmentTier, type SiblingEnvironment } from '../../shared/environments.js';
 
 interface Spec {
   type?: string | string[];
   description?: string;
+  items?: { type?: string };
 }
 export interface Tool {
   name: string;
@@ -31,6 +35,26 @@ interface Call {
   args: Record<string, unknown>;
   answer: Answer;
 }
+interface LiveCall {
+  seq: number;
+  via: 'mcp' | 'console';
+  tool: string;
+  args: Record<string, unknown>;
+  ms: number;
+  isError: boolean;
+  rowsRead?: number;
+  rowsWritten?: number;
+  rowsDeleted?: number;
+  dryRun?: boolean;
+  undoId?: number;
+  answer: Answer;
+}
+interface ActivityPayload {
+  seq?: number;
+  calls?: LiveCall[];
+  egress?: Record<string, number>;
+  mcpEndpoint?: string | null;
+}
 
 /** ~4 characters per token is the rule of thumb the readout says it is. */
 const cost = (text: string) => say('charsTokens', { chars: formatNumber(text.length), tokens: formatNumber(Math.ceil(text.length / 4)) });
@@ -39,6 +63,7 @@ const typesOf = (spec: Spec) => (Array.isArray(spec.type) ? spec.type : [spec.ty
 function Badges({ tool }: { tool: Tool }) {
   const a = tool.annotations ?? {};
   if (a.readOnlyHint) return <span className="agent-badge tone-ok">{say('readOnly')}</span>;
+  if (tool.name === 'export') return <span className="agent-badge">{say('writesFile')}</span>;
   return (
     <>
       <span className="agent-badge tone-warn">{say('writes')}</span>
@@ -49,13 +74,22 @@ function Badges({ tool }: { tool: Tool }) {
 
 export function AgentConsole({ onClose }: { onClose: () => void }) {
   const panel = useRef<HTMLDivElement>(null);
+  const seenWriteSeq = useRef(0);
   const tools = useQuery<Tool[]>({
     queryKey: ['agent-tools'],
     queryFn: async () => (await api('/api/agent/tools')).tools ?? [],
     retry: false,
     staleTime: Infinity,
   });
+  const activity = useQuery<ActivityPayload>({
+    queryKey: ['agent-activity'],
+    queryFn: async () => (await api('/api/agent/activity' as never)) as ActivityPayload,
+    retry: false,
+    refetchInterval: 2_000,
+    refetchIntervalInBackground: false,
+  });
   const [selected, setSelected] = useState<string | null>(null);
+  const [pinnedTarget, setPinnedTarget] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<Call[]>([]);
   const [answer, setAnswer] = useState<
     { kind: 'idle' } | { kind: 'running'; tool: string } | { kind: 'error'; message: string } | { kind: 'answer'; answer: Answer }
@@ -85,6 +119,15 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
     }
   }, [tools.isError]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const externalCalls = Array.isArray(activity.data?.calls) ? activity.data!.calls.filter((c) => c.via === 'mcp') : [];
+  useEffect(() => {
+    const newestUndo = externalCalls.find((c) => c.undoId !== undefined || (c.rowsWritten ?? 0) > 0 || (c.rowsDeleted ?? 0) > 0);
+    if (newestUndo && newestUndo.seq > seenWriteSeq.current) {
+      seenWriteSeq.current = newestUndo.seq;
+      void shell().undo?.refresh?.();
+    }
+  }, [externalCalls]);
+
   if (!tools.data)
     return (
       <div className="conn-inner" ref={panel}>
@@ -93,21 +136,61 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
     );
   const list = tools.data;
   const tool = list.find((t) => t.name === selected) ?? list[0];
+  const connState = state as {
+    activeConnection?: string;
+    connections?: Array<{
+      id: string;
+      name?: string;
+      detail?: string;
+      writable?: boolean;
+      rows?: boolean;
+      database?: string;
+      env?: string;
+      tier?: EnvironmentTier;
+      siblings?: SiblingEnvironment[];
+    }>;
+  };
+  const enrichedConnections = enrichConnectionsWithEnvironments((connState.connections ?? []).map((c) => ({ ...c, name: c.name ?? c.id })));
+  const activeId = connState.activeConnection;
+  const targetId = pinnedTarget && enrichedConnections.some((c) => c.id === pinnedTarget) ? pinnedTarget : activeId;
+
   const pick = (name: string) => {
     setSelected(name);
     setAnswer({ kind: 'idle' });
   };
   const call = async (args: Record<string, unknown>) => {
     setAnswer({ kind: 'running', tool: tool.name });
+    const effectiveArgs =
+      targetId &&
+      targetId !== activeId &&
+      args.connection === undefined &&
+      args.env === undefined &&
+      tool.name !== 'connections' &&
+      (tool.name !== 'diff' || (args.from === undefined && args.fromEnv === undefined))
+        ? tool.name === 'diff'
+          ? { ...args, from: targetId }
+          : { ...args, connection: targetId }
+        : args;
     let got: Answer;
     try {
-      got = await api('/api/agent/call', { name: tool.name, arguments: args });
+      got = await api('/api/agent/call', { name: tool.name, arguments: effectiveArgs });
     } catch (err) {
       setAnswer({ kind: 'error', message: (err as Error).message });
       return;
     }
-    setTranscript((was) => [{ tool: tool.name, args, answer: got }, ...was]);
+    if (got.structuredContent?.undoId !== undefined) void shell().undo?.refresh?.();
+    setTranscript((was) => [{ tool: tool.name, args: effectiveArgs, answer: got }, ...was]);
     setAnswer({ kind: 'answer', answer: got });
+  };
+  const mcpUrl = typeof activity.data?.mcpEndpoint === 'string' ? activity.data.mcpEndpoint : null;
+  const copyMcpUrl = async () => {
+    if (!mcpUrl) return;
+    try {
+      await navigator.clipboard.writeText(mcpUrl);
+      toast(say('copiedMcpEndpoint'));
+    } catch {
+      /* Clipboard denied. */
+    }
   };
   return (
     <div className="conn-inner" ref={panel}>
@@ -121,6 +204,11 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
           <p className="conn-lede">{say('theMcpToolsDriven')}</p>
         </div>
         <div className="conn-head-actions">
+          {mcpUrl ? (
+            <button type="button" className="ghost" onClick={() => void copyMcpUrl()}>
+              {say('copyMcpEndpoint', { url: mcpUrl })}
+            </button>
+          ) : null}
           <button type="button" onClick={onClose}>
             {say('common.done')}
           </button>
@@ -145,9 +233,41 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
           ))}
         </div>
         <div className="agent-main">
+          {enrichedConnections.length > 0 ? (
+            <div className="agent-target-bar" role="group" aria-label={say('targetConnectionsGroup')}>
+              <span className="agent-target-label">{say('targetConnectionLabel')}</span>
+              <div className="agent-target-list">
+                {enrichedConnections.map((conn) => {
+                  const current = conn.id === targetId;
+                  return (
+                    <button
+                      key={conn.id}
+                      type="button"
+                      className={`agent-target-pill tone-${conn.tier}${current ? ' active' : ''}`}
+                      aria-pressed={current}
+                      onClick={() => setPinnedTarget(conn.id === activeId ? null : conn.id)}
+                    >
+                      <span className="env-pill-dot" aria-hidden="true" />
+                      <span className="agent-target-name">{conn.name}</span>
+                      {conn.env ? <span className={`env-pill compact tone-${conn.tier}`}>{conn.env}</span> : null}
+                      <span className="agent-target-posture">
+                        {conn.rows === false ? say('shapeOnlyBadge') : conn.writable ? say('writableBadge') : say('readOnly')}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
           {tool ? (
             <>
-              <ToolForm key={tool.name} tool={tool} onCall={call} onBadJson={(message) => setAnswer({ kind: 'error', message })} />
+              <ToolForm
+                key={tool.name}
+                tool={tool}
+                targetConnection={targetId}
+                onCall={call}
+                onBadJson={(message) => setAnswer({ kind: 'error', message })}
+              />
               <div className="agent-result">
                 {answer.kind === 'running' ? (
                   <p className="loading">{say('calling', { tool: answer.tool })}</p>
@@ -159,6 +279,11 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
                   <AnswerView answer={answer.answer} onClose={onClose} />
                 ) : null}
               </div>
+              <LiveActivityTrail
+                calls={externalCalls}
+                egress={activity.data?.egress}
+                onShow={(a) => setAnswer({ kind: 'answer', answer: a })}
+              />
               <Transcript calls={transcript} onShow={(a) => setAnswer({ kind: 'answer', answer: a })} />
             </>
           ) : (
@@ -172,10 +297,12 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
 
 function ToolForm({
   tool,
+  targetConnection,
   onCall,
   onBadJson,
 }: {
   tool: Tool;
+  targetConnection?: string;
   onCall: (args: Record<string, unknown>) => void;
   onBadJson: (message: string) => void;
 }) {
@@ -191,14 +318,32 @@ function ToolForm({
       if (types.includes('object')) {
         /* Objects arrive as JSON, because a key or a set of values is a shape the caller composes. */
         try {
-          args[name] = JSON.parse(raw);
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+          args[name] = parsed;
         } catch {
           onBadJson(say('isNotJson', { name, raw: raw.slice(0, 60) }));
           return;
         }
-      } else if (types.includes('number') && !Number.isNaN(Number(raw))) {
+      } else if (types.includes('array')) {
+        if (spec.items?.type === 'string' && !raw.startsWith('[')) {
+          args[name] = raw
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean);
+        } else {
+          try {
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) throw new Error();
+            args[name] = parsed;
+          } catch {
+            onBadJson(say('isNotJson', { name, raw: raw.slice(0, 60) }));
+            return;
+          }
+        }
+      } else if ((types.includes('number') || types.includes('integer')) && !Number.isNaN(Number(raw))) {
         args[name] = Number(raw);
-      } else if (spec.type === 'boolean') {
+      } else if (types.includes('boolean')) {
         args[name] = raw === 'true' || raw === '1' || raw === 'yes';
       } else {
         args[name] = raw;
@@ -215,7 +360,8 @@ function ToolForm({
       {/* The description, shown whole: this text is the tool's entire pitch to a model deciding whether to call it. */}
       <p className="agent-desc">{tool.description}</p>
       {Object.entries(properties).map(([name, spec]) => {
-        const isObject = typesOf(spec).includes('object');
+        const types = typesOf(spec);
+        const isJson = types.includes('object') || types.includes('array');
         const set = (v: string) => setValues((was) => ({ ...was, [name]: v }));
         return (
           <div key={name} className="agent-field">
@@ -223,12 +369,12 @@ function ToolForm({
               {name}
               {required.has(name) ? <span className="req">{say('required')}</span> : null}
             </label>
-            {isObject ? (
+            {isJson ? (
               <textarea
                 className="agent-input agent-json"
                 rows={2}
                 spellCheck={false}
-                placeholder={spec.description ?? '{ }'}
+                placeholder={spec.description ?? (types.includes('array') ? '[ ]' : '{ }')}
                 aria-label={`${name} (json)`}
                 value={values[name] ?? ''}
                 onChange={(e) => set(e.currentTarget.value)}
@@ -240,11 +386,7 @@ function ToolForm({
                 autoComplete="off"
                 spellCheck={false}
                 aria-label={name}
-                placeholder={
-                  name === 'connection'
-                    ? `${(state as { activeConnection?: string }).activeConnection ?? 'active'} (active)`
-                    : (spec.description ?? '')
-                }
+                placeholder={name === 'connection' ? `${targetConnection ?? 'active'} (active)` : (spec.description ?? '')}
                 value={values[name] ?? ''}
                 onChange={(e) => set(e.currentTarget.value)}
               />
@@ -264,18 +406,19 @@ function ToolForm({
 function AnswerView({ answer, onClose }: { answer: Answer; onClose: () => void }) {
   const text = answer.structuredContent ? JSON.stringify(answer.structuredContent, null, 2) : (answer.content?.[0]?.text ?? '');
   const stats = answer.structuredContent?.stats ?? {};
-  /* Every deep link in the answer, surfaced as a real door: "see that row" should cost one click. */
+  /* Every deep link in the answer (`link` fields from `linkTo`), surfaced as a real door: "see that row" should cost one click. */
   const links: string[] = [];
-  const walk = (value: unknown) => {
-    if (typeof value === 'string' && /^[#/]\/?\w/.test(value) && !value.startsWith('//')) links.push(value);
-    else if (Array.isArray(value)) value.forEach(walk);
-    else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+  const walk = (value: unknown, key?: string) => {
+    if (key === 'link' && typeof value === 'string' && /^[#/]\/?\w/.test(value) && !value.startsWith('//')) links.push(value);
+    else if (Array.isArray(value)) value.forEach((item) => walk(item));
+    else if (value && typeof value === 'object') Object.entries(value).forEach(([k, v]) => walk(v, k));
   };
   walk(answer.structuredContent ?? {});
   return (
     <>
       <div className="agent-stats">
         {answer.isError ? <span className="agent-badge tone-bad">isError</span> : null}
+        {answer.structuredContent?.dryRun === true ? <span className="agent-badge">{say('dryRunBadge')}</span> : null}
         {Object.entries(stats).map(([k, v]) => (
           <span key={k} className="stat">{`${k} ${v}`}</span>
         ))}
@@ -301,6 +444,38 @@ function AnswerView({ answer, onClose }: { answer: Answer; onClose: () => void }
         </div>
       ) : null}
     </>
+  );
+}
+
+function LiveActivityTrail({
+  calls,
+  egress,
+  onShow,
+}: {
+  calls: LiveCall[];
+  egress?: Record<string, number>;
+  onShow: (answer: Answer) => void;
+}) {
+  if (!calls.length) return null;
+  const totalEgress = egress
+    ? Object.values(egress).reduce((n, v) => n + (Number(v) || 0), 0)
+    : calls.reduce((n, c) => n + (c.rowsRead ?? 0), 0);
+  return (
+    <div className="agent-transcript agent-live-trail">
+      <h4>{say('liveMcpHeading', { calls: say('calls', { count: calls.length }), rows: say('rows', { count: totalEgress }) })}</h4>
+      {calls.slice(0, 12).map((entry) => {
+        const size = entry.answer.content?.[0]?.text?.length ?? 0;
+        return (
+          <button key={entry.seq} type="button" className="agent-past" onClick={() => onShow(entry.answer)}>
+            <span className="agent-badge tone-ok">{say('viaMcp')}</span>
+            {entry.dryRun ? <span className="agent-badge">{say('dryRunBadge')}</span> : null}
+            <span className="agent-past-tool">{entry.tool}</span>
+            <span className="agent-past-args">{JSON.stringify(entry.args).slice(0, 60)}</span>
+            <span className="agent-past-cost">{say('callCost', { ms: String(entry.ms), size: formatNumber(size) })}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

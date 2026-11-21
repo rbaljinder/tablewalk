@@ -181,6 +181,8 @@ describe('the MCP server', () => {
       'fixture',
       'lint',
       'change_impact',
+      'anomalies',
+      'verify_ddl',
       'record',
       'update',
       'insert',
@@ -255,7 +257,10 @@ describe('the MCP server', () => {
     const stray = await call('tools/call', { name: 'query', arguments: { qeury: 'customer' } });
     const strayResult = stray.result as { isError: boolean; content: Array<{ text: string }> };
     assert.equal(strayResult.isError, true);
-    assert.match(strayResult.content[0].text, /unknown argument "qeury" \(did you mean "q"\?\)\. It takes: q, limit, offset, connection/);
+    assert.match(
+      strayResult.content[0].text,
+      /unknown argument "qeury" \(did you mean "q"\?\)\. It takes: q, view, limit, offset, connection, env/,
+    );
 
     const missing = await call('tools/call', { name: 'query', arguments: {} });
     assert.match((missing.result as { content: Array<{ text: string }> }).content[0].text, /missing "q", which is required/);

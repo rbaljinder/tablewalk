@@ -11,7 +11,7 @@ import { tableNamed } from '@mistriwork/engine/host';
 import { lintCounts, lintSchema } from '../../../shared/lint.js';
 import { diffSchemas } from '../../../shared/diff.js';
 import { insertOrder } from '../../../shared/order.js';
-import { linkTo, openFor, READS, STATS, wholeKeyOrThrow, type Handler, ToolError } from '../toolkit.js';
+import { ENV_ARG, linkTo, openFor, READS, STATS, wholeKeyOrThrow, type Handler, ToolError } from '../toolkit.js';
 
 export const definitions = [
   {
@@ -27,6 +27,7 @@ export const definitions = [
       properties: {
         table: { type: 'string', description: 'Table id, e.g. "invoice".' },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       required: ['table'],
       additionalProperties: false,
@@ -81,8 +82,10 @@ export const definitions = [
     inputSchema: {
       type: 'object',
       properties: {
-        from: { type: 'string', description: 'Connection id you have. Defaults to the active one.' },
-        to: { type: 'string', description: 'Connection id to compare against.' },
+        from: { type: 'string', description: 'Connection id or db@env selector you have. Defaults to the active one.' },
+        fromEnv: { type: 'string', description: 'Target environment for `from` (e.g. "local", "staging").' },
+        to: { type: 'string', description: 'Connection id or db@env selector to compare against (e.g. "billing@prod", "@prod").' },
+        toEnv: { type: 'string', description: 'Target environment for `to` (e.g. "prod").' },
       },
       required: ['to'],
       additionalProperties: false,
@@ -145,6 +148,7 @@ export const definitions = [
           description: 'The tables to order. Omit for every table in the schema.',
         },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       additionalProperties: false,
     },
@@ -180,8 +184,10 @@ export const definitions = [
       'row — its customer, that customer\u2019s country — and optionally the rows pointing ' +
       'at it, then returns them grouped by table in the order they must be inserted, plus ' +
       'ready-to-paste INSERT statements. The rule the output satisfies: inserted in the ' +
-      'order given, nothing dangles. Bounded, and it says what it cut. This is test data ' +
-      'taken from a database that already has the shape you need, rather than invented.',
+      'order given, nothing dangles. Pass `redact: true` to deterministically mask emails, ' +
+      'phones, names, addresses and secrets while preserving keys, foreign keys and CHECK ' +
+      'vocabularies. Bounded, and it says what it cut. This is test data taken from a ' +
+      'database that already has the shape you need, rather than invented.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -194,7 +200,17 @@ export const definitions = [
         depth: { type: 'number', description: 'Reference hops to follow. Default 3.' },
         per_child: { type: 'number', description: 'Rows per child relationship. Default 5.' },
         max: { type: 'number', description: 'Ceiling on the whole fixture. Default 100.' },
+        redact: {
+          type: 'boolean',
+          description: 'Deterministically scrub PII and secrets while keeping keys, foreign keys and CHECK values intact.',
+        },
+        redact_columns: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Additional column names (`notes` or `customer.notes`) to mask when `redact` is true.',
+        },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       required: ['table', 'key'],
       additionalProperties: false,
@@ -219,6 +235,8 @@ export const definitions = [
         },
         order: { type: 'array', items: { type: 'string' } },
         sql: { type: 'string', description: 'The same rows as INSERT statements, in order.' },
+        redacted: { type: 'boolean' },
+        redactedColumns: { type: 'array', items: { type: 'string' } },
         truncated: {
           type: 'array',
           items: { type: 'string' },
@@ -255,6 +273,7 @@ export const definitions = [
             'is this schema in" needs — the counts are always complete either way.',
         },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       additionalProperties: false,
     },
@@ -317,6 +336,7 @@ export const definitions = [
           description: 'Narrow to one column. Omit to ask about the whole table.',
         },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       required: ['table'],
       additionalProperties: false,
@@ -368,6 +388,124 @@ export const definitions = [
       },
     },
   },
+  {
+    name: 'anomalies',
+    description:
+      'Data-level counterpart to `lint`: relational anomalies in the stored rows rather than ' +
+      'the catalog. Finds temporal inversions (`completed_at < created_at`, `ended_at < started_at`), ' +
+      'dangling lifecycles (open or active child rows pointing at a soft-deleted, archived or ' +
+      'inactive parent), and nullable foreign keys populated on >=95% of rows with a small tail ' +
+      'of null outliers. Uses bounded counts only — no row values leave the database, so it works ' +
+      'on `"rows": false` connections too — and every finding carries the `query` and `link` to ' +
+      'open the offending rows.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        table: { type: 'string', description: 'Only this table. Omit to check the schema.' },
+        severity: {
+          type: 'string',
+          enum: ['high', 'medium', 'low'],
+          description: 'At least this severe. Default: everything.',
+        },
+        all: {
+          type: 'boolean',
+          description: 'Every finding. Default is at most 5 per rule, with complete counts.',
+        },
+        connection: { type: 'string' },
+        env: ENV_ARG,
+      },
+      additionalProperties: false,
+    },
+    annotations: { title: 'Check rows for anomalies', ...READS },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        connection: { type: 'string' },
+        scannedTables: { type: 'number' },
+        skippedTables: { type: 'number' },
+        counts: {
+          type: 'object',
+          properties: { high: { type: 'number' }, medium: { type: 'number' }, low: { type: 'number' } },
+        },
+        rules: {
+          type: 'object',
+          additionalProperties: {
+            type: 'object',
+            properties: { severity: { type: 'string' }, why: { type: 'string' } },
+          },
+        },
+        total: { type: 'number' },
+        shown: { type: 'number' },
+        note: { type: 'string' },
+        findings: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              rule: { type: 'string' },
+              severity: { type: 'string' },
+              table: { type: 'string' },
+              columns: { type: 'array', items: { type: 'string' } },
+              rows: { type: 'number' },
+              capped: { type: 'boolean' },
+              total: { type: 'number' },
+              message: { type: 'string' },
+              query: { type: 'string' },
+              link: { type: 'string' },
+            },
+          },
+        },
+        stats: STATS,
+      },
+    },
+  },
+  {
+    name: 'verify_ddl',
+    description:
+      'Test candidate migration DDL (`CREATE TABLE`, `ALTER TABLE`, `CREATE INDEX`, `DROP …`) ' +
+      'without changing the database, then diff and lint the resulting shape against the live ' +
+      'schema. Runs against an isolated disposable copy on SQLite (checking existing rows up to ' +
+      '64 MB) and inside `BEGIN … ROLLBACK` on `"writable": true` PostgreSQL connections with ' +
+      '2s lock and 5s statement caps. Answers whether every statement parses and satisfies ' +
+      'existing rows, what changed (`diff`), and any new lint problems the migration introduces ' +
+      '(`introducedLint`, such as an unindexed foreign key or missing ON DELETE rule) before a ' +
+      'migration file is committed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sql: {
+          type: ['string', 'array'],
+          items: { type: 'string' },
+          description: 'One DDL script or an ordered array of DDL statements to verify and roll back.',
+        },
+        connection: { type: 'string' },
+        env: ENV_ARG,
+      },
+      required: ['sql'],
+      additionalProperties: false,
+    },
+    annotations: { title: 'Verify DDL without keeping it', ...READS },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        connection: { type: 'string' },
+        valid: { type: 'boolean' },
+        dialect: { type: 'string' },
+        rolledBack: { type: 'boolean' },
+        mode: { type: 'string', enum: ['copy', 'schema_only', 'rollback'] },
+        statements: { type: 'number' },
+        same: { type: 'boolean' },
+        diff: { type: 'array', items: { type: 'object' } },
+        introducedLint: { type: 'object' },
+        resolvedLintCount: { type: 'number' },
+        failedAt: { type: 'number' },
+        statement: { type: 'string' },
+        errors: { type: 'array', items: { type: 'string' } },
+        note: { type: 'string' },
+        stats: STATS,
+      },
+    },
+  },
 ] as const;
 
 type Name = (typeof definitions)[number]['name'];
@@ -388,18 +526,25 @@ export const handlers: Record<Name, Handler> = {
   },
   diff: async ({ registry, args, schema, id }) => {
     const other = String(args.to ?? '').trim();
-    if (!other) throw new ToolError('invalid_argument', '`to` names the connection to compare against. Ask `connections` for what exists.');
-    if (other === id)
+    const toEnv = typeof args.toEnv === 'string' ? args.toEnv.trim() : '';
+    if (!other && !toEnv)
+      throw new ToolError('invalid_argument', '`to` names the connection to compare against. Ask `connections` for what exists.');
+    if (other === id && !toEnv)
       throw new ToolError('invalid_argument', `"${id}" compared with itself is always the same shape. Name a different connection.`);
     /* Opened here rather than through the caller's resolved pair: a diff is
        the one read that is *about* two connections, and the second one may
        never have been opened this session. */
-    const { schema: theirs } = await openFor(registry, other);
+    const { schema: theirs, id: toId } = await openFor(registry, other || undefined, {
+      env: toEnv || undefined,
+      fallbackConnection: id,
+    });
+    if (toId === id)
+      throw new ToolError('invalid_argument', `"${id}" compared with itself is always the same shape. Name a different connection.`);
     /* The labels are dropped: `from` and `to` are the connection ids a caller
        can act on, and two names for the same pair invites using the wrong
        one in the next call. */
     const { left: _left, right: _right, ...rest } = diffSchemas(schema, theirs);
-    return { from: id, to: other, ...rest };
+    return { from: id, to: toId, ...rest };
   },
   order: async ({ args, schema, id }) => {
     /* An array, or the comma-separated string clients send when the schema
@@ -521,12 +666,79 @@ export const handlers: Record<Name, Handler> = {
       );
     const key = (args.key ?? {}) as Record<string, string | number>;
     wholeKeyOrThrow(schema, table, key);
+    const redactColumns = Array.isArray(args.redact_columns)
+      ? args.redact_columns.map(String)
+      : typeof args.redact_columns === 'string' && args.redact_columns.trim()
+        ? args.redact_columns
+            .split(',')
+            .map((c) => c.trim())
+            .filter(Boolean)
+        : undefined;
     const taken = await extractFixture(adapter, schema, table.id, key, {
-      children: args.children === true,
+      children: args.children === true || args.children === 'true',
       depth: args.depth === undefined ? undefined : Number(args.depth),
       perChild: args.per_child === undefined ? undefined : Number(args.per_child),
       max: args.max === undefined ? undefined : Number(args.max),
+      redact: args.redact === true || args.redact === 'true',
+      redactColumns,
     });
     return { connection: id, ...taken };
+  },
+  anomalies: async ({ args, adapter, schema, id }) => {
+    const only = args.table === undefined ? undefined : tableNamed(schema, String(args.table));
+    if (args.table !== undefined && !only) {
+      throw new ToolError(
+        'not_found',
+        `Unknown table "${String(args.table)}". Ask \`tables\` for what exists — or \`refresh\` if it was just created.`,
+      );
+    }
+    const levels = ['high', 'medium', 'low'];
+    const floor = args.severity === undefined ? levels.length - 1 : levels.indexOf(String(args.severity));
+    if (floor === -1) throw new ToolError('invalid_argument', '`severity` is high, medium or low.');
+    const wanted = new Set(levels.slice(0, floor + 1));
+
+    const { ANOMALY_RULES, checkAnomalies } = await import('../../anomalies.js');
+    const scanned = await checkAnomalies(adapter, schema, id, {
+      ...(only ? { table: only.id } : {}),
+      linkTo,
+    });
+    const matched = scanned.findings.filter((f) => wanted.has(f.severity));
+    const rules: Record<string, { severity: string; why: string }> = {};
+    for (const f of matched) rules[f.rule] ??= ANOMALY_RULES[f.rule];
+
+    const PER_RULE = 5;
+    const all = args.all === true || args.all === 'true';
+    const kept: typeof matched = [];
+    const seen: Record<string, number> = {};
+    for (const f of matched) {
+      seen[f.rule] = (seen[f.rule] ?? 0) + 1;
+      if (all || seen[f.rule] <= PER_RULE) kept.push(f);
+    }
+    const withheld = matched.length - kept.length;
+    const notes: string[] = [];
+    if (withheld) {
+      notes.push(
+        `${withheld} more finding${withheld === 1 ? '' : 's'} not listed — showing at most ${PER_RULE} per rule. Ask with \`all: true\` or narrow with \`table\` or \`severity\`.`,
+      );
+    }
+    if (scanned.skippedTables) {
+      notes.push(`Scanned the first ${scanned.scannedTables} tables (${scanned.skippedTables} skipped); pass \`table\` to check another.`);
+    }
+
+    return {
+      connection: id,
+      scannedTables: scanned.scannedTables,
+      ...(scanned.skippedTables ? { skippedTables: scanned.skippedTables } : {}),
+      counts: lintCounts(matched),
+      rules,
+      findings: kept,
+      total: matched.length,
+      shown: kept.length,
+      ...(notes.length ? { note: notes.join(' ') } : {}),
+    };
+  },
+  verify_ddl: async ({ registry, args, schema, id, trusted }) => {
+    const { verifyDdl } = await import('../../verifyDdl.js');
+    return verifyDdl(registry, id, schema, args.sql, { trusted });
   },
 };

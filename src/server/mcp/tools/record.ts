@@ -16,7 +16,7 @@ import {
   type Filter,
   type DatabaseSchema,
 } from '@mistriwork/engine/host';
-import { COUNT_LIMIT, COUNT_LIMIT_WORDS as bound, linkTo, READS, STATS, type Handler, ToolError } from '../toolkit.js';
+import { COUNT_LIMIT, COUNT_LIMIT_WORDS as bound, ENV_ARG, linkTo, READS, STATS, type Handler, ToolError } from '../toolkit.js';
 
 export const definitions = [
   {
@@ -41,6 +41,7 @@ export const definitions = [
         },
         expand: { type: 'number', description: 'Inline up to this many rows per non-empty relationship (max 10).' },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       required: ['table'],
       additionalProperties: false,
@@ -98,6 +99,9 @@ export const handlers = {
     const expand = Math.max(0, Math.min(10, Number(args.expand ?? 0) || 0));
 
     const wanted = primaryKey(table);
+    if (!wanted.length) {
+      throw new ToolError('invalid_argument', `"${table.name}" has no primary key, so no single row can be addressed by key.`);
+    }
     for (const key of keys) {
       const missing = wanted.filter((c) => key[c] === undefined);
       if (missing.length) {

@@ -90,3 +90,16 @@ test("a connection under the row-security backstop is refused: its url is a tena
   assert.equal(refused.status, 2, refused.stderr);
   assert.match(refused.stderr, /"fenced" is under the row-security backstop/);
 });
+
+test('in-memory SQLite and unsupported schemes are refused without creating files on disk', () => {
+  for (const [name, url, pattern] of [
+    ['mem', ':memory:', /in-memory SQLite/],
+    ['memurl', 'sqlite::memory:', /in-memory SQLite/],
+    ['mysql', 'mysql://root@127.0.0.1/shop', /MySQL is not supported/],
+    ['mongo', 'mongodb://127.0.0.1/shop', /Don't know how to open a "mongodb:\/\/" connection/],
+  ] as const) {
+    const refused = run('journal', '--config', config(name, url, true));
+    assert.equal(refused.status, 2, `${name}: ${refused.stderr}`);
+    assert.match(refused.stderr, pattern);
+  }
+});

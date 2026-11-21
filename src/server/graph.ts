@@ -39,6 +39,7 @@
  * fixture whose order is stable is one whose failures are reproducible.
  */
 import { tableNamed, type Adapter, type InsertResult, type WriteTransaction, type DatabaseSchema } from '@mistriwork/engine/host';
+import { DryRunRollback } from './mcp/toolkit.js';
 
 /** A value that names another row in the same request. */
 interface RowRef {
@@ -69,6 +70,7 @@ interface GraphInsertResult {
    */
   teardown: Array<{ table: string; key: Record<string, string | number> }>;
   rowsWritten: number;
+  dryRun?: boolean;
 }
 
 interface GraphDeleteResult {
@@ -192,7 +194,12 @@ function resolveRef(ref: RowRef, made: Map<string, InsertResult>, where: string)
  * — applies here unchanged. What this adds is the transaction around them and
  * the labels between them.
  */
-export async function insertGraph(adapter: Adapter, schema: DatabaseSchema, rows: GraphRow[]): Promise<GraphInsertResult> {
+export async function insertGraph(
+  adapter: Adapter,
+  schema: DatabaseSchema,
+  rows: GraphRow[],
+  options: { dryRun?: boolean } = {},
+): Promise<GraphInsertResult> {
   if (!adapter.insert) {
     throw new GraphError(`${schema.dialect} connections are read-only in this build.`);
   }
@@ -207,43 +214,51 @@ export async function insertGraph(adapter: Adapter, schema: DatabaseSchema, rows
 
   validate(schema, rows);
 
-  return adapter.transaction(async (tx: WriteTransaction) => {
-    const made = new Map<string, InsertResult>();
-    const inserted: GraphInsertResult['inserted'] = [];
+  try {
+    return await adapter.transaction(async (tx: WriteTransaction) => {
+      const made = new Map<string, InsertResult>();
+      const inserted: GraphInsertResult['inserted'] = [];
 
-    for (const [i, row] of rows.entries()) {
-      const where = `Row ${i + 1} (${row.table})`;
-      /* Resolved to the schema's own id before the adapter sees it. On
-         Postgres a bare `country` means `public.country` to the adapter and
-         `tablewalk_pg_fixture.country` to the schema the caller is browsing —
-         so passing the name through would write to a different table than the
-         one that was validated. Every other write tool resolves first for the
-         same reason. */
-      const table = tableNamed(schema, row.table)!.id;
-      const values: Record<string, string | number | boolean | null> = {};
-      for (const [column, value] of Object.entries(row.values)) {
-        values[column] = (isRef(value) ? resolveRef(value, made, `${where}.${column}`) : value) as string | number | boolean | null;
+      for (const [i, row] of rows.entries()) {
+        const where = `Row ${i + 1} (${row.table})`;
+        /* Resolved to the schema's own id before the adapter sees it. On
+           Postgres a bare `country` means `public.country` to the adapter and
+           `tablewalk_pg_fixture.country` to the schema the caller is browsing —
+           so passing the name through would write to a different table than the
+           one that was validated. Every other write tool resolves first for the
+           same reason. */
+        const table = tableNamed(schema, row.table)!.id;
+        const values: Record<string, string | number | boolean | null> = {};
+        for (const [column, value] of Object.entries(row.values)) {
+          values[column] = (isRef(value) ? resolveRef(value, made, `${where}.${column}`) : value) as string | number | boolean | null;
+        }
+
+        const result = await tx.insert({ table, values }).catch((err: Error) => {
+          /* Named by position and table, because the message the database gives
+             is about a statement and the caller is looking at a list. "Nothing
+             was written" is the part worth being explicit about: the whole
+             point of the transaction is that a failure here is not a mess to
+             clean up. */
+          throw new Error(`${where}: ${err.message}\nNothing was written — the whole graph was rolled back.`);
+        });
+
+        if (row.as) made.set(row.as, result);
+        inserted.push({ table, as: row.as, key: result.key, row: result.row });
       }
 
-      const result = await tx.insert({ table, values }).catch((err: Error) => {
-        /* Named by position and table, because the message the database gives
-           is about a statement and the caller is looking at a list. "Nothing
-           was written" is the part worth being explicit about: the whole
-           point of the transaction is that a failure here is not a mess to
-           clean up. */
-        throw new Error(`${where}: ${err.message}\nNothing was written — the whole graph was rolled back.`);
-      });
-
-      if (row.as) made.set(row.as, result);
-      inserted.push({ table, as: row.as, key: result.key, row: result.row });
-    }
-
-    return {
-      inserted,
-      teardown: [...inserted].reverse().map(({ table, key }) => ({ table, key })),
-      rowsWritten: inserted.length,
-    };
-  });
+      const outcome: GraphInsertResult = {
+        inserted,
+        teardown: [...inserted].reverse().map(({ table, key }) => ({ table, key })),
+        rowsWritten: options.dryRun ? 0 : inserted.length,
+        ...(options.dryRun ? { dryRun: true } : {}),
+      };
+      if (options.dryRun) throw new DryRunRollback(outcome);
+      return outcome;
+    });
+  } catch (err) {
+    if (err instanceof DryRunRollback) return err.result as GraphInsertResult;
+    throw err;
+  }
 }
 
 /**

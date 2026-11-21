@@ -9,17 +9,26 @@
  * is pressed rather than mirrored keystroke by keystroke.
  */
 import { useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@mistriwork/ui/Button.js';
 import { Modal, type ModalHandle } from '@mistriwork/ui/Modal.js';
 import { api, go, render, state, toast } from '@mistriwork/kit/client/core.js';
+import { advanceRecordSource } from '@mistriwork/kit/client/recordSource.js';
 import { attachComplete } from '../complete.js';
 import { sqlSuggestions, tokenAt } from '../sqlcomplete.js';
 import { promptFor } from '@mistriwork/kit/client/prompt.js';
 import { removeStatement, saveStatement, savedStatements } from '../sqlsaved.js';
+import { refreshUndo } from '../undo.js';
 import type { TableMeta } from '@mistriwork/engine/shared/schema.js';
 import { Grid } from '@mistriwork/kit/client/components/Grid.js';
 import { say } from '../copy/workbench/components/SqlPane.js';
 import { addHostListener, removeHostListener, shellQuery } from '@mistriwork/kit/client/shellHost.js';
+import {
+  enrichConnectionsWithEnvironments,
+  groupConnectionsByDatabase,
+  type EnvironmentTier,
+  type SiblingEnvironment,
+} from '../../shared/environments.js';
 
 interface SqlResult {
   columns: string[];
@@ -46,6 +55,7 @@ type Outcome =
 interface SqlPaneProps {
   draft: string;
   onDraft: (text: string) => void;
+  onSwitchConnection?: (id: string, currentDraft: string) => void;
   onClose: () => void;
 }
 
@@ -55,14 +65,33 @@ function autoGrow(input: HTMLTextAreaElement) {
   input.style.height = `${Math.min(Math.max(input.scrollHeight, 84), 340)}px`;
 }
 
-export function SqlPane({ draft, onDraft, onClose }: SqlPaneProps) {
+export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPaneProps) {
+  const queryClient = useQueryClient();
   const input = useRef<HTMLTextAreaElement>(null);
   const [outcome, setOutcome] = useState<Outcome>({ kind: 'idle' });
   const [savedVersion, bump] = useState(0);
   const [pendingWrite, setPendingWrite] = useState<string | null>(null);
   const schema = (state as { schema?: { label?: string; dialect?: string } }).schema;
-  const connections = state as { connections?: Array<{ id: string; writable?: boolean }>; activeConnection?: string };
-  const writable = connections.connections?.find((c) => c.id === connections.activeConnection)?.writable;
+  const connections = state as {
+    connections?: Array<{
+      id: string;
+      name?: string;
+      detail?: string;
+      writable?: boolean;
+      rows?: boolean;
+      database?: string;
+      env?: string;
+      tier?: EnvironmentTier;
+      siblings?: SiblingEnvironment[];
+    }>;
+    activeConnection?: string;
+  };
+  const enriched = enrichConnectionsWithEnvironments((connections.connections ?? []).map((c) => ({ ...c, name: c.name ?? c.id })));
+  const activeConn = enriched.find((c) => c.id === connections.activeConnection);
+  const activeGroup = activeConn
+    ? groupConnectionsByDatabase(enriched).find((g) => g.database.toLowerCase() === activeConn.database.toLowerCase())
+    : undefined;
+  const writable = activeConn?.writable;
 
   useEffect(() => {
     const node = input.current!;
@@ -122,7 +151,10 @@ export function SqlPane({ draft, onDraft, onClose }: SqlPaneProps) {
       const affected = data.affected ?? 0;
       toast(`${say('rows', { count: affected })} changed.`, 'ok');
       setOutcome({ kind: 'written', affected });
-      // The schema and every open page may now be stale.
+      // The schema, cached lists/records, and the Undo barrier entry may all have moved.
+      advanceRecordSource();
+      void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] !== 'command-prepare' });
+      void refreshUndo();
       render();
       return;
     }
@@ -154,6 +186,33 @@ export function SqlPane({ draft, onDraft, onClose }: SqlPaneProps) {
         <div className="sql-title">
           <span className="sql-eyebrow">SQL</span>
           <span className="sql-target">{`${schema?.label ?? ''} · ${schema?.dialect ?? ''}`}</span>
+          {activeConn && activeGroup && activeGroup.environments.length > 1 ? (
+            <div className="sql-env-bar" role="group" aria-label={say('sqlEnvironmentsLabel', { database: activeConn.database })}>
+              {activeGroup.environments.map((envConn) => {
+                const current = envConn.id === activeConn.id;
+                return (
+                  <button
+                    key={envConn.id}
+                    type="button"
+                    className={`env-pill compact tone-${envConn.tier}${current ? ' active' : ''}`}
+                    aria-pressed={current}
+                    title={say('switchSqlToName', { name: envConn.name })}
+                    onClick={() => {
+                      if (!current) onSwitchConnection?.(envConn.id, input.current?.value ?? draft);
+                    }}
+                  >
+                    <span className="env-pill-dot" aria-hidden="true" />
+                    <span>{envConn.env ?? envConn.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : activeConn && (activeConn.tier !== 'other' || Boolean(activeConn.env)) ? (
+            <span className={`env-pill compact active tone-${activeConn.tier}`}>
+              <span className="env-pill-dot" aria-hidden="true" />
+              <span>{activeConn.env ?? activeConn.tier}</span>
+            </span>
+          ) : null}
         </div>
         <div className="sql-head-actions">
           {/* Offered only where the server would allow it. A button that exists to be refused is a button that lies. */}
@@ -237,7 +296,12 @@ export function SqlPane({ draft, onDraft, onClose }: SqlPaneProps) {
         <Results outcome={outcome} onClose={onClose} />
       </div>
       {pendingWrite !== null && (
-        <WriteConfirm statement={pendingWrite} onClose={() => setPendingWrite(null)} onRun={() => void execute(pendingWrite, true)} />
+        <WriteConfirm
+          statement={pendingWrite}
+          prodTarget={activeConn?.tier === 'prod' ? activeConn.name : undefined}
+          onClose={() => setPendingWrite(null)}
+          onRun={() => void execute(pendingWrite, true)}
+        />
       )}
     </>
   );
@@ -335,11 +399,26 @@ function RowsResult({ data, onClose }: { data: SqlResult; onClose: () => void })
 }
 
 /** A write, with the statement in front of you: the question is whether it says what you think it says. */
-function WriteConfirm({ statement, onClose, onRun }: { statement: string; onClose: () => void; onRun: () => void }) {
+function WriteConfirm({
+  statement,
+  prodTarget,
+  onClose,
+  onRun,
+}: {
+  statement: string;
+  prodTarget?: string;
+  onClose: () => void;
+  onRun: () => void;
+}) {
   const dialog = useRef<ModalHandle>(null);
   return (
     <Modal className="confirm" ref={dialog} onClose={onClose}>
       <h2>{say('runThisAsAWrite')}</h2>
+      {prodTarget ? (
+        <p className="sql-prod-callout" role="alert">
+          {say('productionWriteWarning', { target: prodTarget })}
+        </p>
+      ) : null}
       <p>{say('thisRunsOnTheWrite')}</p>
       <pre className="confirm-params">{statement}</pre>
       <div className="confirm-actions">

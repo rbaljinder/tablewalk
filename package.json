@@ -1,6 +1,6 @@
 {
   "name": "tablewalk",
-  "version": "1.0.0-rc.17",
+  "version": "1.0.0-rc.18",
   "description": "Follow the data. A database browser built around the walk: a foreign key is a place you can go.",
   "keywords": [
     "browser",
@@ -55,14 +55,13 @@
     "audit:prod": "npm audit --omit=dev --audit-level=high"
   },
   "dependencies": {
-    "@mistriwork/engine": "1.0.0-rc.65",
-    "@mistriwork/kit": "1.0.0-rc.65",
-    "@mistriwork/ui": "1.0.0-rc.65",
+    "@mistriwork/engine": "1.0.0-rc.77",
+    "@mistriwork/kit": "1.0.0-rc.77",
+    "@mistriwork/ui": "1.0.0-rc.77",
     "@ui-sdk/core": "0.1.0-beta.2",
     "@ui-sdk/react": "0.1.0-beta.2"
   },
   "devDependencies": {
-    "@base-ui/react": "^1.8.0",
     "@playwright/test": "^1.62.1",
     "@tanstack/react-form": "^1.33.5",
     "@tanstack/react-query": "^5.102.8",

@@ -15,7 +15,7 @@ import {
   distance,
   type Registry,
 } from '@mistriwork/engine/host';
-import { openFor, sessionEgress, type Handler, ToolError, errorCodeOf, type ErrorCode } from './toolkit.js';
+import { openFor, recordAgentActivity, sessionEgress, type Handler, ToolError, errorCodeOf, type ErrorCode } from './toolkit.js';
 import * as schemaTools from './tools/schema.js';
 import * as queryTools from './tools/query.js';
 import * as sqlTools from './tools/sql.js';
@@ -60,12 +60,22 @@ const HANDLERS = new Map<string, Handler>(
 );
 
 /** One tool's answer, before stats: the connection it names is opened first. */
-async function callTool(registry: Registry, name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function callTool(
+  registry: Registry,
+  name: string,
+  args: Record<string, unknown>,
+  trusted?: boolean,
+  fallbackConnection?: string,
+): Promise<Record<string, unknown>> {
   if (name === 'connections') return schemaTools.connections(registry);
-  const opened = await openFor(registry, args.connection);
+  const opened = await openFor(registry, name === 'diff' ? (args.from ?? args.connection) : args.connection, {
+    env: name === 'diff' ? (args.fromEnv ?? args.env) : args.env,
+    write: WRITE_NAMES.has(name) || name === 'verify_ddl',
+    fallbackConnection,
+  });
   const handler = HANDLERS.get(name);
   if (!handler) throw new ToolError('not_found', `No tool called "${name}".`);
-  return handler({ registry, args, ...opened });
+  return handler({ registry, args, trusted, ...opened });
 }
 
 /**
@@ -93,10 +103,37 @@ const TOOL_PROFILES: Record<string, string[] | null> = {
   full: null,
   /* Reading a database you did not write: what is here, what points at what,
      what the columns actually hold. */
-  explore: [...ALWAYS, 'schema_summary', 'tables', 'table', 'find', 'query', 'breakdown', 'sql', 'export', 'record', 'explain', 'profile'],
+  explore: [
+    ...ALWAYS,
+    'schema_summary',
+    'tables',
+    'table',
+    'find',
+    'query',
+    'breakdown',
+    'sql',
+    'export',
+    'record',
+    'explain',
+    'profile',
+    'anomalies',
+  ],
   /* Changing a shape safely: what breaks, what it costs, what order it has to
      happen in, and whether it matches somewhere else afterwards. */
-  migrate: [...ALWAYS, 'schema_summary', 'tables', 'table', 'change_impact', 'lint', 'order', 'diff', 'profile', 'explain'],
+  migrate: [
+    ...ALWAYS,
+    'schema_summary',
+    'tables',
+    'table',
+    'change_impact',
+    'lint',
+    'anomalies',
+    'verify_ddl',
+    'order',
+    'diff',
+    'profile',
+    'explain',
+  ],
   /* Test data that respects referential integrity, in and out. */
   seed: [
     ...ALWAYS,
@@ -160,16 +197,19 @@ export const toolNames = () => [...TOOLS, ...WRITE_TOOLS].map((t) => t.name);
  * connection's config allows any. Exported for the agent console, which
  * shows exactly this list — a second list would be a second truth.
  */
-export function agentTools(registry: Registry) {
+export function agentTools(registry: Registry, options: { trusted?: boolean } = {}) {
   const connections = registry.list();
   const anyWritable = connections.some((c) => c.writable);
   const listed = anyWritable ? [...TOOLS, ...WRITE_TOOLS] : [...TOOLS];
+  /* Writing files into this machine's temp directory is for stdio and loopback,
+     not a browser reaching an exposed HTTP listener from elsewhere. */
+  const byTrust = options.trusted === false ? listed.filter((t) => t.name !== 'export') : listed;
   /* If no connection will return a row, the tools that only return rows are
      not a capability this server has — and a tool an agent can see is a tool
      it will spend a call discovering. The same reasoning as the write tools,
      one boundary further out. `find` stays: its name mode is shape. */
   const anyRows = connections.some((c) => c.rows !== false);
-  const byRows = anyRows ? listed : listed.filter((t) => !ROW_ONLY_TOOLS.has(t.name));
+  const byRows = anyRows ? byTrust : byTrust.filter((t) => !ROW_ONLY_TOOLS.has(t.name));
   /* Raw SQL is refused on a connection that hides columns: where every one
      does, the statement tools are not a capability either. */
   const anySql = connections.some((c) => !c.hidesColumns);
@@ -186,7 +226,7 @@ export function agentTools(registry: Registry) {
 /** Tools whose whole answer is row data. */
 const ROW_ONLY_TOOLS = new Set(['query', 'sql', 'record', 'breakdown', 'export']);
 /** Tools that hand the database a statement it did not build. */
-const SQL_TOOLS = new Set(['sql', 'explain']);
+const SQL_TOOLS = new Set(['sql', 'explain', 'verify_ddl']);
 
 interface InputSchema {
   properties?: Record<string, { type?: string | string[]; enum?: unknown[] }>;
@@ -198,9 +238,9 @@ interface InputSchema {
 function argumentProblem(schema: InputSchema, args: Record<string, unknown>): string | null {
   const known = Object.keys(schema.properties ?? {});
   if (schema.additionalProperties === false) {
-    /* `connection` is every tool's, as the `connections` tool says, whether
-       or not the tool's own schema spells it out. */
-    const stray = Object.keys(args).filter((k) => !known.includes(k) && k !== 'connection');
+    /* `connection` and `env` are every tool's, whether or not the tool's own
+       schema spells them out. */
+    const stray = Object.keys(args).filter((k) => !known.includes(k) && k !== 'connection' && k !== 'env');
     if (stray.length) {
       const hint = stray.map((k) => {
         /* A guess when one is close: a shared prefix (`qeury` → `q`,
@@ -248,7 +288,7 @@ export async function runTool(
   registry: Registry,
   name: string,
   args: Record<string, unknown>,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; trusted?: boolean; via?: 'mcp' | 'console'; fallbackConnection?: string } = {},
 ): Promise<{
   content: Array<{ type: 'text'; text: string }>;
   structuredContent?: Record<string, unknown>;
@@ -256,7 +296,16 @@ export async function runTool(
   isError: boolean;
 }> {
   const signal = options.signal ?? new AbortController().signal;
+  const via = options.via ?? 'mcp';
+  const callStarted = Date.now();
   try {
+    if (options.trusted === false && name === 'export') {
+      throw new ToolError(
+        'forbidden',
+        'This server is reachable beyond this machine, so export cannot write files to its temp directory over HTTP. ' +
+          'Run export over stdio (--mcp) or from loopback.',
+      );
+    }
     /* The profile is enforced here, not only in the listing. `--tools explore`
        used to hide `delete` from tools/list and then run it for any client
        that knew the name — a filter on the menu, not on the kitchen. A profile
@@ -283,7 +332,7 @@ export async function runTool(
     /* A call withdrawn before its turn never starts. */
     throwIfCancelled(signal);
     const started = Date.now();
-    const answered = await withCancellation(signal, () => callTool(registry, name, args));
+    const answered = await withCancellation(signal, () => callTool(registry, name, args, options.trusted, options.fallbackConnection));
     /* A read the client cancelled answers as cancelled even when its last
        statement beat the cancel home. A write that finished says what it
        did: an agent told "cancelled" about a write that landed would make it
@@ -304,58 +353,77 @@ export async function runTool(
          rather than being one list — and every one of them left the
          machine. */
           answered.rowsRead
-        : Array.isArray(answered.rows)
-          ? (answered.rows as unknown[]).length
-          : Array.isArray(answered.matches)
-            ? (answered.matches as unknown[]).length
-            : Array.isArray(answered.records)
-              ? (answered.records as Array<Record<string, unknown>>).reduce((n, r) => n + delivered(r), 0)
-              : answered.found === true || answered.found === false
-                ? delivered(answered)
-                : undefined;
+        : name === 'export' && typeof answered.rows === 'number'
+          ? answered.rows
+          : Array.isArray(answered.rows)
+            ? (answered.rows as unknown[]).length
+            : Array.isArray(answered.matches)
+              ? (answered.matches as unknown[]).length
+              : Array.isArray(answered.records)
+                ? (answered.records as Array<Record<string, unknown>>).reduce((n, r) => n + delivered(r), 0)
+                : answered.found === true || answered.found === false
+                  ? delivered(answered)
+                  : undefined;
+    const dryRun = answered.dryRun === true;
     const affected = typeof answered.affected === 'number' ? answered.affected : undefined;
     /* A graph counts its own list rather than an `affected` it never has —
        and `inserted` is a boolean for `insert` and a list for `insert_graph`,
-       which is what the array check tells apart. */
-    const graphIn = name === 'insert_graph' && Array.isArray(answered.inserted) ? (answered.inserted as unknown[]).length : undefined;
+       which is what the array check tells apart. A rolled-back dry run wrote zero rows. */
+    const graphIn =
+      !dryRun && name === 'insert_graph' && Array.isArray(answered.inserted)
+        ? (answered.inserted as unknown[]).length
+        : dryRun && name === 'insert_graph'
+          ? 0
+          : undefined;
     const graphOut =
       name === 'delete_graph' && Array.isArray(answered.removed)
         ? (answered.removed as Array<{ affected?: number }>).reduce((n, r) => n + (r.affected ?? 0), 0)
         : undefined;
-    const written = name === 'update' ? affected : name === 'delete' && answered.deleted === true ? affected : (graphOut ?? graphIn);
+    const written = dryRun
+      ? 0
+      : name === 'update'
+        ? affected
+        : name === 'delete' && answered.deleted === true
+          ? affected
+          : (graphOut ?? graphIn);
     const removals = name === 'delete' || name === 'delete_graph';
-    const inserted = name === 'insert' && answered.inserted === true ? 1 : graphIn;
+    const inserted = dryRun ? undefined : name === 'insert' && answered.inserted === true ? 1 : graphIn;
     if (rows && typeof answered.connection === 'string') {
       sessionEgress.set(answered.connection, (sessionEgress.get(answered.connection) ?? 0) + rows);
     }
+    const ms = Date.now() - started;
     const structured = {
       ...answered,
       stats: {
-        ms: Date.now() - started,
+        ms,
         ...(rows === undefined ? {} : { rowsRead: rows }),
         ...(written === undefined ? {} : removals ? { rowsDeleted: written } : { rowsWritten: written }),
         ...(inserted === undefined ? {} : { rowsInserted: inserted }),
       },
     };
-    return {
+    const reply = {
       /* Compact. The text is a byte-for-byte duplicate of structuredContent
          for clients that read only text; pretty-printing it was the largest
          avoidable cost in every answer — a quarter again on nested rows —
          spent on whitespace no model reads. */
-      content: [{ type: 'text', text: JSON.stringify(structured) }],
+      content: [{ type: 'text' as const, text: JSON.stringify(structured) }],
       structuredContent: structured,
       isError: false,
     };
+    recordAgentActivity(registry, { via, tool: name, args, ms, answer: reply });
+    return reply;
   } catch (err) {
     /* A tool that fails is a result, not a protocol error — the model
        reads the message and adjusts; a JSON-RPC error would read as
        the server being broken. */
     const code = errorCodeOf(err, signal.aborted);
-    return {
-      content: [{ type: 'text', text: stoppedText(err, signal.aborted) ?? (err as Error).message }],
+    const reply = {
+      content: [{ type: 'text' as const, text: stoppedText(err, signal.aborted) ?? (err as Error).message }],
       _meta: { 'tablewalk/code': code },
       isError: true,
     };
+    recordAgentActivity(registry, { via, tool: name, args, ms: Date.now() - callStarted, answer: reply });
+    return reply;
   }
 }
 

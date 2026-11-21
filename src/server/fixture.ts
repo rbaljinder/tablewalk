@@ -29,6 +29,10 @@ interface FixtureOptions {
   perChild?: number;
   /** A ceiling on the whole fixture. */
   max?: number;
+  /** Deterministically scrub PII and secrets while keeping keys, FKs and CHECK vocabularies intact. */
+  redact?: boolean;
+  /** Extra columns (`notes` or `customer.notes`) to mask when `redact` is on. */
+  redactColumns?: readonly string[];
 }
 
 interface FixtureResult {
@@ -40,6 +44,9 @@ interface FixtureResult {
   order: string[];
   /** Ready to paste. Values are literals, because this is a document. */
   sql: string;
+  /** Present when `redact: true` scrubbed columns before returning. */
+  redacted?: boolean;
+  redactedColumns?: string[];
   /** What was left out, and why. Absent when nothing was. */
   truncated?: string[];
   rowsRead: number;
@@ -69,11 +76,14 @@ export async function extractFixture(
   const identity = (table: string, row: Record<string, unknown>) => {
     const pk = primaryKey(findTable(schema, table)!);
     return pk.length
-      ? JSON.stringify(pk.map((c) => row[c]))
+      ? JSON.stringify(
+          pk.map((c) => row[c]),
+          jsonReplacer,
+        )
       : /* A keyless table cannot be deduped by key, so the whole row is its
          own identity — which is right: two identical rows are one row as far
          as a fixture is concerned. */
-        JSON.stringify(row);
+        JSON.stringify(row, jsonReplacer);
   };
 
   const total = () => [...collected.values()].reduce((n, rows) => n + rows.size, 0);
@@ -102,9 +112,14 @@ export async function extractFixture(
     return found.rows as Array<Record<string, unknown>>;
   };
 
+  const pk = primaryKey(root);
+  if (!pk.length) throw new Error(`"${root.name}" has no primary key, so no single row can be addressed by key.`);
+  const missing = pk.filter((c) => key[c] === undefined);
+  if (missing.length) throw new Error(`The key is missing ${missing.join(', ')} — a ${root.name} is identified by (${pk.join(', ')}).`);
+
   const rootRows = await fetch(
     root.id,
-    primaryKey(root).map((c) => ({ column: c, value: key[c] })),
+    pk.map((c) => ({ column: c, value: key[c] })),
     1,
   );
   if (!rootRows.length) throw new Error(`No ${root.name} with that key.`);
@@ -160,12 +175,22 @@ export async function extractFixture(
      the end is the honest place for it — the cycle is named in `order`. */
   const ordered = [...plan.insert, ...plan.cycles.flat()];
 
-  const tables = ordered
+  let tables = ordered
     .filter((id) => collected.has(id))
     .map((id) => ({
       table: id,
       rows: sortWithin(schema, id, [...collected.get(id)!.values()]),
     }));
+
+  const redactedColumns: string[] = [];
+  if (options.redact) {
+    const { maskTableRows } = await import('./mask.js');
+    tables = tables.map(({ table, rows }) => {
+      const masked = maskTableRows(schema, table, rows, { columns: options.redactColumns });
+      for (const col of masked.maskedColumns) redactedColumns.push(`${table}.${col}`);
+      return { table, rows: masked.rows };
+    });
+  }
 
   if (plan.cycles.length) {
     truncated.push(`a cycle between ${plan.cycles.flat().join(', ')} — those inserts need a nullable column set afterwards`);
@@ -177,6 +202,7 @@ export async function extractFixture(
     tables,
     order: tables.map((t) => t.table),
     sql: toSql(schema, tables),
+    ...(options.redact ? { redacted: true, redactedColumns } : {}),
     truncated: truncated.length ? truncated : undefined,
     rowsRead,
   };
@@ -199,7 +225,11 @@ function sortWithin(schema: DatabaseSchema, tableId: string, rows: Array<Record<
   const pk = primaryKey(table);
   if (!pk.length) return rows;
 
-  const idOf = (row: Record<string, unknown>) => JSON.stringify(pk.map((c) => row[c]));
+  const idOf = (row: Record<string, unknown>) =>
+    JSON.stringify(
+      pk.map((c) => row[c]),
+      jsonReplacer,
+    );
   const present = new Map(rows.map((row) => [idOf(row), row]));
   const placed = new Set<string>();
   const out: Array<Record<string, unknown>> = [];
@@ -209,7 +239,10 @@ function sortWithin(schema: DatabaseSchema, tableId: string, rows: Array<Record<
     if (placed.has(id) || seen.has(id)) return;
     seen.add(id);
     for (const fk of self) {
-      const parentId = JSON.stringify(fk.from.columns.map((c) => row[c]));
+      const parentId = JSON.stringify(
+        fk.from.columns.map((c) => row[c]),
+        jsonReplacer,
+      );
       const parent = present.get(parentId);
       if (parent) place(parent, seen);
     }
@@ -236,13 +269,14 @@ function toSql(schema: DatabaseSchema, tables: Array<{ table: string; rows: Arra
   for (const { table, rows } of tables) {
     if (!rows.length) continue;
     const meta = findTable(schema, table);
+    const target = meta?.schema ? `${quoteName(meta.schema)}.${quoteName(meta.name)}` : quoteName(meta?.name ?? table);
     const columns = meta?.columns.map((c) => c.name) ?? Object.keys(rows[0]);
     lines.push(`-- ${table}`);
     for (const row of rows) {
       const present = columns.filter((c) => row[c] !== undefined);
       lines.push(
-        `INSERT INTO ${quoteName(meta?.name ?? table)} (${present.map(quoteName).join(', ')}) ` +
-          `VALUES (${present.map((c) => literal(row[c])).join(', ')});`,
+        `INSERT INTO ${target} (${present.map(quoteName).join(', ')}) ` +
+          `VALUES (${present.map((c) => literal(row[c], schema.dialect)).join(', ')});`,
       );
     }
     lines.push('');
@@ -251,12 +285,21 @@ function toSql(schema: DatabaseSchema, tables: Array<{ table: string; rows: Arra
 }
 
 const quoteName = (id: string) => `"${id.replace(/"/g, '""')}"`;
+const quoteLiteral = (text: string) => `'${text.replace(/'/g, "''")}'`;
+const jsonReplacer = (_key: string, value: unknown) => (typeof value === 'bigint' ? value.toString() : value);
 
-function literal(value: unknown): string {
+function literal(value: unknown, dialect?: string): string {
   if (value === null || value === undefined) return 'NULL';
-  if (typeof value === 'number') return String(value);
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : quoteLiteral(String(value));
+  if (typeof value === 'bigint') return value.toString();
   if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? 'NULL' : quoteLiteral(value.toISOString());
+  if (value instanceof Uint8Array) {
+    const hex = Buffer.from(value).toString('hex');
+    return dialect === 'postgres' ? `'\\x${hex}'` : `X'${hex}'`;
+  }
+  if (typeof value === 'object') return quoteLiteral(JSON.stringify(value, jsonReplacer));
   /* Doubling the quote is the standard escape and the only one every dialect
      here agrees on. */
-  return `'${String(value).replace(/'/g, "''")}'`;
+  return quoteLiteral(String(value));
 }

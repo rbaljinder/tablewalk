@@ -358,10 +358,12 @@ tablewalk --host 0.0.0.0 --allowed-host data.example --auth-proxy-header X-Forwa
 ```
 
 or `TABLEWALK_AUTH_PROXY_HEADER=X-Forwarded-User` in the container's
-environment. From then on a request from beyond loopback without that
-header is refused with the header named — it did not come through the
-proxy — and every write in the journal carries the value. Loopback stays
-exempt, so the container's own health check keeps working. This carries
+environment. From then on a request from beyond loopback — or on loopback
+when forwarded headers, a non-loopback `Host` or `--trust-proxy` show a proxy
+is in front — is refused without that header, naming the header, and every
+write in the journal carries the value. Direct loopback stays exempt, and
+`/healthz` and `/readyz` answer ahead of the door, so the container's own
+health check keeps working. This carries
 the proxy's decision into the process; it is not a login of its own.
 `--trust-proxy` (no `-header`) is a different setting — which proxies the
 client addresses `X-Forwarded-For` is believed about — and naming a
@@ -410,7 +412,7 @@ Tauri collapses —
 Electron is roughly 2.5× the download to avoid a Rust toolchain, a
 per-platform binary acquisition step, and a second language in a project
 maintained by one person. The other factors are closer than they are usually
-claimed to be: both need an Apple Developer ID and notarisation on macOS and
+claimed to be: both need an Apple Developer ID and notarization on macOS and
 both have a first-party updater (`electron-updater`, `tauri-plugin-updater`).
 Tauri's smaller bundle would matter if the app were only a webview. It is not —
 it is a Node server that happens to have a window.

@@ -72,6 +72,10 @@ vi.mock('@mistriwork/kit/client/core.js', () => ({
 vi.mock('../sqlcomplete.js', () => ({ sqlSuggestions: () => [], tokenAt: () => ({ word: '', start: 0 }) }));
 vi.mock('@mistriwork/kit/client/prompt.js', () => ({ promptFor: async () => 'Over limit' }));
 const kept: Array<{ name: string; sql: string; source: string }> = [];
+const refreshedUndo = vi.fn();
+const advancedSource = vi.fn();
+vi.mock('../undo.js', () => ({ refreshUndo: () => refreshedUndo() }));
+vi.mock('@mistriwork/kit/client/recordSource.js', () => ({ advanceRecordSource: () => advancedSource() }));
 vi.mock('../sqlsaved.js', () => ({
   savedStatements: () => kept,
   saveStatement: (name: string, sql: string) => {
@@ -97,7 +101,7 @@ function draw(draft = '') {
       </div>
     </QueryClientProvider>,
   );
-  return { onClose, onDraft };
+  return { client, onClose, onDraft };
 }
 
 afterEach(() => {
@@ -106,6 +110,8 @@ afterEach(() => {
   gone.length = 0;
   toasts.length = 0;
   kept.length = 0;
+  refreshedUndo.mockReset();
+  advancedSource.mockReset();
   reply = {};
 });
 
@@ -149,16 +155,20 @@ test('an error is kept in the database’s words; no rows still says the shape',
   expect(document.querySelector('.sql-empty')).toHaveTextContent('The statement returned these columns: id.');
 });
 
-test('a write shows the statement first and runs on the write connection', async () => {
+test('a write shows the statement first, runs on the write connection, and refreshes caches and Undo', async () => {
   const user = userEvent.setup();
   reply = { affected: 3 };
-  draw('update customer set credit_limit = 0');
+  const { client } = draw('update customer set credit_limit = 0');
+  const invalidate = vi.spyOn(client, 'invalidateQueries');
   await user.click(screen.getByRole('button', { name: 'Run as write…' }));
   expect(screen.getByRole('dialog').querySelector('pre')).toHaveTextContent('update customer set credit_limit = 0');
   await user.click(screen.getByRole('button', { name: 'Run as write' }));
   await screen.findByText('3 rows changed.');
   expect(calls).toEqual([{ text: 'update customer set credit_limit = 0', limit: 500, write: true }]);
   expect(toasts).toEqual(['3 rows changed.']);
+  expect(advancedSource).toHaveBeenCalledTimes(1);
+  expect(refreshedUndo).toHaveBeenCalledTimes(1);
+  expect(invalidate).toHaveBeenCalledTimes(1);
 });
 
 test('a saved statement becomes a chip that fills the box, and can be forgotten', async () => {
@@ -172,4 +182,34 @@ test('a saved statement becomes a chip that fills the box, and can be forgotten'
   expect(input.value).toBe('select 1');
   await user.click(screen.getByRole('button', { name: 'Forget Over limit' }));
   expect(screen.queryByRole('button', { name: 'Over limit' })).toBeNull();
+});
+
+test('renders sibling environment pills in SQL header and highlights production target when confirming a SQL write', async () => {
+  const user = userEvent.setup();
+  const { state } = await import('@mistriwork/kit/client/core.js');
+  const onSwitchConnection = vi.fn();
+  (state as Record<string, unknown>).activeConnection = 'billing-prod';
+  (state as Record<string, unknown>).connections = [
+    { id: 'billing-local', name: 'billing-local', writable: true },
+    { id: 'billing-prod', name: 'billing-prod', writable: true },
+  ];
+  try {
+    const client = new QueryClient();
+    render(
+      <QueryClientProvider client={client}>
+        <div className="sql-panel">
+          <SqlPane draft="select count(*) from customer" onDraft={() => {}} onSwitchConnection={onSwitchConnection} onClose={() => {}} />
+        </div>
+      </QueryClientProvider>,
+    );
+    const localPill = screen.getByRole('button', { name: 'local' });
+    await user.click(localPill);
+    expect(onSwitchConnection).toHaveBeenCalledWith('billing-local', 'select count(*) from customer');
+
+    await user.click(screen.getByRole('button', { name: 'Run as write…' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Production environment (billing-prod)');
+  } finally {
+    (state as Record<string, unknown>).activeConnection = 'demo';
+    (state as Record<string, unknown>).connections = [{ id: 'demo', writable: true }];
+  }
 });

@@ -11,4 +11,5 @@ export const say = defineMessages({
   gonecountRemoved: '{goneCount} removed',
   columnsAdded: { one: '{count} column added', other: '{count} columns added' },
   columnsRemoved: { one: '{count} column removed', other: '{count} columns removed' },
+  tableNotInEnvironment: '"{table}" is not in {name} — opened the schema overview.',
 });

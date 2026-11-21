@@ -5,15 +5,96 @@
  */
 import { redact, saveConfig, scrubSecrets, storeSecret, connect, resolveConnection, UNTRUSTED_NETWORK } from '@mistriwork/engine/host';
 import { configLocations } from '@mistriwork/engine/server/config/locations.js';
+import { layoutsFor, pagesPath } from '@mistriwork/engine/server/layouts.js';
+import { productVersion } from '@mistriwork/engine/server/product.js';
 import { untrustedTargetRefusal } from '@mistriwork/engine/server/http/trust.js';
-import { readJson, send } from '@mistriwork/engine/server/http/reply.js';
+import { readBounded, readJson, send } from '@mistriwork/engine/server/http/reply.js';
 import type { RequestContext } from '@mistriwork/engine/server/http/context.js';
-import { agentTools } from '../mcp.js';
+import {
+  agentActivity,
+  agentTools,
+  answerMcpHttp,
+  getConnectionConfigExtras,
+  getConnectionEnvMeta,
+  getTopLevelConfigExtras,
+  listEnrichedConnections,
+  removeConnectionEnvMeta,
+  setConnectionEnvMeta,
+} from '../mcp.js';
+
+/** Public connection list for HTTP: attaches environment topology whenever a connection has an env, explicit metadata, or siblings. */
+function wireConnections(registry: RequestContext['registry']) {
+  return listEnrichedConnections(registry).map(({ database, env, tier, explicit, siblings, ...base }) =>
+    env || explicit || siblings.length > 0
+      ? {
+          ...base,
+          database,
+          ...(env ? { env } : {}),
+          tier,
+          ...(explicit ? { explicit: true } : {}),
+          siblings,
+        }
+      : base,
+  );
+}
+
+/** Session connections added from the page: enough for any real session, bounded so an exposed listener cannot grow the registry forever. */
+const MAX_SESSION_CONNECTIONS = 32;
+const MCP_HTTP_BODY_LIMIT = 4 * 1024 * 1024;
 
 export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
-  const { req, res, path, registry, configPath, bound, identity, trusted } = ctx;
+  const { req, res, url, path, registry, configPath, configViews, configQueries, configPages, bound, mount, identity, trusted } = ctx;
 
-  /* ---------- connection management ---------- */
+  /* ---------- connection management & shared MCP ---------- */
+
+  if (path === '/mcp') {
+    if (!trusted) {
+      send(res, 403, {
+        error:
+          'MCP over HTTP is served only on loopback so an exposed browser listener does not open an unauthenticated agent port. ' +
+          'Bind tablewalk to 127.0.0.1 (the default), or run tablewalk --mcp over stdio.',
+      });
+      return true;
+    }
+    if (req.method !== 'POST') {
+      res.setHeader('allow', 'POST');
+      send(res, 405, { error: 'Method not allowed. Send MCP JSON-RPC requests with POST.' });
+      return true;
+    }
+    const raw = await readBounded(req, MCP_HTTP_BODY_LIMIT);
+    if (!raw) {
+      send(res, 413, { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'MCP request body is too large.' } });
+      return true;
+    }
+    let payload: unknown;
+    try {
+      payload = JSON.parse(raw.toString('utf8'));
+    } catch {
+      send(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Request body is not valid JSON.' } });
+      return true;
+    }
+    const controller = new AbortController();
+    res.once('close', () => {
+      if (!res.writableEnded) controller.abort();
+    });
+    const reply = await answerMcpHttp(
+      registry,
+      {
+        views: configViews,
+        queries: configQueries,
+        pages: configPages,
+        savedPages: (connection) => layoutsFor(connection, pagesPath()),
+      },
+      payload,
+      { version: productVersion() ?? '0.0.0', signal: controller.signal, trusted },
+    );
+    if (reply === undefined) {
+      res.writeHead(202).end();
+      return true;
+    }
+    send(res, 200, reply);
+    return true;
+  }
 
   /**
    * The MCP tools, for the agent console: the Workbench's (an App server
@@ -22,7 +103,22 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
    * only where some connection's config allows any.
    */
   if (path === '/api/agent/tools' && (req.method === 'GET' || req.method === 'HEAD')) {
-    send(res, 200, { tools: agentTools(registry) });
+    send(res, 200, { tools: agentTools(registry, { trusted }) });
+    return true;
+  }
+  if (path === '/api/agent/activity' && (req.method === 'GET' || req.method === 'HEAD')) {
+    res.setHeader('cache-control', 'no-store');
+    if (!trusted) {
+      send(res, 200, { seq: 0, calls: [], egress: {}, mcpEndpoint: null });
+      return true;
+    }
+    const since = Number(url.searchParams.get('since') ?? '0');
+    const hostShown =
+      bound.host === '127.0.0.1' ? 'localhost' : bound.host.includes(':') && !bound.host.startsWith('[') ? `[${bound.host}]` : bound.host;
+    send(res, 200, {
+      ...agentActivity(registry, Number.isFinite(since) && since > 0 ? Math.floor(since) : 0),
+      mcpEndpoint: `http://${hostShown}:${bound.port}${mount.base}/mcp`,
+    });
     return true;
   }
   if (path === '/api/runtime') {
@@ -36,7 +132,7 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
 
   if (path === '/api/connections' && req.method !== 'POST') {
     send(res, 200, {
-      connections: registry.list(),
+      connections: wireConnections(registry),
       active: registry.active,
       appConfigured: false,
     });
@@ -123,10 +219,18 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
    * already open rather than stacking another onto the list.
    */
   if (path === '/api/connections/demo' && req.method === 'POST') {
+    if (!trusted) {
+      send(res, 403, {
+        error:
+          'This server is reachable beyond this machine, so the sample database can only be built from the machine ' +
+          'running tablewalk (or start with --demo).',
+      });
+      return true;
+    }
     const existing = registry.list().find((c) => c.name === 'demo');
     if (existing) {
       registry.setActive(existing.id);
-      send(res, 200, { connections: registry.list(), active: registry.active, added: existing.id });
+      send(res, 200, { connections: wireConnections(registry), active: registry.active, added: existing.id });
       return true;
     }
     const { demoDatabaseFile, makeDemoDatabase, seedDemoDatabase } = await import('@mistriwork/engine/server/demo.js');
@@ -147,7 +251,7 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
       send(res, 500, { error: (err as Error).message });
       return true;
     }
-    send(res, 200, { connections: registry.list(), active: registry.active, added: added.id });
+    send(res, 200, { connections: wireConnections(registry), active: registry.active, added: added.id });
     return true;
   }
 
@@ -168,6 +272,12 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
         return true;
       }
     }
+    if (registry.configs().filter((c) => c.source === 'session').length >= MAX_SESSION_CONNECTIONS) {
+      send(res, 429, {
+        error: `At most ${MAX_SESSION_CONNECTIONS} session connections can be kept at once. Remove one before adding another.`,
+      });
+      return true;
+    }
     /* Kept so a failed add can put it back. `add` makes the first connection
        active before anything has tried to dial it, so an add that then failed
        to open left the application pointed at a connection that had never
@@ -183,31 +293,28 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
       },
       { untrusted: !trusted },
     );
+    const database = typeof body.database === 'string' ? body.database.trim() : '';
+    const env = typeof body.env === 'string' ? body.env.trim() : '';
+    if (database || env) {
+      setConnectionEnvMeta(registry, added.id, {
+        ...(database ? { database } : {}),
+        ...(env ? { env } : {}),
+      });
+    }
     try {
       await registry.open(added.id);
     } catch (err) {
       registry.setActive(previous);
-      /* The entry stays, listed with its error.
-
-         "The add failed" and "nothing was added" are not the same thing, and
-         here the first is the useful one: a mistyped password should leave the
-         connection on screen to be corrected, not make someone retype the URL
-         they just got nearly right. It is also what already happens to a
-         connection in the config file that will not open — listed, with the
-         reason, rather than dropped.
-
-         The list goes back with the error so the client can show that without
-         a second request, which is what the id alone used to make it do. */
       send(res, 400, {
         error: (err as Error).message,
         id: added.id,
         added: added.id,
-        connections: registry.list(),
+        connections: wireConnections(registry),
         active: registry.active,
       });
       return true;
     }
-    send(res, 200, { connections: registry.list(), active: registry.active, added: added.id });
+    send(res, 200, { connections: wireConnections(registry), active: registry.active, added: added.id });
     return true;
   }
 
@@ -230,6 +337,8 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
     if (typeof body.name === 'string' && body.name.trim()) patch.name = body.name.trim();
     if (typeof body.url === 'string' && body.url.trim()) patch.url = body.url.trim();
     if (Array.isArray(body.schemas)) patch.schemas = body.schemas as string[];
+    const hasDatabase = typeof body.database === 'string';
+    const hasEnv = typeof body.env === 'string';
 
     if (!trusted && (patch.url || patch.schemas)) {
       /* A connection the operator wrote into the config is not the network's
@@ -252,15 +361,24 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
     }
 
     try {
-      await registry.update(id, patch, { untrusted: !trusted });
-      /* Opened straight away when the target changed, so a typo fails here
-         rather than the next time someone clicks the connection. */
-      if (patch.url || patch.schemas) await registry.open(id);
+      if (Object.keys(patch).length > 0) {
+        await registry.update(id, patch, { untrusted: !trusted });
+        /* Opened straight away when the target changed, so a typo fails here
+           rather than the next time someone clicks the connection. */
+        if (patch.url || patch.schemas) await registry.open(id);
+      }
+      if (hasDatabase || hasEnv) {
+        const prevMeta = getConnectionEnvMeta(registry, id) ?? {};
+        setConnectionEnvMeta(registry, id, {
+          database: hasDatabase ? String(body.database).trim() || undefined : prevMeta.database,
+          env: hasEnv ? String(body.env).trim() || undefined : prevMeta.env,
+        });
+      }
     } catch (err) {
-      send(res, 400, { error: (err as Error).message, connections: registry.list() });
+      send(res, 400, { error: (err as Error).message, connections: wireConnections(registry) });
       return true;
     }
-    send(res, 200, { connections: registry.list(), active: registry.active });
+    send(res, 200, { connections: wireConnections(registry), active: registry.active });
     return true;
   }
 
@@ -284,11 +402,12 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
     }
     try {
       await registry.remove(id);
+      removeConnectionEnvMeta(registry, id);
     } catch (err) {
       send(res, 400, { error: (err as Error).message });
       return true;
     }
-    send(res, 200, { connections: registry.list(), active: registry.active });
+    send(res, 200, { connections: wireConnections(registry), active: registry.active });
     return true;
   }
 
@@ -348,7 +467,42 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
 
     try {
       // The cache and search services travel with it: saving must not delete what it does not list.
-      await saveConfig(target, registry.configs(), registry.serviceConfigs(), registry.sections, registry.keptEntries());
+      const configs = registry.configs();
+      await saveConfig(target, configs, registry.serviceConfigs(), registry.sections, registry.keptEntries());
+      const topExtras = getTopLevelConfigExtras(registry);
+      const hasConnExtras = configs.some((c) => Boolean(getConnectionEnvMeta(registry, c.id) || getConnectionConfigExtras(registry, c.id)));
+      if (topExtras || hasConnExtras) {
+        const { readFile, writeFile } = await import('node:fs/promises');
+        const parsed = JSON.parse(await readFile(target, 'utf8')) as Record<string, unknown> & {
+          connections?: Array<Record<string, unknown>>;
+        };
+        if (topExtras) {
+          for (const [k, v] of Object.entries(topExtras)) {
+            if (v !== undefined && parsed[k] === undefined) {
+              parsed[k] = v;
+            }
+          }
+        }
+        if (hasConnExtras && Array.isArray(parsed.connections)) {
+          const used = new Set<number>();
+          for (const cfg of configs) {
+            const meta = getConnectionEnvMeta(registry, cfg.id);
+            const extras = getConnectionConfigExtras(registry, cfg.id);
+            const idx = parsed.connections.findIndex((entry, i) => !used.has(i) && entry && entry.name === cfg.name);
+            if (idx >= 0) {
+              used.add(idx);
+              if (meta?.database) parsed.connections[idx].database = meta.database;
+              if (meta?.env) parsed.connections[idx].env = meta.env;
+              if (extras) {
+                for (const [k, v] of Object.entries(extras)) {
+                  if (v !== undefined) parsed.connections[idx][k] = v;
+                }
+              }
+            }
+          }
+        }
+        await writeFile(target, `${JSON.stringify(parsed, null, 2)}\n`);
+      }
     } catch (err) {
       send(res, 500, { error: `Could not write ${target}: ${(err as Error).message}` });
       return true;
@@ -372,17 +526,29 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
     }
     /* Not gated on `trusted`: anyone who can reach an exposed server already reads every connection, so choosing which
        one the page shows exposes nothing new, and refusing it would break a container with several. */
-    const { schema } = await registry.open(id);
-    registry.setActive(id);
-    send(res, 200, { active: id, schema });
+    try {
+      const { schema } = await registry.open(id);
+      registry.setActive(id);
+      send(res, 200, { active: id, schema });
+    } catch (err) {
+      send(res, 400, { error: (err as Error).message });
+    }
     return true;
   }
 
   if (path === '/api/connections/refresh' && req.method === 'POST') {
     const body = await readJson(req);
     const id = String(body.id ?? registry.active ?? '');
-    const { schema } = await registry.refresh(id);
-    send(res, 200, { schema });
+    if (!registry.has(id)) {
+      send(res, 404, { error: `No connection called "${id}".` });
+      return true;
+    }
+    try {
+      const { schema } = await registry.refresh(id);
+      send(res, 200, { schema });
+    } catch (err) {
+      send(res, 400, { error: (err as Error).message });
+    }
     return true;
   }
 

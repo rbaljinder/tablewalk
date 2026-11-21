@@ -26,19 +26,23 @@ import {
   type Adapter,
   type DatabaseSchema,
   type TableMeta,
+  type ViewDef,
 } from '@mistriwork/engine/host';
 import { MAX_LIMIT } from '@mistriwork/engine/shared/reads.js';
 import { resolveOrder, tableDialect, type Order } from '@mistriwork/engine/shared/schema.js';
 import { continueGroups, keysetAfter, keysetOrder, pageBounds } from '@mistriwork/engine/shared/keysetPage.js';
-import { STATS, type Handler, ToolError } from '../toolkit.js';
+import { resolveNamedView, resolveSavedQuery, shelfOf } from '../shelf.js';
+import { ENV_ARG, STATS, type Handler, ToolError } from '../toolkit.js';
 
 export const definitions = [
   {
     name: 'export',
     description:
       'Write a result to a file on this machine instead of returning its rows — for more data than fits in a ' +
-      'reply. Give exactly one of `query` (the query language, as `query` takes it) or `sql` (a read-only SELECT, as ' +
-      '`sql` takes it). The file is csv (default), ndjson or json, in tablewalk-exports under the temp directory; the ' +
+      'reply. Give exactly one of `query` (the query language, as `query` takes it), `view` (a named view from ' +
+      'tablewalk.json), `sql` (a read-only SELECT, as `sql` takes it) or `saved` (a named query from tablewalk.json). ' +
+      'Pass `redact: true` to deterministically mask emails, phones, names, addresses and secrets in both the file and ' +
+      'the five-row sample. The file is csv (default), ndjson or json, in tablewalk-exports under the temp directory; the ' +
       'answer is its absolute path, row and byte counts, the columns, five sample rows, and how to load it (DuckDB, ' +
       'Python, head) — read the file with your own tools, not through this one. ndjson and csv (or their `.gz`) load ' +
       'straight into Databricks and DuckDB; `compress: "gzip"` writes `.csv.gz`/`.ndjson.gz` for an upload. A `query` export pages through the ' +
@@ -47,13 +51,25 @@ export const definitions = [
     inputSchema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'The query language, starting with a table name. Exclusive with `sql`.' },
-        sql: { type: 'string', description: 'A read-only SELECT. Exclusive with `query`.' },
+        query: { type: 'string', description: 'The query language, starting with a table name. Exclusive with `view`, `sql` and `saved`.' },
+        view: {
+          type: 'string',
+          description: 'Name or id of a configured view in tablewalk.json. Exclusive with `query`, `sql` and `saved`.',
+        },
+        sql: { type: 'string', description: 'A read-only SELECT. Exclusive with `query`, `view` and `saved`.' },
+        saved: { type: 'string', description: 'Name of a saved query in tablewalk.json. Exclusive with `query`, `view` and `sql`.' },
         format: { type: 'string', enum: ['csv', 'ndjson', 'json'], description: 'Default csv.' },
         limit: { type: 'number', description: 'Rows wanted. Absent: every row (a `sql` export stops at the cap).' },
         compress: { type: 'string', enum: ['gzip'], description: 'Gzip the file (`.gz`). Default: uncompressed.' },
+        redact: { type: 'boolean', description: 'Deterministically mask PII and secrets in the exported file and sample.' },
+        redact_columns: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Additional column names to mask when `redact` is true.',
+        },
         name: { type: 'string', description: 'A file name stem: letters, digits, `-` and `_`. Not a path.' },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       additionalProperties: false,
     },
@@ -76,6 +92,8 @@ export const definitions = [
         ms: { type: 'number' },
         truncated: { type: 'boolean', description: 'More rows exist than the file holds, because of a cap rather than `limit`.' },
         paging: { type: 'string', description: 'keyset, offset or single.' },
+        redacted: { type: 'boolean' },
+        redactedColumns: { type: 'array', items: { type: 'string' } },
         sample: { type: 'array', items: { type: 'object' }, description: 'The first five rows.' },
         hint: { type: 'string' },
         note: { type: 'string', description: 'Present when the file is not the whole answer, and why.' },
@@ -127,20 +145,28 @@ export interface ExportOutcome {
   ms: number;
   truncated: boolean;
   paging: Source['paging'];
+  redacted?: boolean;
+  redactedColumns?: string[];
   sample: Row[];
   note?: string;
 }
 
 export const handlers = {
-  export: async ({ args, adapter, schema, id }) => {
+  export: async ({ registry, args, adapter, schema, id }) => {
     const format = (args.format ?? 'csv') as string;
     if (!(FORMATS as readonly string[]).includes(format)) {
       throw new ToolError('invalid_argument', 'export: "format" must be "csv", "ndjson" or "json".');
     }
     const text = typeof args.query === 'string' ? args.query.trim() : '';
+    const namedView = typeof args.view === 'string' ? args.view.trim() : '';
     const statement = typeof args.sql === 'string' ? args.sql.trim() : '';
-    if (!text === !statement) {
-      throw new ToolError('invalid_argument', 'export: give exactly one of `query` (the query language) or `sql` (a read-only SELECT).');
+    const namedSaved = typeof args.saved === 'string' ? args.saved.trim() : '';
+    const given = [Boolean(text), Boolean(namedView), Boolean(statement), Boolean(namedSaved)].filter(Boolean).length;
+    if (given !== 1) {
+      throw new ToolError(
+        'invalid_argument',
+        'export: give exactly one of `query` (the query language), `view` (a named view), `sql` (a read-only SELECT) or `saved` (a named query).',
+      );
     }
     const wanted = args.limit === undefined || args.limit === null ? undefined : Math.floor(Number(args.limit));
     if (wanted !== undefined && !(wanted >= 1))
@@ -149,19 +175,51 @@ export const handlers = {
       throw new ToolError('invalid_argument', 'export: "compress" must be "gzip" when given.');
     }
     const stem = args.name === undefined ? undefined : stemOf(String(args.name));
+    const redact = args.redact === true || args.redact === 'true';
+    const redactColumns = Array.isArray(args.redact_columns)
+      ? args.redact_columns.map(String)
+      : typeof args.redact_columns === 'string' && args.redact_columns.trim()
+        ? args.redact_columns
+            .split(',')
+            .map((c) => c.trim())
+            .filter(Boolean)
+        : undefined;
 
     if (inFlight >= EXPORTS_IN_FLIGHT) {
       throw new ToolError('limit', `At most ${EXPORTS_IN_FLIGHT} exports run at once. Wait for one to finish and ask again.`);
     }
     inFlight++;
     try {
-      const source = text ? await querySource(adapter, schema, text, wanted) : await sqlSource(adapter, schema, statement, wanted);
+      const connName = registry?.list().find((c) => c.id === id)?.name;
+      let source: Source & { table: string };
+      let defaultStem: string | undefined;
+      if (text) {
+        source = await querySource(adapter, schema, text, wanted);
+      } else if (namedView) {
+        if (!adapter.runView) throw new ToolError('forbidden', `${schema.dialect} connections cannot run views in this build.`);
+        const viewDef = resolveNamedView(schema, registry ? shelfOf(registry).views : [], id, connName, namedView);
+        source = viewDefSource(adapter, schema, viewDef, wanted);
+        defaultStem = clean(viewDef.name || viewDef.id) || viewDef.base;
+      } else if (namedSaved) {
+        const picked = resolveSavedQuery(registry ? shelfOf(registry).queries : [], id, connName, namedSaved);
+        source = await sqlSource(adapter, schema, picked.sql.trim(), wanted);
+        defaultStem = clean(picked.name) || 'sql';
+      } else {
+        source = await sqlSource(adapter, schema, statement, wanted);
+      }
+      const maskModule = redact ? await import('../../mask.js') : undefined;
+      const maskTableId = findTable(schema, source.table)?.id;
       const outcome = await writeExport({
         source,
         format: format as Format,
         gzip: args.compress === 'gzip',
         connection: id,
-        stem: stem ?? source.table,
+        stem: stem ?? defaultStem ?? source.table,
+        ...(maskModule
+          ? {
+              mask: (rows: Row[]) => maskModule.maskTableRows(schema, maskTableId, rows, { columns: redactColumns }),
+            }
+          : {}),
       });
       const { note, ...rest } = outcome;
       return {
@@ -250,6 +308,21 @@ function dedupe(names: string[]): string[] {
   });
 }
 
+function viewDefSource(adapter: Adapter, schema: DatabaseSchema, view: ViewDef, wanted: number | undefined): Source & { table: string } {
+  const total = rowsWanted(wanted, view.limit);
+  const types = new Map<string, string>();
+  return offsetSource(
+    view.base,
+    total,
+    async (offset, size) => {
+      const { result } = await readView(adapter, schema, view, { limit: size, offset }, 'none');
+      for (const r of result.resolved ?? []) types.set(r.name, String((r as { type?: string }).type ?? 'unknown'));
+      return result;
+    },
+    (names) => names.map((name) => ({ name, type: types.get(name) ?? 'unknown' })),
+  );
+}
+
 async function querySource(
   adapter: Adapter,
   schema: DatabaseSchema,
@@ -263,19 +336,7 @@ async function querySource(
        resume from, so it pages by offset. */
     const asView = textToView(schema, text, { id: 'export', name: '' });
     if (asView.view && !asView.errors.length) {
-      const view = asView.view;
-      const total = rowsWanted(wanted, view.limit);
-      const types = new Map<string, string>();
-      return offsetSource(
-        view.base,
-        total,
-        async (offset, size) => {
-          const { result } = await readView(adapter, schema, view, { limit: size, offset }, 'none');
-          for (const r of result.resolved ?? []) types.set(r.name, String((r as { type?: string }).type ?? 'unknown'));
-          return result;
-        },
-        (names) => names.map((name) => ({ name, type: types.get(name) ?? 'unknown' })),
-      );
+      return viewDefSource(adapter, schema, asView.view, wanted);
     }
   }
   if (!parsed.query || parsed.errors.length) {
@@ -495,6 +556,7 @@ async function writeExport(opts: {
   gzip: boolean;
   connection: string;
   stem: string;
+  mask?: (rows: Row[]) => { rows: Row[]; maskedColumns: string[] };
 }): Promise<ExportOutcome> {
   const { source, format } = opts;
   const started = Date.now();
@@ -518,14 +580,21 @@ async function writeExport(opts: {
     bytes += buffer.length;
   };
   const sample: Row[] = [];
+  const redactedSet = new Set<string>();
   let rows = 0;
   try {
     let batch = await source.next();
     const names = source.columns.map((c) => c.name);
     if (format === 'csv') await put(`${names.map(csvCell).join(',')}\r\n`);
     while (batch) {
+      let batchRows = batch.rows;
+      if (opts.mask && batchRows.length) {
+        const masked = opts.mask(batchRows);
+        batchRows = masked.rows;
+        for (const col of masked.maskedColumns) redactedSet.add(col);
+      }
       const lines: string[] = [];
-      for (const row of batch.rows) {
+      for (const row of batchRows) {
         if (sample.length < SAMPLE_ROWS) sample.push(Object.fromEntries(names.map((n) => [n, plain(row[n]) ?? null])));
         lines.push(lineOf(format, names, row, rows === 0));
         rows++;
@@ -557,6 +626,7 @@ async function writeExport(opts: {
     ms: Date.now() - started,
     truncated: source.truncated(),
     paging: source.paging,
+    ...(opts.mask ? { redacted: true, redactedColumns: [...redactedSet] } : {}),
     sample,
     ...(note ? { note } : {}),
   };

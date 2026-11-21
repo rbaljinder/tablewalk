@@ -22,6 +22,9 @@ import { Dropdown } from '@mistriwork/kit/client/components/Dropdown.js';
 import { ConfirmDialog } from '@mistriwork/kit/client/components/Prompt.js';
 import { say } from '../copy/workbench/components/ConnectionDialog.js';
 import { addHostListener, removeHostListener } from '@mistriwork/kit/client/shellHost.js';
+import { classifyEnvTier, resolveConnectionEnvironment } from '../../shared/environments.js';
+
+const QUICK_ENVS = ['local', 'dev', 'staging', 'prod', 'replica'] as const;
 
 export interface Parts {
   driver: string;
@@ -36,12 +39,16 @@ export interface Submission {
   url: string;
   name: string;
   schemas: string[];
+  database?: string;
+  env?: string;
 }
 export interface ConnectionDialogProps {
   title: string;
   name?: string;
   url?: string;
   schemas?: string[];
+  database?: string;
+  env?: string;
   verb: string;
   /** Returns `{ error }` to keep the dialog open with the message, or null to close it. */
   run: (submission: Submission) => Promise<{ error: string } | null | undefined>;
@@ -76,6 +83,8 @@ export function ConnectionDialog({
   name: nameValue,
   url: urlValue,
   schemas: schemasValue,
+  database: databaseValue,
+  env: envProp,
   verb,
   run,
   onClose,
@@ -90,6 +99,8 @@ export function ConnectionDialog({
   const [urlText, setUrlText] = useState(() => shownUrl(parse(urlValue ?? '')));
   const [name, setName] = useState(nameValue ?? '');
   const [schemas, setSchemas] = useState((schemasValue ?? []).join(', '));
+  const [databaseGroup, setDatabaseGroup] = useState(databaseValue ?? '');
+  const [envValue, setEnvValue] = useState(envProp ?? '');
   const [secretMode, setSecretMode] = useState<'typed' | 'env'>(() =>
     /^\$\{?[A-Za-z_]/.test(parse(urlValue ?? '').password ?? '') ? 'env' : 'typed',
   );
@@ -102,7 +113,7 @@ export function ConnectionDialog({
   const alive = useRef(true);
   const approvedClose = useRef(false);
   const testGeneration = useRef(0);
-  const fingerprint = JSON.stringify([parts, urlText, name, schemas]);
+  const fingerprint = JSON.stringify([parts, urlText, name, schemas, databaseGroup, envValue]);
   const initial = useRef(fingerprint);
 
   useEffect(() => {
@@ -218,7 +229,16 @@ export function ConnectionDialog({
     setSubmitting(true);
     setResult(null);
     try {
-      const outcome = await run({ url: targetUrl().trim(), name: chosenName(), schemas: schemaList() });
+      const nextDb = databaseGroup.trim();
+      const nextEnv = envValue.trim();
+      const submission: Submission = {
+        url: targetUrl().trim(),
+        name: chosenName(),
+        schemas: schemaList(),
+        ...(nextDb || databaseValue !== undefined ? { database: nextDb } : {}),
+        ...(nextEnv || envProp !== undefined ? { env: nextEnv } : {}),
+      };
+      const outcome = await run(submission);
       if (!alive.current) return;
       if (outcome?.error) setResult({ ok: false, text: outcome.error });
       else setCompleted(true);
@@ -374,6 +394,59 @@ export function ConnectionDialog({
           />
           <span className="field-hint">{say('whatItIsCalled')}</span>
         </label>
+        {(() => {
+          const inferred = resolveConnectionEnvironment({ id: 'draft', name: chosenName() });
+          const activeEnv = envValue.trim() || inferred.env || '';
+          return (
+            <div className="conn-dialog-env-grid">
+              <label className="field-stack">
+                <span>{say('databaseGroup')}</span>
+                <input
+                  type="text"
+                  className="cell-edit"
+                  spellCheck={false}
+                  value={databaseGroup}
+                  onChange={(e) => setDatabaseGroup(e.currentTarget.value)}
+                  placeholder={inferred.database || say('optionalDatabaseGroup')}
+                  aria-label={say('databaseGroup')}
+                />
+                <span className="field-hint">{say('databaseGroupHint')}</span>
+              </label>
+              <div className="field-stack">
+                <label className="field-stack">
+                  <span>{say('environmentLabel')}</span>
+                  <input
+                    type="text"
+                    className="cell-edit"
+                    spellCheck={false}
+                    value={envValue}
+                    onChange={(e) => setEnvValue(e.currentTarget.value)}
+                    placeholder={inferred.env ?? say('optionalEnvironment')}
+                    aria-label={say('environmentLabel')}
+                  />
+                </label>
+                <div className="conn-env-picks" role="group" aria-label={say('environmentPresets')}>
+                  {QUICK_ENVS.map((tier) => {
+                    const selected = envValue.trim().toLowerCase() === tier;
+                    const inferredMatch = !envValue.trim() && activeEnv.toLowerCase() === tier;
+                    return (
+                      <button
+                        key={tier}
+                        type="button"
+                        className={`env-pill tone-${classifyEnvTier(tier)}${selected || inferredMatch ? ' active' : ''}`}
+                        aria-pressed={selected}
+                        onClick={() => setEnvValue(selected ? '' : tier)}
+                      >
+                        <span className="env-pill-dot" aria-hidden="true" />
+                        <span>{tier}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
         <label className="field-stack">
           <span>{say('schemas')}</span>
           <input
@@ -415,7 +488,7 @@ export function ConnectionDialog({
           {testing ? say('testing') : say('test')}
         </Button>
         <Button intent="primary" disabled={submitting} onClick={() => void submit()}>
-          {submitting ? 'Saving...' : verb}
+          {submitting ? say('saving') : verb}
         </Button>
       </div>
       {discard && (

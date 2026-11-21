@@ -361,3 +361,24 @@ test('a failed newer switch recovers the schema whose dependent loads it superse
   expect(render).toHaveBeenCalledOnce();
   expect(toast).toHaveBeenCalledWith('C unavailable', 'error');
 });
+
+test('preserveContext keeps the active table and query across sibling environments and falls back cleanly when absent', async () => {
+  state.stack = [{ kind: 'table', table: 'invoice', query: 'invoice status = open' }];
+  (document.getElementById('query') as HTMLInputElement).value = 'invoice status = open';
+  api.mockResolvedValueOnce({
+    schema: { label: 'billing-staging', dialect: 'postgres', tables: [{ id: 'invoice', name: 'invoice' }] },
+  });
+  await connections.selectConnection('b', { preserveContext: true });
+  expect(state.activeConnection).toBe('b');
+  expect(state.stack).toEqual([{ kind: 'table', table: 'invoice', query: 'invoice status = open' }]);
+  expect((document.getElementById('query') as HTMLInputElement).value).toBe('invoice status = open');
+
+  api.mockResolvedValueOnce({
+    schema: { label: 'billing-prod', dialect: 'postgres', tables: [{ id: 'customer', name: 'customer' }] },
+  });
+  await connections.selectConnection('c', { preserveContext: true });
+  expect(state.activeConnection).toBe('c');
+  expect(state.stack).toEqual([]);
+  expect((document.getElementById('query') as HTMLInputElement).value).toBe('');
+  expect(toast).toHaveBeenCalledWith(expect.stringContaining('"invoice" is not in billing-prod'), 'ok');
+});

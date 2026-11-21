@@ -33,4 +33,8 @@ export const say = defineMessages({
   countConnections: { one: '{count} connection', other: '{count} connections' },
   expandedFromTheEnvironment: '{example} — expanded from the environment, never stored.',
   shownOfAll: '{shown} of {all}',
+  writable: 'writable',
+  cloneEnv: '+ Env',
+  cloneEnvTitle: 'Add another environment for {database}',
+  countEnvironments: { one: '{count} env', other: '{count} envs' },
 });

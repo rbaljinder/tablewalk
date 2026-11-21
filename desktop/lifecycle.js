@@ -51,6 +51,7 @@ function createServerLifecycle({
   graceMs = 3000,
 }) {
   let current = null;
+  let starting = null;
   let port = 0;
 
   /** Retire a record: its exit is now expected. */
@@ -59,6 +60,7 @@ function createServerLifecycle({
     record.retired = true;
     const child = record.child;
     if (current === record) current = null;
+    if (starting === record) starting = null;
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
     child.kill('SIGTERM');
     const hard = setTimeout(() => child.kill('SIGKILL'), graceMs);
@@ -78,9 +80,14 @@ function createServerLifecycle({
         ),
       );
     }
+    if (starting) {
+      const pending = starting;
+      starting = null;
+      if (pending.cancel) pending.cancel();
+      else retire(pending);
+    }
 
     return freePort().then((chosen) => {
-      port = chosen;
       const args = [...found.args, '--port', String(chosen), '--host', '127.0.0.1'];
       if (target) args.push('--db', target);
 
@@ -104,8 +111,8 @@ function createServerLifecycle({
           abort.abort();
           outcome(value);
         };
-        /* A failed startup leaves nothing running: the child is stopped here,
-           so a retry starts from a clean slate. */
+        /* A failed startup leaves nothing of the candidate running, and leaves
+           any already-serving child in place so a bad file never kills a good session. */
         const failStartup = (message) => {
           retire(record);
           finish(fail, new Error(message));
@@ -120,7 +127,7 @@ function createServerLifecycle({
           return;
         }
         record.child = child;
-        current = record;
+        starting = record;
 
         child.stdout?.on('data', note);
         child.stderr?.on('data', note);
@@ -153,6 +160,10 @@ function createServerLifecycle({
           fetch(`http://127.0.0.1:${chosen}/api/connections`, { signal: abort.signal })
             .then((res) => {
               if (!res.ok) throw new Error(String(res.status));
+              if (starting === record) starting = null;
+              if (current && current !== record) retire(current);
+              current = record;
+              port = chosen;
               finish(ok, chosen);
             })
             .catch(() => {
@@ -176,10 +187,15 @@ function createServerLifecycle({
    * promise.
    */
   function stop() {
+    if (starting) {
+      const pending = starting;
+      starting = null;
+      if (pending.cancel) pending.cancel();
+      else retire(pending);
+    }
     const record = current;
     if (!record) return;
-    if (record.cancel) record.cancel();
-    else retire(record);
+    retire(record);
   }
 
   return {

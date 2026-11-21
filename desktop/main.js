@@ -231,10 +231,9 @@ function createWindow(port) {
 async function openDatabase() {
   const file = await chooseDatabase();
   if (!file) return;
-  writeState({ lastDatabase: file });
-  stopServer();
   try {
     const port = await startServer(file);
+    writeState({ lastDatabase: file });
     if (window) window.loadURL(`http://127.0.0.1:${port}/`);
     else createWindow(port);
   } catch (err) {
@@ -321,8 +320,20 @@ if (!app.requestSingleInstanceLock()) {
       if (target) writeState({ lastDatabase: target });
       createWindow(port);
     } catch (err) {
-      dialog.showErrorBox('tablewalk could not start', err.message);
-      app.quit();
+      if (!fromArgv && target) {
+        dialog.showErrorBox('Could not open the last database', err.message);
+        writeState({ lastDatabase: undefined });
+        try {
+          const port = await startServer(undefined);
+          createWindow(port);
+        } catch (fallbackErr) {
+          dialog.showErrorBox('tablewalk could not start', fallbackErr.message);
+          app.quit();
+        }
+      } else {
+        dialog.showErrorBox('tablewalk could not start', err.message);
+        app.quit();
+      }
     }
 
     app.on('activate', () => {

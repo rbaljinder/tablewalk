@@ -389,4 +389,114 @@
       & .ddl { white-space: pre-wrap; overflow-wrap: anywhere; }
     }
   }
+
+  /* ---------- multi-environment controls & posture badges (all looks) ---------- */
+
+  :is(.conn-env-bar, .sql-env-bar) {
+    display: inline-flex; align-items: center; gap: 1px; padding: var(--space-1);
+    border: 1px solid var(--line); border-radius: var(--radius); background: var(--ground); flex-wrap: wrap;
+  }
+  .env-pill {
+    display: inline-flex; align-items: center; gap: var(--space-1h); padding: 1px var(--space-2h);
+    border: 1px solid transparent; border-radius: var(--radius-item, var(--radius)); background: transparent;
+    color: var(--ink-muted); font: 500 var(--text-xs) var(--face-ui, var(--sans)); line-height: 1.35; white-space: nowrap;
+  }
+  button.env-pill { cursor: pointer; }
+  .env-pill.compact { padding: 1px var(--space-2); }
+  .env-pill-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-subtle); flex: none; }
+  .env-pill-mode { font: 500 var(--text-xs) var(--figures, var(--code)); opacity: 0.85; margin-inline-start: var(--space-1); }
+
+  :is(.env-pill, .agent-target-pill):is(.tone-local, .tone-dev) .env-pill-dot { background: var(--status-good); }
+  :is(.env-pill, .agent-target-pill).tone-test .env-pill-dot { background: var(--accent); }
+  :is(.env-pill, .agent-target-pill).tone-staging .env-pill-dot { background: var(--status-warning); }
+  :is(.env-pill, .agent-target-pill).tone-replica .env-pill-dot { background: var(--status-info); }
+  :is(.env-pill, .agent-target-pill).tone-prod .env-pill-dot { background: var(--status-critical); }
+
+  .env-pill:is(.active, .compact:not(button)):is(.tone-local, .tone-dev) {
+    color: var(--status-good);
+    background: color-mix(in srgb, var(--status-good) 11%, var(--surface));
+    border-color: color-mix(in srgb, var(--status-good) 30%, var(--line));
+  }
+  .env-pill:is(.active, .compact:not(button)).tone-test {
+    color: var(--accent-ink, var(--accent));
+    background: color-mix(in srgb, var(--accent) 11%, var(--surface));
+    border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  }
+  .env-pill:is(.active, .compact:not(button)).tone-staging {
+    color: var(--status-warning);
+    background: color-mix(in srgb, var(--status-warning) 12%, var(--surface));
+    border-color: color-mix(in srgb, var(--status-warning) 35%, var(--line));
+  }
+  .env-pill:is(.active, .compact:not(button)).tone-replica {
+    color: var(--status-info);
+    background: color-mix(in srgb, var(--status-info) 11%, var(--surface));
+    border-color: color-mix(in srgb, var(--status-info) 30%, var(--line));
+  }
+  .env-pill:is(.active, .compact:not(button)).tone-prod {
+    color: var(--status-critical); font-weight: 600;
+    background: color-mix(in srgb, var(--status-critical) 12%, var(--surface));
+    border-color: color-mix(in srgb, var(--status-critical) 38%, var(--line));
+  }
+  .env-pill.active.tone-other {
+    color: var(--ink); background: var(--surface); border-color: var(--line-strong);
+  }
+
+  .conn-group { border-bottom: 1px solid var(--line-strong); }
+  .conn-group:last-child { border-bottom: 0; }
+  .conn-group-head {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3);
+    padding: var(--space-2h) var(--space-4); background: var(--ground); border-bottom: 1px solid var(--line);
+  }
+  .conn-group-title-wrap, .conn-group-pipeline, .conn-pipeline-step {
+    display: inline-flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
+  }
+  .conn-group-title { font: 600 var(--text-sm) var(--face-ui, var(--sans)); color: var(--ink); }
+  .conn-pipeline-arrow { color: var(--ink-subtle); font-size: var(--text-xs); }
+  .conn-name { display: inline-flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; min-inline-size: 0; }
+  .conn-badge.writable {
+    color: var(--status-warning);
+    border-color: color-mix(in srgb, var(--status-warning) 35%, var(--line));
+    background: color-mix(in srgb, var(--status-warning) 9%, var(--surface));
+  }
+
+  .conn-dialog-env-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: var(--space-3h); margin-block: var(--space-2);
+  }
+  .conn-env-picks { display: flex; flex-wrap: wrap; gap: var(--space-1h); margin-block-start: var(--space-1h); }
+
+  .sql-title { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--space-2h); }
+  .sql-prod-callout {
+    margin: var(--space-2) 0; padding: var(--space-2h) var(--space-3h); border-radius: var(--radius);
+    border: 1px solid color-mix(in srgb, var(--status-critical) 45%, var(--line));
+    background: color-mix(in srgb, var(--status-critical) 10%, var(--surface));
+    color: var(--status-critical); font: 600 var(--text-sm) var(--face-ui, var(--sans));
+  }
+
+  .agent-target-bar {
+    display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2h);
+    padding: var(--space-2h) var(--space-3h); margin-block-end: var(--space-3h);
+    border: 1px solid var(--line); border-radius: var(--radius-panel, var(--radius)); background: var(--ground);
+  }
+  .agent-target-label { font: 600 var(--text-xs) var(--face-ui, var(--sans)); color: var(--ink-subtle); }
+  .agent-target-list { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+  .agent-target-pill {
+    display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2h);
+    border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+    color: var(--ink-muted); font: 500 var(--text-xs) var(--face-ui, var(--sans)); cursor: pointer;
+  }
+  .agent-target-pill.active { color: var(--ink); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .agent-target-pill.active.tone-prod { border-color: var(--status-critical); box-shadow: 0 0 0 1px var(--status-critical); }
+  .agent-target-pill.active.tone-staging { border-color: var(--status-warning); box-shadow: 0 0 0 1px var(--status-warning); }
+  .agent-target-posture { color: var(--ink-subtle); font: var(--text-xs) var(--figures, var(--code)); }
+
+  @media (hover: hover) {
+    button.env-pill:not(.active):hover { color: var(--ink); background: var(--raised); }
+    .agent-target-pill:not(.active):hover { color: var(--ink); border-color: var(--line-strong); background: var(--raised); }
+    #query:hover:not(:focus) { border-color: var(--line-strong); }
+  }
+
+  @media (max-width: 600px) {
+    body:not(.app-mode) .conn-picker { flex-wrap: wrap; }
+    .conn-group-pipeline { display: none; }
+  }
 }

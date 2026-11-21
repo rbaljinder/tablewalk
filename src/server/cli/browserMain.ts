@@ -55,18 +55,86 @@ function appFlagIn(opts: import('@mistriwork/engine/server/cli/args.js').Options
   return flags.find(([on]) => on)?.[1] ?? 'that start';
 }
 
+interface BrowserExtraArgs {
+  rest: string[];
+  connection?: string;
+  env?: string;
+  lease?: string;
+  lazy?: boolean;
+  query?: string;
+  call?: string;
+  args?: string;
+  error?: string;
+}
+
+function extractBrowserExtraArgs(argv: readonly string[]): BrowserExtraArgs {
+  const rest: string[] = [];
+  const out: BrowserExtraArgs = { rest };
+  const takeValue = (flag: string, next: string | undefined, idx: number): [string, number] | null => {
+    if (next === undefined || (next.startsWith('-') && next !== '-')) {
+      out.error ??= `${flag} requires a value.`;
+      return null;
+    }
+    return [next, idx + 1];
+  };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--') {
+      rest.push(...argv.slice(i));
+      break;
+    }
+    if (arg === '--lazy') {
+      out.lazy = true;
+    } else if (arg === '--connection') {
+      const got = takeValue(arg, argv[i + 1], i);
+      if (got) [out.connection, i] = got;
+    } else if (arg === '--env') {
+      const got = takeValue(arg, argv[i + 1], i);
+      if (got) [out.env, i] = got;
+    } else if (arg === '--lease') {
+      const got = takeValue(arg, argv[i + 1], i);
+      if (got) [out.lease, i] = got;
+    } else if (arg === '--query') {
+      const got = takeValue(arg, argv[i + 1], i);
+      if (got) [out.query, i] = got;
+    } else if (arg === '--call') {
+      const got = takeValue(arg, argv[i + 1], i);
+      if (got) [out.call, i] = got;
+    } else if (arg === '--args') {
+      const got = takeValue(arg, argv[i + 1], i);
+      if (got) [out.args, i] = got;
+    } else {
+      rest.push(arg);
+    }
+  }
+  if (out.query !== undefined && out.call !== undefined) {
+    out.error ??= 'Pass either --query or --call, not both.';
+  }
+  if (out.args !== undefined && out.call === undefined && out.query === undefined) {
+    out.error ??= '--args goes with --call (or --query).';
+  }
+  return out;
+}
+
 export const main: Main = async () => {
   /* Before any flag is read: the variables both binaries read are said in this one's name (TABLEWALK_*). */
   setProduct('tablewalk', browserVersion());
-  const argv = process.argv.slice(2);
-  const own = subcommandIn(BROWSER_COMMANDS, argv);
-  if (own) return runSubcommand(own, argv.slice(1), 'tablewalk');
+  const rawArgv = process.argv.slice(2);
+  const own = subcommandIn(BROWSER_COMMANDS, rawArgv);
+  if (own) return runSubcommand(own, rawArgv.slice(1), 'tablewalk');
   /* A word that is the App framework's command (`tablewalk check`, `tablewalk dev`), unless a file of that name is
      here to open, as `./theme` without `show` always was. `serve` is no command of either: a start serves. */
-  if (argv[0] !== undefined && [...APP_COMMAND_WORDS, 'serve'].includes(argv[0]) && !(await import('node:fs')).existsSync(argv[0])) {
-    if (argv[0] === 'serve') return refuseApp('serving an App', ['--app', '<dir>']);
-    return refuseApp(`tablewalk ${argv[0]}`, argv);
+  if (
+    rawArgv[0] !== undefined &&
+    [...APP_COMMAND_WORDS, 'serve'].includes(rawArgv[0]) &&
+    !(await import('node:fs')).existsSync(rawArgv[0])
+  ) {
+    if (rawArgv[0] === 'serve') return refuseApp('serving an App', ['--app', '<dir>']);
+    return refuseApp(`tablewalk ${rawArgv[0]}`, rawArgv);
   }
+
+  const extra = extractBrowserExtraArgs(rawArgv);
+  const argv = extra.rest;
 
   /* Past the commands, a start: the flag parser and what every start does are loaded now, and not for a command. */
   const [{ CHECK_VALIDATION, parseArgs }, { answeredFirst, configureProcess, startFor, SCHEMA_EXPORTS }] = await Promise.all([
@@ -74,8 +142,13 @@ export const main: Main = async () => {
     import('@mistriwork/engine/server/cli/startup.js'),
   ]);
   const opts = parseArgs(argv);
-  if (process.env[CHECK_VALIDATION] === '1') return refuseApp('checking an App', ['check', ...argv]);
+  if (process.env[CHECK_VALIDATION] === '1') return refuseApp('checking an App', ['check', ...rawArgv]);
   if (await answeredFirst(opts, BROWSER)) return;
+  if (extra.error) {
+    console.error(`tablewalk: ${extra.error}`);
+    process.exitCode = 2;
+    return;
+  }
   /* --write-pool sizes an App's writer pool; the browser's writes run one at a time (configureWriteOrder below), so
      the engine's parser accepts it and nothing here would read it. */
   if (opts.writePool !== undefined) {
@@ -90,7 +163,7 @@ export const main: Main = async () => {
     process.exitCode = 1;
     return;
   }
-  if (startFor(opts) === 'mistri') return refuseApp(appFlagIn(opts), argv);
+  if (startFor(opts) === 'mistri') return refuseApp(appFlagIn(opts), rawArgv);
   /* A word one slip from an App command (`tablewalk chek`) and no file of that name: the near miss is mistri's. */
   if (opts.target && /^[a-z][a-z-]*$/.test(opts.target)) {
     const [{ existsSync }, { didYouMean }] = await Promise.all([import('node:fs'), import('@mistriwork/engine/server/cli/usage.js')]);
@@ -106,17 +179,34 @@ export const main: Main = async () => {
       return;
     }
   }
+
+  const oneShotTool = extra.query !== undefined || Boolean(extra.call);
+  /* Detect piped/FIFO/`TABLEWALK_CONFIG_JSON` config before `configNamesApps` touches `opts.config` (reading a FIFO
+     twice would lose its contents). Avoids importing `vaultConfig.js` on ordinary starts. */
+  const maybePiped =
+    !opts.noConfig &&
+    (opts.config === '-' ||
+      opts.config === '/dev/stdin' ||
+      Boolean(!opts.config && process.env.TABLEWALK_CONFIG_JSON?.trim()) ||
+      Boolean(opts.config && /^\/(?:dev\/fd|proc\/self\/fd)\/\d+$/.test(opts.config)) ||
+      (Boolean(opts.config) && Boolean((await import('node:fs')).statSync(opts.config!, { throwIfNoEntry: false })?.isFIFO())));
+
   /* A config file that lists Apps is the App framework's to serve, whatever the mode: a server serves them, and an
      App enrolled in a row policy is never read around. The file is read raw for that one question. */
-  if (await (await import('@mistriwork/engine/server/cli/config.js')).configNamesApps(opts)) {
-    return refuseApp('a config file that lists Apps', argv);
+  if (!maybePiped && (await (await import('@mistriwork/engine/server/cli/config.js')).configNamesApps(opts))) {
+    return refuseApp('a config file that lists Apps', rawArgv);
   }
   configureProcess(opts, 'tablewalk');
-  /* In MCP mode stdout is the protocol channel; in an export, the document — `--export md >> CLAUDE.md` must
-     append a brief, not a brief with a startup banner stapled to its forehead. Every startup line goes to stderr,
+  /* In MCP mode stdout is the protocol channel; in an export or one-shot query, the document — `--export md >> CLAUDE.md`
+     must append a brief, not a brief with a startup banner stapled to its forehead. Every startup line goes to stderr,
      redirected here once rather than guarded at each call site. */
-  const printing = opts.mcp || opts.export || opts.lint || opts.diff;
+  const printing = opts.mcp || opts.export || opts.lint || opts.diff || oneShotTool;
   if (printing) console.log = (...args: unknown[]) => console.error(...args);
+  if (opts.mcp && process.env.TABLEWALK_MCP_URL?.trim()) {
+    const { bridgeMcpToHttp } = await import('./mcpMode.js');
+    bridgeMcpToHttp(process.env.TABLEWALK_MCP_URL.trim());
+    return;
+  }
 
   const [{ Registry, redact }, { readStartupConfig }, { configLocations }, { configureWriteOrder }] = await Promise.all([
     import('@mistriwork/engine/host'),
@@ -124,10 +214,74 @@ export const main: Main = async () => {
     import('@mistriwork/engine/server/config/locations.js'),
     import('@mistriwork/engine/adapters/writeLanes.js'),
   ]);
-  const registry = new Registry();
-  /* Config first, then the command line, so an explicitly named database is the one you land on even when a
-     config file lists others. */
-  const config = await readStartupConfig(opts, registry, browserSections);
+  let registry = new Registry();
+  let config: Awaited<ReturnType<typeof readStartupConfig>>;
+  let mcpInputStream: NodeJS.ReadableStream | undefined;
+  let startupMeta: { active?: string; only?: boolean; lazy?: boolean } = {};
+
+  if (maybePiped) {
+    const { loadPipedVaultConfig } = await import('./vaultConfig.js');
+    try {
+      const loaded = await loadPipedVaultConfig(opts.config, opts.mcp, extra.lease);
+      if (loaded.namesApps) return refuseApp('a config file that lists Apps', rawArgv);
+      registry = loaded.registry;
+      mcpInputStream = loaded.remainingStdin;
+      startupMeta = { active: loaded.active, only: loaded.only, lazy: loaded.lazy };
+      if ((opts as { targetFromEnvironment?: boolean }).targetFromEnvironment && registry.list().length) {
+        opts.target = '';
+        (opts as { targetFromEnvironment?: boolean }).targetFromEnvironment = false;
+      }
+      config = {
+        views: loaded.views,
+        queries: loaded.queries,
+        pages: loaded.pages,
+        layouts: loaded.layouts,
+        apps: [],
+        appEnv: {},
+      };
+    } catch (err) {
+      console.error(`tablewalk: ${(err as Error).message}`);
+      await registry.closeAll().catch(() => {});
+      process.exit(1);
+    }
+  } else {
+    /* Config first, then the command line, so an explicitly named database is the one you land on even when a
+       config file lists others. */
+    config = await readStartupConfig(opts, registry, browserSections);
+    if (config.loadedConfigText) {
+      const { loadConfigEnvMeta } = await import('../mcp/toolkit.js');
+      loadConfigEnvMeta(registry, config.loadedConfigText);
+    }
+    /* Checked inline here so plain `serve` and `--mcp` do not import `vaultConfig.js` + `blocklist.js`
+       (test/cli-startup.test.ts holds plain `serve` at <= 260 modules). */
+    const needsExtended =
+      Boolean(extra.lease) ||
+      Boolean(
+        config.loadedConfigText &&
+        /"(?:blocklist|blockedTables|blockedFields|blockedColumns|lease|secrets|dotenv|defaultConnection|active|lazy|only)"/.test(
+          config.loadedConfigText,
+        ),
+      );
+    if (needsExtended) {
+      const { applyExtendedDiskConfig } = await import('./vaultConfig.js');
+      try {
+        const upgraded = applyExtendedDiskConfig(
+          registry,
+          config.loadedConfigText,
+          config.configPath ?? 'tablewalk.json',
+          opts.mcp,
+          extra.lease,
+        );
+        registry = upgraded.registry;
+        startupMeta = { active: upgraded.active, only: upgraded.only, lazy: upgraded.lazy };
+      } catch (err) {
+        console.error(`tablewalk: ${(err as Error).message}`);
+        await registry.closeAll().catch(() => {});
+        process.exit(1);
+      }
+    }
+  }
+
   /* A connection under the row-security backstop signs in as a tenant App's restricted role, which sees no tenant
      row until a tenant is set: every table would open empty and say nothing of why. Only a tenant App reads through
      it, as mistri refuses the same of its Workbench. Refused before anything connects. */
@@ -201,6 +355,22 @@ export const main: Main = async () => {
     registry.setActive(added.id);
   }
 
+  if (extra.connection || extra.env || startupMeta.active || startupMeta.only) {
+    const { applyStartupTargetSelection } = await import('./vaultConfig.js');
+    try {
+      await applyStartupTargetSelection(registry, {
+        connection: extra.connection,
+        env: extra.env,
+        configActive: startupMeta.active,
+        only: startupMeta.only,
+      });
+    } catch (err) {
+      console.error(`tablewalk: ${(err as Error).message}`);
+      await registry.closeAll().catch(() => {});
+      process.exit(1);
+    }
+  }
+
   /* Nothing named a database. Every mode but the server needs one: `--export` prints a schema, `--lint` reads one,
      `--diff` compares two, and every MCP tool is a question about one, and an agent on stdio has no way to supply
      it — so those stop here, with the usage and the places a config was looked for. The server starts, and its
@@ -211,9 +381,20 @@ export const main: Main = async () => {
     console.log(`\nLooked for a config file in:\n  ${configLocations(opts.config).join('\n  ')}`);
     process.exit(1);
   }
-  /* The active connection is opened eagerly, so a bad target is a startup error with a clear message rather than
-     a broken page. The rest stay closed until someone selects them. */
-  if (!nothingToOpen) {
+
+  if (oneShotTool) {
+    const { runCliOneShot } = await import('./vaultConfig.js');
+    return runCliOneShot(
+      registry,
+      { views: config.views, queries: config.queries, pages: config.pages },
+      { query: extra.query, call: extra.call, args: extra.args, connection: extra.connection, env: extra.env },
+    );
+  }
+
+  /* The active connection is opened eagerly unless `--lazy` (or a piped/leased MCP config with `lazy: true`)
+     defers dialing until the agent's first tool call so MCP handshake answers immediately. */
+  const skipEagerOpen = opts.mcp && (extra.lazy === true || startupMeta.lazy === true);
+  if (!nothingToOpen && !skipEagerOpen) {
     try {
       const { schema } = await registry.open(registry.active!);
       console.log(
@@ -222,6 +403,7 @@ export const main: Main = async () => {
     } catch (err) {
       console.error(`Could not open the active connection:`);
       console.error(`  ${(err as Error).message}`);
+      await registry.closeAll().catch(() => {});
       process.exit(1);
     }
   }
@@ -241,7 +423,13 @@ export const main: Main = async () => {
   if (opts.mcp) {
     const { serveMcpMode } = await import('./mcpMode.js');
     const { packageVersion } = await import('@mistriwork/engine/server/cli/usage.js');
-    return serveMcpMode(opts, registry, { queries: config.queries, pages: config.pages }, packageVersion);
+    return serveMcpMode(
+      opts,
+      registry,
+      { views: config.views, queries: config.queries, pages: config.pages },
+      packageVersion,
+      mcpInputStream,
+    );
   }
   const { serveBrowser } = await import('./browserServe.js');
   await serveBrowser(opts, registry, config, nothingToOpen);

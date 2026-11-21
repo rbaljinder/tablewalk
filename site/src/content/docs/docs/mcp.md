@@ -30,13 +30,28 @@ Or name one database instead of a config file: `"args": ["tablewalk", "--mcp", "
 claude mcp add tablewalk -- npx tablewalk --mcp --db postgres://localhost/app
 ```
 
-Every answer carries a `link` the person beside the agent can open in the page, and says what it cost in rows and milliseconds. To see exactly what an agent receives, open **Agent console** from the `···` menu or `⌘K`: it runs the same tools by hand and shows each answer with its size in tokens.
+Every answer carries a `link` the person beside the agent can open in the page, and says what it cost in rows and milliseconds. When tablewalk is running locally in the browser, external MCP clients can also connect directly over Streamable HTTP at `http://localhost:4111/mcp` (or bridge stdio via `TABLEWALK_MCP_URL=http://localhost:4111/mcp`) so the browser and the agent share one connection pool, Undo stack and live activity trail. To see what an agent receives — or watch external MCP calls live — open **Agent console** from the `···` menu or `⌘K`, or pick **Copy brief for agent** to put the current view, key and MCP call onto the clipboard.
+
+### Vault configs, leases and fast agent lookups
+
+When credentials live in a secret vault, pipe a JSON config straight into `tablewalk` so secrets stay in memory and connections close automatically when the agent finishes:
+
+```sh
+# MCP session over a vault config with lazy startup, a 5-minute lease, and a table/field blocklist
+{ vault get db/billing-staging; cat; } | npx tablewalk --mcp --config - --env staging --lease 5m
+
+# Process substitution or one-shot JSON lookup (closes all connections on exit)
+npx tablewalk --config <(vault get db/billing) --env staging --query "invoice status = open limit 10"
+npx tablewalk --config <(vault get db/billing) --call schema_summary
+```
+
+Piped JSON configs can include `"secrets"` (or `.env` text under `"dotenv"`), `"active": "billing@staging"`, `"only": true` to expose only the selected target, `"lazy": true` (default for piped `--mcp` configs so `initialize` and `tools/list` answer before dialing the database), `"lease": { "idleSeconds": 30, "maxSeconds": 300 }`, and `"blocklist": { "tables": ["audit_*"], "fields": { "*": ["*_token"], "customer": ["tax_id"] } }`.
 
 ![The Agent console running the record tool on customer 1, with the answer and its cost](/shots/agent.webp?v=2)
 
 ## The tools
 
-Twenty-four tools: eighteen read-only, and six writes that are listed only when a connection is `"writable": true`. Every tool also takes `connection` when there is more than one.
+Twenty-six tools: twenty read-only, and six writes that are listed only when a connection is `"writable": true`. Every tool also takes `connection` (an id, `"db@env"` such as `"billing@staging"`, or `"@staging"` relative to the active database) and optional `env` (`"local"`, `"staging"`, `"prod"`) when multiple environments are configured. Connections can declare `"database"` and `"env"` in `tablewalk.json` or rely on naming conventions (`billing-local`, `billing_staging`, `billing [prod]`); when a `prod` environment is active, write tools refuse implicit calls unless `connection` or `env: "prod"` is passed explicitly.
 
 ### Reading
 
@@ -48,18 +63,20 @@ Twenty-four tools: eighteen read-only, and six writes that are listed only when 
 | `tables` | Every table with its column count, approximate rows, and whether it is a view. | `{}` |
 | `table` | One table in full: columns, keys, DDL, and its foreign keys in both directions. | `{"table": "invoice"}` |
 | `find` | Where a name or a value lives, across every table and column. | `{"value": "Harbour Freight"}` |
-| `query` | Rows from the [query language](/docs/query/), a total, and the SQL it compiled to. | `{"q": "invoice total > 500 sort total desc", "limit": 10}` |
+| `query` | Rows from the [query language](/docs/query/) or a named `view` in `tablewalk.json`, a total, and the SQL it compiled to. | `{"q": "invoice total > 500 sort total desc", "limit": 10}` |
 | `breakdown` | Counts and sums grouped by something. | `{"q": "invoice count by status"}` |
 | `record` | One row, its human name, and everything that points at it. | `{"table": "customer", "key": {"id": 1}}` |
-| `sql` | A read-only `SELECT` for what the language cannot say. | `{"statement": "select status, count(*) from invoice group by 1", "timeout_ms": 2000}` |
-| `export` | A result written to a file instead of returned: csv, ndjson or json, optionally gzipped. | `{"query": "invoice status = open", "format": "ndjson"}` |
+| `sql` | A read-only `SELECT` or a named `saved` query from `tablewalk.json`. | `{"statement": "select status, count(*) from invoice group by 1", "timeout_ms": 2000}` |
+| `export` | A `query`, `view`, `sql` or `saved` result written to a file (csv, ndjson or json; optionally gzipped and `redact: true`). | `{"query": "invoice status = open", "format": "ndjson", "redact": true}` |
 | `explain` | The planner's account of a statement, without running it. | `{"statement": "select * from invoice where customer_id = 1"}` |
 | `profile` | What a table's columns hold: null share, distinct count, range, common values. | `{"table": "invoice"}` |
 | `diff` | How two connections' shapes differ: tables, columns, types, keys, delete rules. | `{"from": "staging", "to": "production"}` |
 | `order` | What has to exist first: tables in insert order, and the reverse for teardown. | `{"tables": ["invoice_line", "customer"]}` |
-| `fixture` | One real row and everything it needs to exist, ready for `insert_graph`. | `{"table": "invoice", "key": {"id": 1001}, "children": true}` |
+| `fixture` | One real row and everything it needs to exist (with optional `redact: true` masking), ready for `insert_graph`. | `{"table": "invoice", "key": {"id": 1001}, "children": true, "redact": true}` |
 | `lint` | What the shape will cost: keyless tables, unindexed foreign keys, naive timestamps. | `{"severity": "high"}` |
+| `anomalies` | Data-level counterpart to `lint`: temporal inversions, dangling soft-delete lifecycles, and >=95%-populated nullable FKs with null outliers. | `{"severity": "high"}` |
 | `change_impact` | What breaks if a table or column changes, asked before writing the migration. | `{"table": "customer", "column": "email"}` |
+| `verify_ddl` | Runs candidate DDL in an isolated SQLite copy or rolled-back PostgreSQL transaction and returns `diff` plus newly introduced `lint` findings. | `{"sql": "ALTER TABLE invoice ADD COLUMN po_number text"}` |
 
 ### Writing
 
@@ -67,10 +84,10 @@ Listed only when a connection is `"writable": true`, and refused on any other co
 
 | Tool | What it does | Example arguments |
 | --- | --- | --- |
-| `update` | Sets columns on exactly one row, named by its whole primary key. | `{"table": "invoice", "key": {"id": 1001}, "set": {"status": "paid"}}` |
-| `insert` | Adds one row and answers with what the database stored. | `{"table": "country", "values": {"code": "IS", "name": "Iceland"}}` |
+| `update` | Sets columns on exactly one row (`dryRun: true` checks inside `BEGIN … ROLLBACK`). | `{"table": "invoice", "key": {"id": 1001}, "set": {"status": "paid"}}` |
+| `insert` | Adds one row and answers with what the database stored (`dryRun: true` rolls back after inspecting defaults and keys). | `{"table": "country", "values": {"code": "IS", "name": "Iceland"}}` |
 | `delete` | Removes one row in two calls: the first reports what points at it, the second confirms. | `{"table": "invoice", "key": {"id": 1001}, "confirm": true}` |
-| `insert_graph` | Inserts related rows in one transaction, all or none. A row names its parent by label. | `{"rows": [{"table": "customer", "as": "c1", "values": {"name": "Dry Creek"}}, {"table": "invoice", "values": {"customer_id": {"ref": "c1"}, "invoice_date": "2026-11-02", "total": 99.5}}]}` |
+| `insert_graph` | Inserts related rows in one transaction, all or none (`dryRun: true` validates and rolls back). A row names its parent by label. | `{"rows": [{"table": "customer", "as": "c1", "values": {"name": "Dry Creek"}}, {"table": "invoice", "values": {"customer_id": {"ref": "c1"}, "invoice_date": "2026-11-02", "total": 99.5}}]}` |
 | `delete_graph` | Removes several rows in one transaction, children first. | `{"rows": [{"table": "invoice", "key": {"id": 1908}}], "confirm": true}` |
 | `revert` | Shows the last write, then undoes it when confirmed with that preview's id. | `{"confirm": true, "expectedId": 12}` |
 
@@ -81,7 +98,7 @@ Listed only when a connection is `"writable": true`, and refused on any other co
 `export` is for more rows than fit in a reply. It streams the result to a file and answers with the file's absolute path, row and byte counts, the columns, five sample rows, and a line on how to load it, so the rows never pass through the agent's context. The agent then reads the file with its own tools: DuckDB, Python, `head`.
 
 - Files land in `tablewalk-exports` under the system temp directory, named `<connection>-<name or table>-<yyyyMMdd-HHmmss>.<ext>` (UTC). An existing file is never overwritten, and a caller cannot choose the directory.
-- Give exactly one of `query` (the [query language](/docs/query/)) or `sql` (a read-only `SELECT`). `format` is `csv` (default), `ndjson` or `json`; `limit` caps the rows; `name` sets the file stem; `compress: "gzip"` writes `.csv.gz` or `.ndjson.gz`, which Databricks and DuckDB read directly.
+- Give exactly one of `query` (the [query language](/docs/query/)), `view` (a named view from `tablewalk.json`), `sql` (a read-only `SELECT`), or `saved` (a named query from `tablewalk.json`). `format` is `csv` (default), `ndjson` or `json`; `limit` caps the rows; `name` sets the file stem; `compress: "gzip"` writes `.csv.gz` or `.ndjson.gz`; `redact: true` deterministically masks emails, phones, names, addresses and secrets in both the file and the sample.
 - A `query` export pages through the whole result by key in batches of 5,000 rows, with no ceiling beyond `limit`. A query that cannot page by key (a view over references, a union) reads by position and stops at 100,000 rows, and says so. A `sql` export is one read capped at 100,000 rows; the answer says when it stopped short.
 - Ids past 2^53 stay strings, dates are ISO, and an empty CSV field is `null`. At most two exports run at once.
 
@@ -95,8 +112,8 @@ Listed only when a connection is `"writable": true`, and refused on any other co
 
 | Profile | Tools |
 | --- | --- |
-| `explore` | connections, refresh, schema_summary, tables, table, find, query, breakdown, sql, export, record, explain, profile |
-| `migrate` | connections, refresh, schema_summary, tables, table, change_impact, lint, order, diff, profile, explain |
+| `explore` | connections, refresh, schema_summary, tables, table, find, query, breakdown, sql, export, record, explain, profile, anomalies |
+| `migrate` | connections, refresh, schema_summary, tables, table, change_impact, lint, anomalies, verify_ddl, order, diff, profile, explain |
 | `seed` | connections, refresh, schema_summary, tables, table, order, fixture, record, query, insert, insert_graph, delete_graph, revert |
 | `full` | all of them (the default) |
 
@@ -108,8 +125,10 @@ Three prompts: `orient`, `pre-migration-check` (takes `tables`) and `investigate
 
 - `tablewalk://{connection}/schema`, the schema brief
 - `tablewalk://{connection}/table/{table}`, one table
+- `tablewalk://{connection}/views`, the named multi-table views in your config file
 - `tablewalk://{connection}/queries`, the named SQL in your config file
 - `tablewalk://{connection}/pages`, page definitions from the config file and pages saved from the browser
+- `tablewalk://{connection}/page/{page}`, one record page in full (root table, sections, fields, related lists and filters)
 
 ## When a call fails
 
@@ -132,7 +151,7 @@ A failed call is a normal result with `isError: true` and a sentence a model can
 
 ## Limits
 
-- Rows that enter an agent's context leave your machine. Point agents at development databases, or mark a connection `"rows": false` so only the shape answers. When every connection is shape-only, `query`, `sql`, `record` and `breakdown` are not listed at all. When every connection [hides columns](/docs/connections/#a-connections-fields), `sql` and `explain` are not listed.
+- Rows that enter an agent's context leave your machine. Point agents at development databases, or mark a connection `"rows": false` so only the shape and bounded counts (`lint`, `anomalies`) answer. When every connection is shape-only, `query`, `sql`, `record`, `breakdown` and `export` are not listed at all. When every connection [hides columns](/docs/connections/#a-connections-fields), `sql`, `explain` and `verify_ddl` are not listed.
 - A statement runs under a 30-second cap; `sql` takes `timeout_ms` to lower it (at least 100). A client that cancels a call stops its statement.
 - Totals from `query` and `breakdown`, and counts on `record`, stop at 10,000 and say so.
-- `sql` and `explain` refuse statements that touch tablewalk's own tables (`__mistri_*`, the `mistri` schema, `__tablewalk_*`, `tablewalk_auth`).
+- `sql`, `explain` and `verify_ddl` refuse statements that touch tablewalk's own tables (`__mistri_*`, the `mistri` schema, `__tablewalk_*`, `tablewalk_auth`).
