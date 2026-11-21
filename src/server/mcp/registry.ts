@@ -65,9 +65,14 @@ async function callTool(
   name: string,
   args: Record<string, unknown>,
   trusted?: boolean,
+  fallbackConnection?: string,
 ): Promise<Record<string, unknown>> {
   if (name === 'connections') return schemaTools.connections(registry);
-  const opened = await openFor(registry, name === 'diff' ? (args.from ?? args.connection) : args.connection);
+  const opened = await openFor(registry, name === 'diff' ? (args.from ?? args.connection) : args.connection, {
+    env: name === 'diff' ? (args.fromEnv ?? args.env) : args.env,
+    write: WRITE_NAMES.has(name) || name === 'verify_ddl',
+    fallbackConnection,
+  });
   const handler = HANDLERS.get(name);
   if (!handler) throw new ToolError('not_found', `No tool called "${name}".`);
   return handler({ registry, args, trusted, ...opened });
@@ -233,9 +238,9 @@ interface InputSchema {
 function argumentProblem(schema: InputSchema, args: Record<string, unknown>): string | null {
   const known = Object.keys(schema.properties ?? {});
   if (schema.additionalProperties === false) {
-    /* `connection` is every tool's, as the `connections` tool says, whether
-       or not the tool's own schema spells it out. */
-    const stray = Object.keys(args).filter((k) => !known.includes(k) && k !== 'connection');
+    /* `connection` and `env` are every tool's, whether or not the tool's own
+       schema spells them out. */
+    const stray = Object.keys(args).filter((k) => !known.includes(k) && k !== 'connection' && k !== 'env');
     if (stray.length) {
       const hint = stray.map((k) => {
         /* A guess when one is close: a shared prefix (`qeury` → `q`,
@@ -283,7 +288,7 @@ export async function runTool(
   registry: Registry,
   name: string,
   args: Record<string, unknown>,
-  options: { signal?: AbortSignal; trusted?: boolean; via?: 'mcp' | 'console' } = {},
+  options: { signal?: AbortSignal; trusted?: boolean; via?: 'mcp' | 'console'; fallbackConnection?: string } = {},
 ): Promise<{
   content: Array<{ type: 'text'; text: string }>;
   structuredContent?: Record<string, unknown>;
@@ -327,7 +332,7 @@ export async function runTool(
     /* A call withdrawn before its turn never starts. */
     throwIfCancelled(signal);
     const started = Date.now();
-    const answered = await withCancellation(signal, () => callTool(registry, name, args, options.trusted));
+    const answered = await withCancellation(signal, () => callTool(registry, name, args, options.trusted, options.fallbackConnection));
     /* A read the client cancelled answers as cancelled even when its last
        statement beat the cancel home. A write that finished says what it
        did: an agent told "cancelled" about a write that landed would make it

@@ -5,47 +5,112 @@
  * above it.
  */
 import { Dropdown } from '@mistriwork/kit/client/components/Dropdown.js';
+import type { EnvironmentTier, SiblingEnvironment } from '../../shared/environments.js';
 import { say } from '../copy/workbench/components/ConnectionPicker.js';
 
-interface PickerConnection {
+const PIPELINE = ['local', 'dev', 'test', 'staging', 'replica', 'prod', 'other'];
+
+export interface PickerConnection {
   id: string;
   name: string;
   detail?: string;
   dialect?: string;
   error?: string;
   connected?: boolean;
+  writable?: boolean;
+  rows?: boolean;
+  database?: string;
+  env?: string;
+  tier?: EnvironmentTier;
+  explicit?: boolean;
+  siblings?: SiblingEnvironment[];
+}
+
+function postureShort(conn: { writable?: boolean; rows?: boolean }): string {
+  if (conn.rows === false) return say('postureShape');
+  return conn.writable ? say('postureRw') : say('postureRo');
 }
 
 export function ConnectionPicker({
   connections,
   active,
   onSelect,
+  onSelectSibling,
   onReintrospect,
   onManage,
 }: {
   connections: PickerConnection[];
   active: string;
   onSelect: (id: string) => void;
+  onSelectSibling?: (id: string) => void;
   onReintrospect: () => void;
   onManage: () => void;
 }) {
+  const activeConn = connections.find((c) => c.id === active);
+  const activeDb = (activeConn?.database ?? activeConn?.name ?? '').toLowerCase();
+  const groupEnvs = activeConn
+    ? connections
+        .filter((c) => (c.database ?? c.name).toLowerCase() === activeDb)
+        .sort((a, b) => PIPELINE.indexOf(a.tier ?? 'other') - PIPELINE.indexOf(b.tier ?? 'other'))
+    : [];
+  const switchSibling = onSelectSibling ?? onSelect;
+
   return (
     <>
       <Dropdown
         ariaLabel={say('databaseConnection')}
         value={active}
-        /* The detail is the redacted form — host and database, never a password — as a second line rather than a tooltip, because it is what tells two connections called "app" apart. */
         items={connections.map((conn) => ({
           value: conn.id,
           label: conn.name,
           detail: conn.error ? say('unreachableDetail', { detail: conn.detail ?? '' }) : conn.detail,
-          badge: conn.dialect,
+          badge: conn.env ? `${conn.env}${conn.dialect ? ` · ${conn.dialect}` : ''}` : conn.dialect,
           tone: conn.error ? 'bad' : undefined,
         }))}
-        onChange={onSelect}
-        /* Re-introspection on demand: the schema is read once and trusted, which is wrong the moment a migration runs in another window. */
+        onChange={(id) => {
+          const picked = connections.find((c) => c.id === id);
+          if (activeConn && picked && (picked.database ?? picked.name).toLowerCase() === activeDb) switchSibling(id);
+          else onSelect(id);
+        }}
         actions={[{ label: say('reReadTheSchema'), onSelect: onReintrospect }]}
       />
+      {activeConn && groupEnvs.length > 1 ? (
+        <div
+          className="conn-env-bar"
+          role="group"
+          aria-label={say('environmentGroup', { database: activeConn.database ?? activeConn.name })}
+        >
+          {groupEnvs.map((envConn) => {
+            const current = envConn.id === active;
+            const posture = postureShort(envConn);
+            return (
+              <button
+                key={envConn.id}
+                type="button"
+                className={`env-pill tone-${envConn.tier ?? 'other'}${current ? ' active' : ''}`}
+                aria-pressed={current}
+                title={say(current ? 'currentEnvironmentTitle' : 'switchEnvironmentTitle', { name: envConn.name, posture })}
+                onClick={() => {
+                  if (!current) switchSibling(envConn.id);
+                }}
+              >
+                <span className="env-pill-dot" aria-hidden="true" />
+                <span className="env-pill-label">{envConn.env ?? envConn.name}</span>
+                {current ? <span className="env-pill-mode">{posture}</span> : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : activeConn && (activeConn.tier === 'prod' || activeConn.tier === 'staging' || Boolean(activeConn.explicit && activeConn.env)) ? (
+        <span
+          className={`env-pill active tone-${activeConn.tier ?? 'other'}`}
+          title={say('currentEnvironmentTitle', { name: activeConn.name, posture: postureShort(activeConn) })}
+        >
+          <span className="env-pill-dot" aria-hidden="true" />
+          <span className="env-pill-label">{activeConn.env ?? activeConn.tier}</span>
+          <span className="env-pill-mode">{postureShort(activeConn)}</span>
+        </span>
+      ) : null}
       <button
         type="button"
         className="conn-manage"

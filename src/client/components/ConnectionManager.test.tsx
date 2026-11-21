@@ -157,3 +157,37 @@ test('keyboard activation of an action does not open its containing connection r
   expect(props.onOpen).not.toHaveBeenCalled();
   expect(props.onClose).not.toHaveBeenCalled();
 });
+
+test('groups multi-environment databases under logical headers in pipeline order while keeping .conn-name-text pure', async () => {
+  const user = userEvent.setup();
+  const onCloneEnv = vi.fn();
+  api.mockResolvedValueOnce({
+    active: 'billing-local',
+    connections: [
+      { id: 'billing-prod', name: 'billing-prod', detail: 'prod/billing', dialect: 'postgres', source: 'config', rows: false },
+      { id: 'billing-local', name: 'billing-local', detail: 'localhost/billing', dialect: 'postgres', source: 'config', writable: true },
+      { id: 'billing-staging', name: 'billing-staging', detail: 'stg/billing', dialect: 'postgres', source: 'config' },
+    ],
+  });
+  state.activeConnection = 'billing-local';
+  render(
+    <div className="conn-manager">
+      <ConnectionManager
+        onClose={vi.fn()}
+        onOpen={vi.fn()}
+        onAdd={vi.fn()}
+        onCloneEnv={onCloneEnv}
+        onEdit={vi.fn()}
+        onRemove={vi.fn()}
+        onSaveFile={vi.fn()}
+        onIntrospect={vi.fn(async () => {})}
+      />
+    </div>,
+  );
+  const rows = await screen.findAllByRole('option');
+  expect(rows.map((r) => r.querySelector('.conn-name-text')?.textContent)).toEqual(['billing-local', 'billing-staging', 'billing-prod']);
+  expect(document.querySelector('.conn-group-title')).toHaveTextContent('billing');
+  expect(rows[0]).toHaveTextContent('writable');
+  await user.click(screen.getAllByRole('button', { name: '+ Env' })[0]);
+  expect(onCloneEnv).toHaveBeenCalledWith(expect.objectContaining({ id: 'billing-local', database: 'billing' }), expect.any(Function));
+});

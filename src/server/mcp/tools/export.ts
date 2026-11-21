@@ -32,7 +32,7 @@ import { MAX_LIMIT } from '@mistriwork/engine/shared/reads.js';
 import { resolveOrder, tableDialect, type Order } from '@mistriwork/engine/shared/schema.js';
 import { continueGroups, keysetAfter, keysetOrder, pageBounds } from '@mistriwork/engine/shared/keysetPage.js';
 import { resolveNamedView, resolveSavedQuery, shelfOf } from '../shelf.js';
-import { STATS, type Handler, ToolError } from '../toolkit.js';
+import { ENV_ARG, STATS, type Handler, ToolError } from '../toolkit.js';
 
 export const definitions = [
   {
@@ -69,6 +69,7 @@ export const definitions = [
         },
         name: { type: 'string', description: 'A file name stem: letters, digits, `-` and `_`. Not a path.' },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       additionalProperties: false,
     },

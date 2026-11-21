@@ -26,4 +26,8 @@ export const say = defineMessages({
   copyMcpEndpoint: 'MCP {url}',
   copiedMcpEndpoint: 'Copied MCP endpoint URL',
   openLink: 'open {link}',
+  targetConnectionLabel: 'Target',
+  targetConnectionsGroup: 'Target connection',
+  shapeOnlyBadge: 'shape-only',
+  writableBadge: 'writable',
 });

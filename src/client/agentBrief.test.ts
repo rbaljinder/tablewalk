@@ -57,3 +57,23 @@ test('formats schema, table query, breakdown and record briefs with MCP calls', 
   expect(writeText).toHaveBeenCalledWith(rowText);
   expect(toasts).toEqual([{ message: 'Copied brief for agent', tone: undefined }]);
 });
+
+test('includes logical database environment and sibling postures when multiple environments exist', async () => {
+  const { state } = await import('@mistriwork/kit/client/core.js');
+  (state as Record<string, unknown>).activeConnection = 'billing-local';
+  (state as Record<string, unknown>).connections = [
+    { id: 'billing-local', name: 'billing-local', writable: true },
+    { id: 'billing-staging', name: 'billing-staging', writable: false },
+    { id: 'billing-prod', name: 'billing-prod', writable: false, rows: false },
+  ];
+  try {
+    entry = { kind: 'table', table: 'invoice', query: 'invoice status = open' };
+    const brief = buildAgentBrief();
+    expect(brief).toContain('- Environment: `billing` · `local` (writable)');
+    expect(brief).toContain('`billing-staging` (staging, read-only)');
+    expect(brief).toContain('`billing-prod` (prod, shape-only)');
+  } finally {
+    (state as Record<string, unknown>).activeConnection = 'demo';
+    delete (state as Record<string, unknown>).connections;
+  }
+});

@@ -23,7 +23,7 @@ import { queriesFor, type SavedQuery } from '@mistriwork/engine/shared/sqlsaved.
 import type { PageDef, PageSection } from '@mistriwork/engine/shared/page.js';
 // Pure like shape.js, and split out for exactly this reason: the same brief
 // the browser downloads and the CLI prints, offered as ambient context.
-import { openFor, ToolError } from './toolkit.js';
+import { listEnrichedConnections, openFor, ToolError } from './toolkit.js';
 import type { Answer } from './protocol.js';
 
 /**
@@ -270,6 +270,29 @@ export function tableBrief(schema: DatabaseSchema, table: ReturnType<typeof find
   return lines.join('\n');
 }
 
+function postureOf(conn: { writable?: boolean; rows?: boolean }): string {
+  if (conn.rows === false) return 'shape-only';
+  return conn.writable ? 'writable' : 'read-only';
+}
+
+export function schemaBrief(registry: Registry, connId: string, schema: DatabaseSchema): string {
+  const base = toMarkdown(schema) as string;
+  const conn = listEnrichedConnections(registry).find((c) => c.id === connId);
+  if (!conn || (!conn.env && !conn.siblings.length)) return base;
+  const envLine = `- Environment: \`${conn.database}\`${conn.env ? ` · \`${conn.env}\`` : ''} (\`${conn.id}\`, ${postureOf(conn)})`;
+  const siblingLine = conn.siblings.length
+    ? `- Sibling environments: ${conn.siblings
+        .map((s) => `\`${s.id}\`${s.env ? ` (\`${s.env}\`, ${postureOf(s)})` : ` (${postureOf(s)})`}`)
+        .join(', ')} — target via \`connection: "${conn.database}@<env>"\` or \`env: "<env>"\``
+    : undefined;
+  const block = [envLine, ...(siblingLine ? [siblingLine] : [])].join('\n');
+  const newline = base.indexOf('\n');
+  if (newline >= 0 && base.startsWith('#')) {
+    return `${base.slice(0, newline + 1)}\n${block}\n${base.slice(newline + 1)}`;
+  }
+  return `${block}\n\n${base}`;
+}
+
 /* Resources are the reference shelf: things a client can attach to a
    conversation without spending a tool call, @-mentionable where the
    client supports it. The schema brief per connection is concrete;
@@ -438,10 +461,10 @@ export async function readResource(registry: Registry, shelf: Shelf, params: Rec
       }
       return answer({ error: { code: -32002, message: `No page "${pageId}" behind "${uri}".` } });
     }
-    const { schema } = await openFor(registry, connId);
+    const { schema, id: resolvedId } = await openFor(registry, connId);
     if (match[2] === 'schema') {
       return answer({
-        result: { contents: [{ uri, mimeType: 'text/markdown', text: toMarkdown(schema) as string }] },
+        result: { contents: [{ uri, mimeType: 'text/markdown', text: schemaBrief(registry, resolvedId, schema) }] },
       });
     }
     const table = tableNamed(schema, decodeURIComponent(match[3]));

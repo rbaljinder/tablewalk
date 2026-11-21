@@ -8,7 +8,7 @@
  */
 import { Refusal, clampLimit, STATEMENT_TIMEOUT_MS, distance, type DatabaseSchema } from '@mistriwork/engine/host';
 import { resolveSavedQuery, shelfOf } from '../shelf.js';
-import { READS, STATS, type Handler, ToolError } from '../toolkit.js';
+import { ENV_ARG, READS, STATS, type Handler, ToolError } from '../toolkit.js';
 
 export const definitions = [
   {
@@ -39,6 +39,7 @@ export const definitions = [
           description: `Lower this statement’s ${STATEMENT_TIMEOUT_MS / 1000}-second cap, in ms. Floor 100; never raises it.`,
         },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       additionalProperties: false,
     },
@@ -78,6 +79,7 @@ export const definitions = [
           items: { type: ['string', 'number', 'boolean', 'null'] },
         },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       required: ['statement'],
       additionalProperties: false,

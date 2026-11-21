@@ -12,6 +12,7 @@ import { say } from '../copy/workbench/components/AgentConsole.js';
 import { shown } from '@mistriwork/kit/client/addressMount.js';
 import { addHostListener, navFollow, removeHostListener } from '@mistriwork/kit/client/shellHost.js';
 import { shell } from '@mistriwork/kit/client/shellMode.js';
+import { enrichConnectionsWithEnvironments, type EnvironmentTier, type SiblingEnvironment } from '../../shared/environments.js';
 
 interface Spec {
   type?: string | string[];
@@ -88,6 +89,7 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
     refetchIntervalInBackground: false,
   });
   const [selected, setSelected] = useState<string | null>(null);
+  const [pinnedTarget, setPinnedTarget] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<Call[]>([]);
   const [answer, setAnswer] = useState<
     { kind: 'idle' } | { kind: 'running'; tool: string } | { kind: 'error'; message: string } | { kind: 'answer'; answer: Answer }
@@ -134,21 +136,50 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
     );
   const list = tools.data;
   const tool = list.find((t) => t.name === selected) ?? list[0];
+  const connState = state as {
+    activeConnection?: string;
+    connections?: Array<{
+      id: string;
+      name?: string;
+      detail?: string;
+      writable?: boolean;
+      rows?: boolean;
+      database?: string;
+      env?: string;
+      tier?: EnvironmentTier;
+      siblings?: SiblingEnvironment[];
+    }>;
+  };
+  const enrichedConnections = enrichConnectionsWithEnvironments((connState.connections ?? []).map((c) => ({ ...c, name: c.name ?? c.id })));
+  const activeId = connState.activeConnection;
+  const targetId = pinnedTarget && enrichedConnections.some((c) => c.id === pinnedTarget) ? pinnedTarget : activeId;
+
   const pick = (name: string) => {
     setSelected(name);
     setAnswer({ kind: 'idle' });
   };
   const call = async (args: Record<string, unknown>) => {
     setAnswer({ kind: 'running', tool: tool.name });
+    const effectiveArgs =
+      targetId &&
+      targetId !== activeId &&
+      args.connection === undefined &&
+      args.env === undefined &&
+      tool.name !== 'connections' &&
+      (tool.name !== 'diff' || (args.from === undefined && args.fromEnv === undefined))
+        ? tool.name === 'diff'
+          ? { ...args, from: targetId }
+          : { ...args, connection: targetId }
+        : args;
     let got: Answer;
     try {
-      got = await api('/api/agent/call', { name: tool.name, arguments: args });
+      got = await api('/api/agent/call', { name: tool.name, arguments: effectiveArgs });
     } catch (err) {
       setAnswer({ kind: 'error', message: (err as Error).message });
       return;
     }
     if (got.structuredContent?.undoId !== undefined) void shell().undo?.refresh?.();
-    setTranscript((was) => [{ tool: tool.name, args, answer: got }, ...was]);
+    setTranscript((was) => [{ tool: tool.name, args: effectiveArgs, answer: got }, ...was]);
     setAnswer({ kind: 'answer', answer: got });
   };
   const mcpUrl = typeof activity.data?.mcpEndpoint === 'string' ? activity.data.mcpEndpoint : null;
@@ -202,9 +233,41 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
           ))}
         </div>
         <div className="agent-main">
+          {enrichedConnections.length > 0 ? (
+            <div className="agent-target-bar" role="group" aria-label={say('targetConnectionsGroup')}>
+              <span className="agent-target-label">{say('targetConnectionLabel')}</span>
+              <div className="agent-target-list">
+                {enrichedConnections.map((conn) => {
+                  const current = conn.id === targetId;
+                  return (
+                    <button
+                      key={conn.id}
+                      type="button"
+                      className={`agent-target-pill tone-${conn.tier}${current ? ' active' : ''}`}
+                      aria-pressed={current}
+                      onClick={() => setPinnedTarget(conn.id === activeId ? null : conn.id)}
+                    >
+                      <span className="env-pill-dot" aria-hidden="true" />
+                      <span className="agent-target-name">{conn.name}</span>
+                      {conn.env ? <span className={`env-pill compact tone-${conn.tier}`}>{conn.env}</span> : null}
+                      <span className="agent-target-posture">
+                        {conn.rows === false ? say('shapeOnlyBadge') : conn.writable ? say('writableBadge') : say('readOnly')}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
           {tool ? (
             <>
-              <ToolForm key={tool.name} tool={tool} onCall={call} onBadJson={(message) => setAnswer({ kind: 'error', message })} />
+              <ToolForm
+                key={tool.name}
+                tool={tool}
+                targetConnection={targetId}
+                onCall={call}
+                onBadJson={(message) => setAnswer({ kind: 'error', message })}
+              />
               <div className="agent-result">
                 {answer.kind === 'running' ? (
                   <p className="loading">{say('calling', { tool: answer.tool })}</p>
@@ -234,10 +297,12 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
 
 function ToolForm({
   tool,
+  targetConnection,
   onCall,
   onBadJson,
 }: {
   tool: Tool;
+  targetConnection?: string;
   onCall: (args: Record<string, unknown>) => void;
   onBadJson: (message: string) => void;
 }) {
@@ -321,11 +386,7 @@ function ToolForm({
                 autoComplete="off"
                 spellCheck={false}
                 aria-label={name}
-                placeholder={
-                  name === 'connection'
-                    ? `${(state as { activeConnection?: string }).activeConnection ?? 'active'} (active)`
-                    : (spec.description ?? '')
-                }
+                placeholder={name === 'connection' ? `${targetConnection ?? 'active'} (active)` : (spec.description ?? '')}
                 value={values[name] ?? ''}
                 onChange={(e) => set(e.currentTarget.value)}
               />

@@ -11,7 +11,7 @@ import { tableNamed } from '@mistriwork/engine/host';
 import { lintCounts, lintSchema } from '../../../shared/lint.js';
 import { diffSchemas } from '../../../shared/diff.js';
 import { insertOrder } from '../../../shared/order.js';
-import { linkTo, openFor, READS, STATS, wholeKeyOrThrow, type Handler, ToolError } from '../toolkit.js';
+import { ENV_ARG, linkTo, openFor, READS, STATS, wholeKeyOrThrow, type Handler, ToolError } from '../toolkit.js';
 
 export const definitions = [
   {
@@ -27,6 +27,7 @@ export const definitions = [
       properties: {
         table: { type: 'string', description: 'Table id, e.g. "invoice".' },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       required: ['table'],
       additionalProperties: false,
@@ -81,8 +82,10 @@ export const definitions = [
     inputSchema: {
       type: 'object',
       properties: {
-        from: { type: 'string', description: 'Connection id you have. Defaults to the active one.' },
-        to: { type: 'string', description: 'Connection id to compare against.' },
+        from: { type: 'string', description: 'Connection id or db@env selector you have. Defaults to the active one.' },
+        fromEnv: { type: 'string', description: 'Target environment for `from` (e.g. "local", "staging").' },
+        to: { type: 'string', description: 'Connection id or db@env selector to compare against (e.g. "billing@prod", "@prod").' },
+        toEnv: { type: 'string', description: 'Target environment for `to` (e.g. "prod").' },
       },
       required: ['to'],
       additionalProperties: false,
@@ -145,6 +148,7 @@ export const definitions = [
           description: 'The tables to order. Omit for every table in the schema.',
         },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       additionalProperties: false,
     },
@@ -206,6 +210,7 @@ export const definitions = [
           description: 'Additional column names (`notes` or `customer.notes`) to mask when `redact` is true.',
         },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       required: ['table', 'key'],
       additionalProperties: false,
@@ -268,6 +273,7 @@ export const definitions = [
             'is this schema in" needs — the counts are always complete either way.',
         },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       additionalProperties: false,
     },
@@ -330,6 +336,7 @@ export const definitions = [
           description: 'Narrow to one column. Omit to ask about the whole table.',
         },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       required: ['table'],
       additionalProperties: false,
@@ -405,6 +412,7 @@ export const definitions = [
           description: 'Every finding. Default is at most 5 per rule, with complete counts.',
         },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       additionalProperties: false,
     },
@@ -471,6 +479,7 @@ export const definitions = [
           description: 'One DDL script or an ordered array of DDL statements to verify and roll back.',
         },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       required: ['sql'],
       additionalProperties: false,
@@ -517,18 +526,25 @@ export const handlers: Record<Name, Handler> = {
   },
   diff: async ({ registry, args, schema, id }) => {
     const other = String(args.to ?? '').trim();
-    if (!other) throw new ToolError('invalid_argument', '`to` names the connection to compare against. Ask `connections` for what exists.');
-    if (other === id)
+    const toEnv = typeof args.toEnv === 'string' ? args.toEnv.trim() : '';
+    if (!other && !toEnv)
+      throw new ToolError('invalid_argument', '`to` names the connection to compare against. Ask `connections` for what exists.');
+    if (other === id && !toEnv)
       throw new ToolError('invalid_argument', `"${id}" compared with itself is always the same shape. Name a different connection.`);
     /* Opened here rather than through the caller's resolved pair: a diff is
        the one read that is *about* two connections, and the second one may
        never have been opened this session. */
-    const { schema: theirs } = await openFor(registry, other);
+    const { schema: theirs, id: toId } = await openFor(registry, other || undefined, {
+      env: toEnv || undefined,
+      fallbackConnection: id,
+    });
+    if (toId === id)
+      throw new ToolError('invalid_argument', `"${id}" compared with itself is always the same shape. Name a different connection.`);
     /* The labels are dropped: `from` and `to` are the connection ids a caller
        can act on, and two names for the same pair invites using the wrong
        one in the next call. */
     const { left: _left, right: _right, ...rest } = diffSchemas(schema, theirs);
-    return { from: id, to: other, ...rest };
+    return { from: id, to: toId, ...rest };
   },
   order: async ({ args, schema, id }) => {
     /* An array, or the comma-separated string clients send when the schema

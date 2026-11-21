@@ -259,7 +259,7 @@ describe('the MCP server', () => {
     assert.equal(strayResult.isError, true);
     assert.match(
       strayResult.content[0].text,
-      /unknown argument "qeury" \(did you mean "q"\?\)\. It takes: q, view, limit, offset, connection/,
+      /unknown argument "qeury" \(did you mean "q"\?\)\. It takes: q, view, limit, offset, connection, env/,
     );
 
     const missing = await call('tools/call', { name: 'query', arguments: {} });

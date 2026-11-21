@@ -20,4 +20,6 @@ export const say = defineMessages({
   copyContextForAgent: 'copy this view, key and MCP call as Markdown',
   fromTablewalkJson: 'from tablewalk.json',
   savedSql: 'saved SQL',
+  switchToEnv: 'Switch to {database} · {env}',
+  keepViewOnName: '{name} — keep current view',
 });

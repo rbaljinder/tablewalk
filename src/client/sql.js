@@ -27,6 +27,7 @@ import { mount, unmount } from '@mistriwork/kit/client/components/mount.js';
 import { onDemand } from '@mistriwork/kit/client/components/onDemand.js';
 import { say } from './copy/workbench/sql.js';
 import { addHostListener, portalRoot } from '@mistriwork/kit/client/shellHost.js';
+import { selectConnection } from './connections.js';
 
 /* The Workbench's, loaded the first time it opens: an App's reader may never
    open it, and an App's first page should not wait for it. */
@@ -82,6 +83,10 @@ function paint() {
     createElement(SqlPane, {
       draft: drafts.get(connectionKey()) ?? '',
       onDraft: (text) => drafts.set(connectionKey(), text),
+      onSwitchConnection: (targetId, text) => {
+        drafts.set(targetId, text);
+        void selectConnection(targetId, { preserveContext: true });
+      },
       onClose: close,
     }),
   );

@@ -32,6 +32,11 @@ Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly
   (`tablewalk://{connection}/views`, `tablewalk://{connection}/page/{page}`) and runnable by name in `query`, `sql` and
   `export` (with `views` working across `"hidden"`-column connections); **Copy brief for agent** (`⌘K` / `···`) copies a
   Markdown handoff of the current record, query or schema to the clipboard.
+- Connections sharing a logical database across environments (`"database"` and `"env"` in `tablewalk.json`, or inferred
+  from names like `billing-local`, `billing-staging`, `billing-prod`) group together in Connections, switch in place
+  from the topbar, `⌘K` palette, SQL editor and Agent console while keeping the open table, query or record, and can be
+  targeted by MCP tools with `env` or `db@env` / `@env` selectors (with implicit unaddressed writes to `prod` refused
+  when non-production siblings exist).
 - `tablewalk journal` resolves credentials and refuses in-memory SQLite and unsupported schemes before touching the
   filesystem; `--diff` and `--lint` close their connections and let stdout drain before exiting; the desktop app
   replaces its server and updates `lastDatabase` only after the new database opens, falling back to Welcome if a

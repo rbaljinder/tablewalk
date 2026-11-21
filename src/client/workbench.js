@@ -108,19 +108,36 @@ function start(boot) {
         }))
       : [],
   );
-  addPaletteSource('databases', () =>
-    workbenchShown() && canManageConnections()
-      ? (state.connections ?? [])
-          .filter((connection) => connection.id !== state.activeConnection)
-          .map((connection) => ({
-            kind: 'database',
-            label: connection.name,
-            search: `${connection.name} ${connection.dialect}`,
-            detail: connection.detail ?? connection.dialect,
-            run: () => selectConnection(connection.id),
-          }))
-      : [],
-  );
+  addPaletteSource('databases', () => {
+    if (!workbenchShown() || !canManageConnections()) return [];
+    const list = /** @type {any[]} */ (state.connections ?? []);
+    const activeConn = list.find((c) => c.id === state.activeConnection);
+    const activeDb = (activeConn?.database ?? activeConn?.name ?? '').toLowerCase();
+    const siblingItems = (activeConn?.siblings ?? []).map((sib) => {
+      const label = say('switchToEnv', { database: activeConn.database ?? activeConn.name, env: sib.env ?? sib.name });
+      return {
+        kind: 'database',
+        label,
+        search: `${label} ${sib.name}`,
+        detail: say('keepViewOnName', { name: sib.name }),
+        run: () => selectConnection(sib.id, { preserveContext: true }),
+      };
+    });
+    const otherItems = list
+      .filter((c) => c.id !== state.activeConnection)
+      .map((c) => {
+        const db = c.database ?? c.name;
+        const sameDb = Boolean(activeDb && db.toLowerCase() === activeDb);
+        return {
+          kind: 'database',
+          label: c.name,
+          search: `${c.name} ${db} ${c.env ?? ''} ${c.dialect ?? ''}`,
+          detail: c.env ? `${db} · ${c.env} · ${c.detail ?? c.dialect ?? ''}` : (c.detail ?? c.dialect),
+          run: () => selectConnection(c.id, { preserveContext: sameDb }),
+        };
+      });
+    return [...siblingItems, ...otherItems];
+  });
 
   /* The connection name is a link to the connections dialog. It is the only
      way in when there is a single unconfigured database — the picker that

@@ -16,7 +16,7 @@ import {
   textToBreakdown,
 } from '@mistriwork/engine/host';
 import { resolveNamedView, shelfOf } from '../shelf.js';
-import { COUNT_LIMIT, COUNT_LIMIT_WORDS as bound, linkTo, READS, STATS, type Handler, ToolError } from '../toolkit.js';
+import { COUNT_LIMIT, COUNT_LIMIT_WORDS as bound, ENV_ARG, linkTo, READS, STATS, type Handler, ToolError } from '../toolkit.js';
 
 export const definitions = [
   {
@@ -50,6 +50,7 @@ export const definitions = [
         limit: { type: 'number', description: 'Rows to return (default 20, clamped).' },
         offset: { type: 'number' },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       additionalProperties: false,
     },
@@ -104,6 +105,7 @@ export const definitions = [
         limit: { type: 'number', description: 'Groups to return (default 20, clamped).' },
         offset: { type: 'number' },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       required: ['q'],
       additionalProperties: false,

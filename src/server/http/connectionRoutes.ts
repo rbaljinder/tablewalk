@@ -10,7 +10,31 @@ import { productVersion } from '@mistriwork/engine/server/product.js';
 import { untrustedTargetRefusal } from '@mistriwork/engine/server/http/trust.js';
 import { readBounded, readJson, send } from '@mistriwork/engine/server/http/reply.js';
 import type { RequestContext } from '@mistriwork/engine/server/http/context.js';
-import { agentActivity, agentTools, answerMcpHttp } from '../mcp.js';
+import {
+  agentActivity,
+  agentTools,
+  answerMcpHttp,
+  getConnectionEnvMeta,
+  listEnrichedConnections,
+  removeConnectionEnvMeta,
+  setConnectionEnvMeta,
+} from '../mcp.js';
+
+/** Public connection list for HTTP: attaches environment topology whenever a connection has an env, explicit metadata, or siblings. */
+function wireConnections(registry: RequestContext['registry']) {
+  return listEnrichedConnections(registry).map(({ database, env, tier, explicit, siblings, ...base }) =>
+    env || explicit || siblings.length > 0
+      ? {
+          ...base,
+          database,
+          ...(env ? { env } : {}),
+          tier,
+          ...(explicit ? { explicit: true } : {}),
+          siblings,
+        }
+      : base,
+  );
+}
 
 /** Session connections added from the page: enough for any real session, bounded so an exposed listener cannot grow the registry forever. */
 const MAX_SESSION_CONNECTIONS = 32;
@@ -106,7 +130,7 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
 
   if (path === '/api/connections' && req.method !== 'POST') {
     send(res, 200, {
-      connections: registry.list(),
+      connections: wireConnections(registry),
       active: registry.active,
       appConfigured: false,
     });
@@ -204,7 +228,7 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
     const existing = registry.list().find((c) => c.name === 'demo');
     if (existing) {
       registry.setActive(existing.id);
-      send(res, 200, { connections: registry.list(), active: registry.active, added: existing.id });
+      send(res, 200, { connections: wireConnections(registry), active: registry.active, added: existing.id });
       return true;
     }
     const { demoDatabaseFile, makeDemoDatabase, seedDemoDatabase } = await import('@mistriwork/engine/server/demo.js');
@@ -225,7 +249,7 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
       send(res, 500, { error: (err as Error).message });
       return true;
     }
-    send(res, 200, { connections: registry.list(), active: registry.active, added: added.id });
+    send(res, 200, { connections: wireConnections(registry), active: registry.active, added: added.id });
     return true;
   }
 
@@ -267,31 +291,28 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
       },
       { untrusted: !trusted },
     );
+    const database = typeof body.database === 'string' ? body.database.trim() : '';
+    const env = typeof body.env === 'string' ? body.env.trim() : '';
+    if (database || env) {
+      setConnectionEnvMeta(registry, added.id, {
+        ...(database ? { database } : {}),
+        ...(env ? { env } : {}),
+      });
+    }
     try {
       await registry.open(added.id);
     } catch (err) {
       registry.setActive(previous);
-      /* The entry stays, listed with its error.
-
-         "The add failed" and "nothing was added" are not the same thing, and
-         here the first is the useful one: a mistyped password should leave the
-         connection on screen to be corrected, not make someone retype the URL
-         they just got nearly right. It is also what already happens to a
-         connection in the config file that will not open — listed, with the
-         reason, rather than dropped.
-
-         The list goes back with the error so the client can show that without
-         a second request, which is what the id alone used to make it do. */
       send(res, 400, {
         error: (err as Error).message,
         id: added.id,
         added: added.id,
-        connections: registry.list(),
+        connections: wireConnections(registry),
         active: registry.active,
       });
       return true;
     }
-    send(res, 200, { connections: registry.list(), active: registry.active, added: added.id });
+    send(res, 200, { connections: wireConnections(registry), active: registry.active, added: added.id });
     return true;
   }
 
@@ -314,6 +335,8 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
     if (typeof body.name === 'string' && body.name.trim()) patch.name = body.name.trim();
     if (typeof body.url === 'string' && body.url.trim()) patch.url = body.url.trim();
     if (Array.isArray(body.schemas)) patch.schemas = body.schemas as string[];
+    const hasDatabase = typeof body.database === 'string';
+    const hasEnv = typeof body.env === 'string';
 
     if (!trusted && (patch.url || patch.schemas)) {
       /* A connection the operator wrote into the config is not the network's
@@ -336,15 +359,24 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
     }
 
     try {
-      await registry.update(id, patch, { untrusted: !trusted });
-      /* Opened straight away when the target changed, so a typo fails here
-         rather than the next time someone clicks the connection. */
-      if (patch.url || patch.schemas) await registry.open(id);
+      if (Object.keys(patch).length > 0) {
+        await registry.update(id, patch, { untrusted: !trusted });
+        /* Opened straight away when the target changed, so a typo fails here
+           rather than the next time someone clicks the connection. */
+        if (patch.url || patch.schemas) await registry.open(id);
+      }
+      if (hasDatabase || hasEnv) {
+        const prevMeta = getConnectionEnvMeta(registry, id) ?? {};
+        setConnectionEnvMeta(registry, id, {
+          database: hasDatabase ? String(body.database).trim() || undefined : prevMeta.database,
+          env: hasEnv ? String(body.env).trim() || undefined : prevMeta.env,
+        });
+      }
     } catch (err) {
-      send(res, 400, { error: (err as Error).message, connections: registry.list() });
+      send(res, 400, { error: (err as Error).message, connections: wireConnections(registry) });
       return true;
     }
-    send(res, 200, { connections: registry.list(), active: registry.active });
+    send(res, 200, { connections: wireConnections(registry), active: registry.active });
     return true;
   }
 
@@ -368,11 +400,12 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
     }
     try {
       await registry.remove(id);
+      removeConnectionEnvMeta(registry, id);
     } catch (err) {
       send(res, 400, { error: (err as Error).message });
       return true;
     }
-    send(res, 200, { connections: registry.list(), active: registry.active });
+    send(res, 200, { connections: wireConnections(registry), active: registry.active });
     return true;
   }
 
@@ -432,7 +465,25 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
 
     try {
       // The cache and search services travel with it: saving must not delete what it does not list.
-      await saveConfig(target, registry.configs(), registry.serviceConfigs(), registry.sections, registry.keptEntries());
+      const configs = registry.configs();
+      await saveConfig(target, configs, registry.serviceConfigs(), registry.sections, registry.keptEntries());
+      if (configs.some((c) => Boolean(getConnectionEnvMeta(registry, c.id)))) {
+        const { readFile, writeFile } = await import('node:fs/promises');
+        const parsed = JSON.parse(await readFile(target, 'utf8')) as { connections?: Array<Record<string, unknown>> };
+        if (Array.isArray(parsed.connections)) {
+          const used = new Set<number>();
+          for (const cfg of configs) {
+            const meta = getConnectionEnvMeta(registry, cfg.id);
+            const idx = parsed.connections.findIndex((entry, i) => !used.has(i) && entry && entry.name === cfg.name);
+            if (idx >= 0) {
+              used.add(idx);
+              if (meta?.database) parsed.connections[idx].database = meta.database;
+              if (meta?.env) parsed.connections[idx].env = meta.env;
+            }
+          }
+          await writeFile(target, `${JSON.stringify(parsed, null, 2)}\n`);
+        }
+      }
     } catch (err) {
       send(res, 500, { error: `Could not write ${target}: ${(err as Error).message}` });
       return true;

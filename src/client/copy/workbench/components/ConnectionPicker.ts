@@ -6,4 +6,10 @@ export const say = defineMessages({
   reReadTheSchema: '↻ Re-read the schema',
   manageConnections: 'Manage connections',
   unreachableDetail: '{detail} · unreachable',
+  environmentGroup: '{database} environments',
+  switchEnvironmentTitle: 'Switch to {name} ({posture})',
+  currentEnvironmentTitle: '{name} ({posture})',
+  postureRw: 'RW',
+  postureRo: 'RO',
+  postureShape: 'shape',
 });

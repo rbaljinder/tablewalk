@@ -25,6 +25,13 @@
 export { answerMcpHttp, serveMcp } from './mcp/protocol.js';
 export { agentTools, runTool, setAdvertiseOutputSchema, setToolProfile, toolCounts, toolNames } from './mcp/registry.js';
 export { bindShelf } from './mcp/shelf.js';
-export { agentActivity } from './mcp/toolkit.js';
+export {
+  agentActivity,
+  getConnectionEnvMeta,
+  listEnrichedConnections,
+  loadConfigEnvMeta,
+  removeConnectionEnvMeta,
+  setConnectionEnvMeta,
+} from './mcp/toolkit.js';
 export { setElicitor } from './mcp/tools/write.js';
 export { findValue } from './mcp/tools/schema.js';

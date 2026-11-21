@@ -231,11 +231,11 @@ agent can open in the UI, and says what it cost in rows and milliseconds.
 | `anomalies` | data-level counterpart to `lint`: temporal inversions, dangling soft-delete lifecycles, and nullable FKs that are >=95% populated with null outliers (counts only, works on `"rows": false` too) |
 | `change_impact` | what breaks if you change a table or column — asked *before* the migration is written |
 | `verify_ddl` | runs candidate DDL in a disposable copy (SQLite) or `BEGIN … ROLLBACK` (writable Postgres) and returns the schema `diff` and newly introduced `lint` findings without altering the database |
-| `diff` | whether two connections are still the same shape |
+| `diff` | whether two connections or environments (`{"from": "@local", "to": "@prod"}`) are still the same shape |
 | `order` | what has to exist before what, and the reverse for teardown |
 | `fixture` | a real row and the graph it belongs to (with optional `redact: true` deterministic PII masking), ready to replay into a test database |
 | `refresh` | re-read the catalog after a migration |
-| `connections` | list them; the call to start with |
+| `connections` | list connections, logical database groups, environments, and sibling postures; the call to start with |
 
 **Writing** — offered only when a connection is marked `"writable": true`; a
 read-only server does not list tools it would refuse.
@@ -327,13 +327,23 @@ on should live in version control rather than in one person's browser.
 ```json
 {
   "connections": [
-    { "name": "app (local)", "url": "postgres://localhost/app", "schemas": ["public"] },
-    { "name": "production",  "url": "postgres://reader@prod/app", "rows": false },
+    { "name": "app-local",   "url": "postgres://localhost/app", "database": "app", "env": "local", "writable": true, "schemas": ["public"] },
+    { "name": "app-staging", "url": "postgres://reader@staging/app", "database": "app", "env": "staging" },
+    { "name": "production",  "url": "postgres://reader@prod/app", "database": "app", "env": "prod", "rows": false },
     { "name": "analytics",   "url": "postgres://user:pass@warehouse/an" },
     { "name": "cache",       "url": "./var/cache.sqlite" }
   ]
 }
 ```
+
+Connections that share a logical `database` (either declared explicitly with
+`"database"` and `"env"`, or inferred from names like `app-local`, `app_staging`,
+`app (prod)`, or `app-replica`) appear as one promotion pipeline across the top
+bar, the SQL editor, and the Connections screen — switching environments keeps
+your current table, query, or record open when that table exists on the other
+side. In MCP, every tool accepts `"connection": "app@staging"`, `"@staging"`, or
+`"env": "staging"`, and implicit writes while a `prod` environment is active are
+refused unless `"connection"` or `"env": "prod"` is named explicitly.
 
 A PostgreSQL entry can size its read pool and idle window,
 `"pool": { "read": 16, "idleSeconds": 300, "minIdle": 2 }` (`read` 1 to 64, default

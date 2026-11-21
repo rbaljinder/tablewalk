@@ -133,6 +133,10 @@ export const main: Main = async () => {
   /* Config first, then the command line, so an explicitly named database is the one you land on even when a
      config file lists others. */
   const config = await readStartupConfig(opts, registry, browserSections);
+  if (config.loadedConfigText) {
+    const { loadConfigEnvMeta } = await import('../mcp/toolkit.js');
+    loadConfigEnvMeta(registry, config.loadedConfigText);
+  }
   /* A connection under the row-security backstop signs in as a tenant App's restricted role, which sees no tenant
      row until a tenant is set: every table would open empty and say nothing of why. Only a tenant App reads through
      it, as mistri refuses the same of its Workbench. Refused before anything connects. */

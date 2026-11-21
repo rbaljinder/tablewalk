@@ -5,7 +5,28 @@
  */
 import { currentEntry, findTable, refsFrom, refsTo, state, toast } from '@mistriwork/kit/client/core.js';
 import { shellById } from '@mistriwork/kit/client/shellHost.js';
+import { enrichConnectionsWithEnvironments } from '../shared/environments.js';
 import { say } from './copy/workbench/agentBrief.js';
+
+function postureText(conn) {
+  if (conn.rows === false) return say('postureShapeOnly');
+  return conn.writable ? say('postureWritable') : say('postureReadOnly');
+}
+
+function environmentLines(connId) {
+  const enriched = enrichConnectionsWithEnvironments(state.connections ?? []);
+  const active = enriched.find((c) => c.id === connId);
+  if (!active || (!active.env && !active.siblings.length)) return [];
+  const lines = [];
+  if (active.env) {
+    lines.push(say('lineEnvironment', { database: active.database, env: active.env, posture: postureText(active) }));
+  }
+  if (active.siblings.length) {
+    const siblings = active.siblings.map((s) => `\`${s.id}\` (${s.env ? `${s.env}, ` : ''}${postureText(s)})`).join(', ');
+    lines.push(say('lineSiblings', { siblings }));
+  }
+  return lines;
+}
 
 /** Build the Markdown brief for the current Workbench view without touching the clipboard (exported for unit tests). */
 export function buildAgentBrief() {
@@ -13,6 +34,7 @@ export function buildAgentBrief() {
   const dialect = state.schema?.dialect ?? 'sql';
   const entry = currentEntry();
   const link = typeof location !== 'undefined' ? `${location.pathname}${location.search}` : `/${encodeURIComponent(conn)}`;
+  const envInfo = environmentLines(conn);
 
   if (entry && (entry.kind === 'row' || (entry.kind === 'page' && entry.key))) {
     const tableId = entry.table;
@@ -22,6 +44,7 @@ export function buildAgentBrief() {
     const lines = [
       say('headingRecord', { table: tableId }),
       say('lineConnection', { connection: conn, dialect }),
+      ...envInfo,
       say('lineKey', { key: keyJson }),
       ...(entry.label ? [say('lineLabel', { label: String(entry.label) })] : []),
       say('lineLink', { link }),
@@ -40,6 +63,7 @@ export function buildAgentBrief() {
     return [
       say('headingBreakdown', { table: entry.table }),
       say('lineConnection', { connection: conn, dialect }),
+      ...envInfo,
       say('lineQuery', { query: q }),
       say('lineLink', { link }),
       say('lineMcpCall', { tool: 'breakdown', args: JSON.stringify({ connection: conn, q }) }),
@@ -56,6 +80,7 @@ export function buildAgentBrief() {
     return [
       say('headingTable', { table: tableId }),
       say('lineConnection', { connection: conn, dialect }),
+      ...envInfo,
       say('lineQuery', { query: q }),
       say('lineLink', { link }),
       ...(out.length ? [say('linePointsAt', { targets: out.join('; ') })] : []),
@@ -69,6 +94,7 @@ export function buildAgentBrief() {
   return [
     say('headingSchema', { connection: conn }),
     say('lineConnection', { connection: conn, dialect }),
+    ...envInfo,
     say('lineCounts', { tables, fks }),
     say('lineLink', { link }),
     say('lineMcpCall', { tool: 'schema_summary', args: JSON.stringify({ connection: conn }) }),

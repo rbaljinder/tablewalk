@@ -94,3 +94,38 @@ test.describe('editing an existing connection', () => {
     await expect(page.locator('.conn-result.bad')).toContainText('Nothing to test yet');
   });
 });
+
+test.describe('multi-environment databases', () => {
+  test('groups sibling environments and preserves the open table and query across environment pills', async ({ page }) => {
+    await page.goto(`/${DEMO}`);
+    const addLocal = await page.request.post('/api/connections', {
+      data: { name: 'envsuite-local', url: SCRATCH_DB, database: 'envsuite', env: 'local' },
+    });
+    expect(addLocal.ok()).toBe(true);
+    const addStaging = await page.request.post('/api/connections', {
+      data: { name: 'envsuite-staging', url: SCRATCH_DB, database: 'envsuite', env: 'staging' },
+    });
+    expect(addStaging.ok()).toBe(true);
+
+    try {
+      await page.goto('/envsuite-local/customer');
+      await expect(page.locator('#conn-picker')).toContainText('envsuite-local');
+      const envBar = page.getByRole('group', { name: 'envsuite environments' });
+      await expect(envBar).toBeVisible();
+
+      // Clicking the sibling `staging` pill switches connection while preserving the `customer` table view!
+      await envBar.getByRole('button', { name: /staging/ }).click();
+      await expect.poll(() => new URL(page.url()).pathname).toBe('/envsuite-staging/customer');
+      await expect(page.locator('#conn-picker')).toContainText('envsuite-staging');
+
+      // ConnectionManager renders the logical `envsuite` database group header in pipeline order.
+      await page.getByRole('button', { name: 'Manage connections' }).click();
+      await expect(page.locator('.conn-group-title').filter({ hasText: /^envsuite$/ })).toBeVisible();
+      await page.getByRole('button', { name: 'Done', exact: true }).click();
+    } finally {
+      await page.request.post('/api/connections/remove', { data: { id: 'envsuite-local' } });
+      await page.request.post('/api/connections/remove', { data: { id: 'envsuite-staging' } });
+      await page.goto(`/${DEMO}`);
+    }
+  });
+});

@@ -185,3 +185,30 @@ function fireEventInput(node: HTMLElement, value: string) {
   Object.getOwnPropertyDescriptor(proto, 'value')?.set?.call(node, value);
   node.dispatchEvent(new Event('input', { bubbles: true }));
 }
+
+test('target connection bar displays environment/posture badges and forwards pinned connection to /api/agent/call', async () => {
+  const user = userEvent.setup();
+  const { state } = await import('@mistriwork/kit/client/core.js');
+  (state as Record<string, unknown>).activeConnection = 'billing-local';
+  (state as Record<string, unknown>).connections = [
+    { id: 'billing-local', name: 'billing-local', writable: true },
+    { id: 'billing-staging', name: 'billing-staging', writable: false },
+    { id: 'billing-prod', name: 'billing-prod', writable: false, rows: false },
+  ];
+  try {
+    draw();
+    await screen.findAllByRole('option');
+    const targetGroup = screen.getByRole('group', { name: 'Target connection' });
+    expect(within(targetGroup).getByText('writable')).toBeInTheDocument();
+    expect(within(targetGroup).getByText('shape-only')).toBeInTheDocument();
+
+    await user.click(within(targetGroup).getByRole('button', { name: /billing-staging/ }));
+    await user.type(screen.getByRole('textbox', { name: 'q' }), 'customer');
+    await user.click(screen.getByRole('button', { name: 'Call tool' }));
+    await screen.findByText('rowsRead 1');
+    expect(calls).toEqual([{ name: 'query', arguments: { q: 'customer', connection: 'billing-staging' } }]);
+  } finally {
+    (state as Record<string, unknown>).activeConnection = 'demo';
+    delete (state as Record<string, unknown>).connections;
+  }
+});

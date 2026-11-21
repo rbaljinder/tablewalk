@@ -159,3 +159,25 @@ test('removing the current connection selects a replacement through the transiti
   expect(selectConnection).toHaveBeenCalledWith('b');
   expect(state.activeConnection).toBe('a');
 });
+
+test('onCloneEnv pre-fills the logical database and next environment, and editDialog saves env-only updates', async () => {
+  manager.onCloneEnv!(
+    { id: 'shop-local', name: 'shop-local', database: 'shop', env: 'local', tier: 'local', schemas: ['public'] },
+    refreshed,
+  );
+  const cloneForm = mounted[1] as ConnectionDialogProps;
+  expect(cloneForm.database).toBe('shop');
+  expect(cloneForm.env).toBe('staging');
+  expect(cloneForm.name).toBe('shop-staging');
+  expect(cloneForm.schemas).toEqual(['public']);
+  cloneForm.onClose();
+
+  manager.onEdit(conn, refreshed);
+  const editForm = mounted[2] as ConnectionDialogProps;
+  expect(await editForm.run({ url: '', name: 'A', schemas: ['sales'], database: 'billing', env: 'staging' })).toBeNull();
+  expect(api).toHaveBeenCalledWith('/api/connections/update', {
+    id: 'a',
+    database: 'billing',
+    env: 'staging',
+  });
+});

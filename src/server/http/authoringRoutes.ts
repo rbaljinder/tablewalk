@@ -91,12 +91,14 @@ export async function authoringRoutes(post: PostContext, trusted = true): Promis
   if (path === '/api/agent/call') {
     const name = String(body.name ?? '');
     const raw = (body.arguments ?? {}) as Record<string, unknown>;
-    const args =
-      connection && raw.connection === undefined && (name !== 'diff' || raw.from === undefined) && name !== 'connections'
-        ? { ...raw, connection }
-        : raw;
     // The console's writes are an agent's, made in the operator's name.
-    send(res, 200, await attributeWrites({ via: 'agent' }, () => runTool(registry, name, args, { trusted, via: 'console' })));
+    send(
+      res,
+      200,
+      await attributeWrites({ via: 'agent' }, () =>
+        runTool(registry, name, raw, { trusted, via: 'console', fallbackConnection: connection || undefined }),
+      ),
+    );
     return true;
   }
 

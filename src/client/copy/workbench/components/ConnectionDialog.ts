@@ -41,4 +41,10 @@ export const say = defineMessages({
   discardConnectionChanges: 'Discard connection changes?',
   changesInThisForm: 'Changes in this form will be discarded.',
   theUrlWillHold: 'The URL will hold {reference}. Nothing is stored, here or anywhere.',
+  databaseGroup: 'Database group',
+  databaseGroupHint: 'Groups local, staging, and prod connections under one logical database.',
+  optionalDatabaseGroup: 'e.g. billing',
+  environmentLabel: 'Environment',
+  optionalEnvironment: 'e.g. local, staging, prod',
+  saving: 'Saving…',
 });

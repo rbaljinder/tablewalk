@@ -142,3 +142,26 @@ test('changed forms require an explicit discard, without persisting credentials'
   expect(onClose).toHaveBeenCalledTimes(1);
   expect(localStorage.length).toBe(stored);
 });
+
+test('auto-infers database/environment placeholders from Connection name and submits explicit database and env picks', async () => {
+  const user = userEvent.setup();
+  const run = vi.fn(async () => null);
+  render(<ConnectionDialog title="Add a connection" verb="Add and open" run={run} onClose={() => {}} />);
+  await user.type(screen.getByLabelText('Connection URL or file path'), 'postgres://localhost/billing_stg');
+  const nameInput = screen.getByLabelText('Connection name');
+  await user.clear(nameInput);
+  await user.type(nameInput, 'billing-staging');
+  expect(screen.getByLabelText('Database group')).toHaveAttribute('placeholder', 'billing');
+  expect(screen.getByRole('textbox', { name: 'Environment' })).toHaveAttribute('placeholder', 'staging');
+
+  await user.type(screen.getByLabelText('Database group'), 'billing');
+  await user.click(screen.getByRole('button', { name: 'staging' }));
+  await user.click(screen.getByRole('button', { name: 'Add and open' }));
+  expect(run).toHaveBeenCalledWith({
+    url: 'postgres://localhost/billing_stg',
+    name: 'billing-staging',
+    schemas: [],
+    database: 'billing',
+    env: 'staging',
+  });
+});

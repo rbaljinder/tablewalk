@@ -11,20 +11,43 @@ import type { PublicConnection } from '@mistriwork/engine/shared/connection.js';
 import { formatNumber } from '@mistriwork/kit/client/locale.js';
 import { say } from '../copy/workbench/components/ConnectionManager.js';
 import { addHostListener, removeHostListener, shellQuery } from '@mistriwork/kit/client/shellHost.js';
+import {
+  enrichConnectionsWithEnvironments,
+  groupConnectionsByDatabase,
+  type EnvironmentTier,
+  type SiblingEnvironment,
+} from '../../shared/environments.js';
 
-export type Connection = Pick<PublicConnection, 'id' | 'name'> & Partial<Omit<PublicConnection, 'id' | 'name'>>;
+export type Connection = Pick<PublicConnection, 'id' | 'name'> &
+  Partial<Omit<PublicConnection, 'id' | 'name'>> & {
+    database?: string;
+    env?: string;
+    tier?: EnvironmentTier;
+    explicit?: boolean;
+    siblings?: SiblingEnvironment[];
+  };
 export interface ConnectionManagerProps {
   onClose: () => void;
   /** Open a connection: the manager closes first. */
   onOpen: (conn: Connection) => void;
   onAdd: (refresh: () => Promise<void>) => void;
+  onCloneEnv?: (conn: Connection, refresh: () => Promise<void>) => void;
   onEdit: (conn: Connection, refresh: () => Promise<void>) => void;
   onRemove: (conn: Connection, refresh: () => Promise<void>) => void;
   onSaveFile: (count: number) => void;
   onIntrospect: (conn: Connection) => Promise<void>;
 }
 
-export function ConnectionManager({ onClose, onOpen, onAdd, onEdit, onRemove, onSaveFile, onIntrospect }: ConnectionManagerProps) {
+export function ConnectionManager({
+  onClose,
+  onOpen,
+  onAdd,
+  onCloneEnv,
+  onEdit,
+  onRemove,
+  onSaveFile,
+  onIntrospect,
+}: ConnectionManagerProps) {
   const inner = useRef<HTMLDivElement>(null);
   const filter = useRef<HTMLInputElement>(null);
   const [connections, setConnections] = useState<Connection[] | null>(null);
@@ -79,19 +102,33 @@ export function ConnectionManager({ onClose, onOpen, onAdd, onEdit, onRemove, on
     return () => removeHostListener(document, 'keydown', onKey, true);
   }, [onClose]);
 
-  const all = connections ?? [];
+  const rawAll = connections ?? [];
+  const rawById = new Map<string, Connection>(rawAll.map((c) => [c.id, c]));
+  const all = enrichConnectionsWithEnvironments(rawAll);
+  const hasMultiEnv = groupConnectionsByDatabase(all).some(
+    (g) => g.environments.length > 1 || g.environments.some((c) => Boolean(c.explicit)),
+  );
   const q = needle.trim().toLowerCase();
-  const shown = q ? all.filter((c) => `${c.name} ${c.detail} ${c.dialect} ${c.source}`.toLowerCase().includes(q)) : all;
+  const filtered = q
+    ? all.filter((c) =>
+        `${c.name} ${c.database} ${c.env ?? ''} ${c.tier} ${c.detail ?? ''} ${c.dialect ?? ''} ${c.source ?? ''}`.toLowerCase().includes(q),
+      )
+    : all;
+  const groups = groupConnectionsByDatabase(filtered);
+  const ordered = hasMultiEnv ? groups.flatMap((g) => g.environments) : filtered;
+  const indexById = new Map<string, number>(ordered.map((c, idx) => [c.id, idx]));
+
+  const originalOf = (conn: Connection) => rawById.get(conn.id) ?? conn;
   const open = (conn: Connection) => {
     onClose();
-    if (conn.id !== active) onOpen(conn);
+    if (conn.id !== active) onOpen(originalOf(conn));
   };
   const introspect = async (conn: Connection) => {
     if (pending.current.has(conn.id)) return;
     pending.current.add(conn.id);
     setBusy((was) => new Set(was).add(conn.id));
     try {
-      await onIntrospect(conn);
+      await onIntrospect(originalOf(conn));
     } catch (err) {
       if (alive.current) toast((err as Error).message, 'error');
     } finally {
@@ -109,14 +146,14 @@ export function ConnectionManager({ onClose, onOpen, onAdd, onEdit, onRemove, on
   const onFilterKey = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      if (shown.length) setCursor((cursor + 1 + shown.length) % shown.length);
+      if (ordered.length) setCursor((cursor + 1 + ordered.length) % ordered.length);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      if (shown.length) setCursor((cursor - 1 + shown.length) % shown.length);
+      if (ordered.length) setCursor((cursor - 1 + ordered.length) % ordered.length);
     } else if (e.key === 'Enter') {
       e.preventDefault();
       // No explicit highlight means the obvious one: the only match, or the first.
-      const conn = shown[cursor >= 0 ? cursor : 0];
+      const conn = ordered[cursor >= 0 ? cursor : 0];
       if (conn) open(conn);
     }
   };
@@ -163,19 +200,55 @@ export function ConnectionManager({ onClose, onOpen, onAdd, onEdit, onRemove, on
         />
         <span className="conn-count">
           {q
-            ? say('shownOfAll', { shown: formatNumber(shown.length), all: formatNumber(all.length) })
+            ? say('shownOfAll', { shown: formatNumber(ordered.length), all: formatNumber(all.length) })
             : say('countConnections', { count: all.length })}
         </span>
       </div>
-      <div className="conn-list" role="listbox" aria-label={say('connections')}>
+      <div className={`conn-list${hasMultiEnv ? ' conn-list-grouped' : ''}`} role="listbox" aria-label={say('connections')}>
         {connections === null ? (
           <p className="loading">{say('readingConnections')}</p>
         ) : !all.length ? (
           <p className="note">{say('noConnectionsAddOne')}</p>
-        ) : !shown.length ? (
+        ) : !ordered.length ? (
           <p className="note">{say('nothingMatches', { needle: needle.trim() })}</p>
+        ) : hasMultiEnv ? (
+          groups.map((group) => (
+            <div key={group.database} className="conn-group">
+              <div className="conn-group-head">
+                <div className="conn-group-title-wrap">
+                  <span className="conn-group-title">{group.database}</span>
+                  <span className="conn-badge">{say('countEnvironments', { count: group.environments.length })}</span>
+                </div>
+                <div className="conn-group-pipeline" aria-hidden="true">
+                  {group.environments.map((envConn, idx) => (
+                    <span key={envConn.id} className="conn-pipeline-step">
+                      {idx > 0 ? <span className="conn-pipeline-arrow">→</span> : null}
+                      <span className={`env-pill compact tone-${envConn.tier}${envConn.id === active ? ' active' : ''}`}>
+                        <span className="env-pill-dot" />
+                        <span>{envConn.env ?? envConn.name}</span>
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+              {group.environments.map((conn) => (
+                <Row
+                  key={conn.id}
+                  conn={conn}
+                  active={conn.id === active}
+                  cursor={(indexById.get(conn.id) ?? -1) === cursor}
+                  busy={busy.has(conn.id)}
+                  onOpen={() => open(conn)}
+                  onClone={() => (onCloneEnv ? onCloneEnv(conn, refresh) : onAdd(refresh))}
+                  onEdit={() => onEdit(originalOf(conn), refresh)}
+                  onIntrospect={() => void introspect(conn)}
+                  onRemove={() => onRemove(originalOf(conn), refresh)}
+                />
+              ))}
+            </div>
+          ))
         ) : (
-          shown.map((conn, i) => (
+          ordered.map((conn, i) => (
             <Row
               key={conn.id}
               conn={conn}
@@ -183,9 +256,10 @@ export function ConnectionManager({ onClose, onOpen, onAdd, onEdit, onRemove, on
               cursor={i === cursor}
               busy={busy.has(conn.id)}
               onOpen={() => open(conn)}
-              onEdit={() => onEdit(conn, refresh)}
+              onClone={() => (onCloneEnv ? onCloneEnv(conn, refresh) : onAdd(refresh))}
+              onEdit={() => onEdit(originalOf(conn), refresh)}
               onIntrospect={() => void introspect(conn)}
-              onRemove={() => onRemove(conn, refresh)}
+              onRemove={() => onRemove(originalOf(conn), refresh)}
             />
           ))
         )}
@@ -209,6 +283,7 @@ function Row({
   cursor,
   busy,
   onOpen,
+  onClone,
   onEdit,
   onIntrospect,
   onRemove,
@@ -218,6 +293,7 @@ function Row({
   cursor: boolean;
   busy: boolean;
   onOpen: () => void;
+  onClone: () => void;
   onEdit: () => void;
   onIntrospect: () => void;
   onRemove: () => void;
@@ -264,6 +340,7 @@ function Row({
       <span className={`conn-dot ${status.tone}`} aria-hidden="true" />
       <span className="conn-name">
         <span className="conn-name-text">{conn.name}</span>
+        {conn.env ? <span className={`env-pill compact tone-${conn.tier ?? 'other'}`}>{conn.env}</span> : null}
         {active ? <span className="conn-badge current">{say('current')}</span> : null}
       </span>
       {/* Host and database, or a file name. Never a password. */}
@@ -273,6 +350,7 @@ function Row({
       <span className="conn-meta">
         <span className="conn-badge">{conn.dialect}</span>
         <span className={`conn-badge source-${conn.source}`}>{conn.source}</span>
+        {conn.writable ? <span className="conn-badge writable">{say('writable')}</span> : null}
         {conn.secret && conn.secret !== 'none' ? (
           <span className="conn-badge" title={say('password', { secret: conn.secret })}>
             {conn.secret}
@@ -287,6 +365,7 @@ function Row({
       </span>
       <span className={`conn-status ${status.tone}`}>{status.text}</span>
       <span className="conn-actions">
+        {action(say('cloneEnv'), say('cloneEnvTitle', { database: conn.database ?? conn.name }), onClone)}
         {action(say('edit'), say('editName', { name: conn.name }), onEdit)}
         {busy ? (
           <span className="conn-action working">{say('introspecting')}</span>

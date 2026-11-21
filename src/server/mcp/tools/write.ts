@@ -25,7 +25,7 @@ import {
   type UpdateRequest,
 } from '@mistriwork/engine/host';
 import { deleteGraph, flattenTables, insertGraph, type GraphRow } from '../../graph.js';
-import { DryRunRollback, linkTo, STATS, wholeKeyOrThrow, type Handler, type ToolCall, ToolError } from '../toolkit.js';
+import { DryRunRollback, ENV_ARG, linkTo, STATS, wholeKeyOrThrow, type Handler, type ToolCall, ToolError } from '../toolkit.js';
 
 /**
  * Offered only when some connection's config says `"writable": true` — the
@@ -63,6 +63,7 @@ export const definitions = [
           description: 'Run inside BEGIN … ROLLBACK: check constraints and return coerced values without committing.',
         },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       required: ['table', 'key', 'set'],
       additionalProperties: false,
@@ -112,6 +113,7 @@ export const definitions = [
           description: 'Run inside BEGIN … ROLLBACK: check constraints and return defaults/key without committing.',
         },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       required: ['table', 'values'],
       additionalProperties: false,
@@ -155,6 +157,7 @@ export const definitions = [
         key: { type: 'object', additionalProperties: { type: ['string', 'number'] } },
         confirm: { type: 'boolean', description: 'Actually delete. Absent means report only.' },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       required: ['table', 'key'],
       additionalProperties: false,
@@ -233,6 +236,7 @@ export const definitions = [
           description: 'Run the whole graph inside BEGIN … ROLLBACK without committing.',
         },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       additionalProperties: false,
     },
@@ -305,6 +309,7 @@ export const definitions = [
         },
         confirm: { type: 'boolean', description: 'Actually delete. Absent means report only.' },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       required: ['rows'],
       additionalProperties: false,
@@ -365,6 +370,7 @@ export const definitions = [
         },
         limit: { type: 'number', description: 'How many past writes to list. Default 10.' },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       additionalProperties: false,
     },

@@ -16,5 +16,10 @@ export const say = defineMessages({
   linePointsAt: '- Points at: {targets}',
   linePointedAtBy: '- Pointed at by: {sources}',
   lineCounts: '- Shape: {tables} tables, {fks} foreign keys',
+  lineEnvironment: '- Environment: `{database}` · `{env}` ({posture})',
+  lineSiblings: '- Sibling environments: {siblings}',
+  postureWritable: 'writable',
+  postureReadOnly: 'read-only',
+  postureShapeOnly: 'shape-only',
   lineMcpCall: '- MCP `{tool}`: `{args}`',
 });

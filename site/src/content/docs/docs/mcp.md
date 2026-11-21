@@ -36,7 +36,7 @@ Every answer carries a `link` the person beside the agent can open in the page, 
 
 ## The tools
 
-Twenty-six tools: twenty read-only, and six writes that are listed only when a connection is `"writable": true`. Every tool also takes `connection` when there is more than one.
+Twenty-six tools: twenty read-only, and six writes that are listed only when a connection is `"writable": true`. Every tool also takes `connection` (an id, `"db@env"` such as `"billing@staging"`, or `"@staging"` relative to the active database) and optional `env` (`"local"`, `"staging"`, `"prod"`) when multiple environments are configured. Connections can declare `"database"` and `"env"` in `tablewalk.json` or rely on naming conventions (`billing-local`, `billing_staging`, `billing [prod]`); when a `prod` environment is active, write tools refuse implicit calls unless `connection` or `env: "prod"` is passed explicitly.
 
 ### Reading
 

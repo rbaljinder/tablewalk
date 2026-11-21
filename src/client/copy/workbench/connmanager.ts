@@ -10,6 +10,7 @@ export const say = defineMessages({
   removalWasNotConfirmed: 'Removal was not confirmed. Refresh Connections before trying again.',
   removed: 'Removed {name}.',
   addAConnection: 'Add a connection',
+  addEnvironmentForDatabase: 'Add environment for "{database}"',
   addAndOpen: 'Add and open',
   theWorkspaceChangedClose: 'The workspace changed. Close this form and open Connections again.',
   aConnectionStringOrFile: 'A connection string or file path is required.',

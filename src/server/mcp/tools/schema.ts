@@ -20,15 +20,16 @@ import {
 } from '@mistriwork/engine/host';
 // Plain JS and pure on purpose — the same analysis the landing page says out
 // loud, importable here because it takes a schema and touches nothing else.
-import { linkTo, READS, sessionEgress, STATS, type Handler, ToolError } from '../toolkit.js';
+import { groupConnectionsByDatabase } from '../../../shared/environments.js';
+import { ENV_ARG, linkTo, listEnrichedConnections, READS, sessionEgress, STATS, type Handler, ToolError } from '../toolkit.js';
 
 export const definitions = [
   {
     name: 'connections',
     description:
-      'List the configured database connections: id, name, dialect, and table count. ' +
-      'Call this first when unsure which database to ask about; every other tool takes ' +
-      'an optional "connection" (the id) and defaults to the active one.',
+      'List the configured database connections and logical database environments: id, name, database, env, tier, dialect, table count, write/shape posture, and sibling environments. ' +
+      'Call this first when unsure which database or environment to ask about; every other tool takes ' +
+      'an optional "connection" (an id, "db@env", or "@env") and optional "env", defaulting to the active connection.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { title: 'List connections', ...READS },
     outputSchema: {
@@ -41,13 +42,31 @@ export const definitions = [
             properties: {
               id: { type: 'string' },
               name: { type: 'string' },
+              database: { type: 'string' },
+              env: { type: 'string' },
+              tier: { type: 'string' },
               dialect: { type: 'string' },
               tables: { type: 'number' },
               active: { type: 'boolean', description: 'The default when no connection is named.' },
               writable: { type: 'boolean' },
+              rows: { type: 'boolean' },
+              hidesColumns: { type: 'boolean' },
+              siblings: { type: 'array', items: { type: 'object' } },
+              rowsReadThisSession: { type: 'number' },
             },
           },
         },
+        databases: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              database: { type: 'string' },
+              environments: { type: 'array', items: { type: 'object' } },
+            },
+          },
+        },
+        note: { type: 'string' },
         stats: STATS,
       },
     },
@@ -60,7 +79,7 @@ export const definitions = [
       'this so every other tool stops answering from the world before it.',
     inputSchema: {
       type: 'object',
-      properties: { connection: { type: 'string' } },
+      properties: { connection: { type: 'string' }, env: ENV_ARG },
       additionalProperties: false,
     },
     annotations: { title: 'Refresh the schema', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -84,7 +103,10 @@ export const definitions = [
       'table that does not exist. Start here before reaching for table lists or DDL.',
     inputSchema: {
       type: 'object',
-      properties: { connection: { type: 'string', description: 'Connection id; defaults to the active connection.' } },
+      properties: {
+        connection: { type: 'string', description: 'Connection id or db@env selector; defaults to the active connection.' },
+        env: ENV_ARG,
+      },
       additionalProperties: false,
     },
     annotations: { title: 'Orient in the schema', ...READS },
@@ -118,7 +140,7 @@ export const definitions = [
     description: 'Every table on a connection: id, column count, approximate rows, and whether it is a view.',
     inputSchema: {
       type: 'object',
-      properties: { connection: { type: 'string' } },
+      properties: { connection: { type: 'string' }, env: ENV_ARG },
       additionalProperties: false,
     },
     annotations: { title: 'List tables', ...READS },
@@ -154,6 +176,7 @@ export const definitions = [
       properties: {
         table: { type: 'string', description: 'Table id, e.g. "invoice".' },
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       required: ['table'],
       additionalProperties: false,
@@ -236,6 +259,7 @@ export const definitions = [
            JSON Schema can say and few clients enforce — the tool refuses in
            words as well. */
         connection: { type: 'string' },
+        env: ENV_ARG,
       },
       additionalProperties: false,
     },
@@ -303,20 +327,57 @@ export const definitions = [
 
 type Name = (typeof definitions)[number]['name'];
 
-/** The one tool answered without opening a connection: the list is the registry's. */
+/** The one tool answered without opening a connection: the list is the registry's, enriched with environment topology. */
 export function connections(registry: Registry): Record<string, unknown> {
-  return {
-    connections: registry.list().map((c) => ({
+  const enriched = listEnrichedConnections(registry);
+  const groups = groupConnectionsByDatabase(enriched);
+  const hasMultiEnv = groups.some((g) => g.environments.length > 1 || g.environments.some((c) => Boolean(c.env)));
+  const databases = groups.map((g) => ({
+    database: g.database,
+    environments: g.environments.map((c) => ({
       id: c.id,
       name: c.name,
+      ...(c.env ? { env: c.env } : {}),
+      tier: c.tier,
+      active: c.id === registry.active,
+      writable: c.writable,
+      ...(c.rows === false ? { rows: false } : {}),
+      ...(c.hidesColumns ? { hidesColumns: true } : {}),
+    })),
+  }));
+  const note = hasMultiEnv
+    ? `Environments by database: ${groups
+        .map(
+          (g) =>
+            `${g.database} [${g.environments
+              .map(
+                (c) =>
+                  `${c.env ?? c.tier}="${c.id}" (${c.rows === false ? 'shape-only' : c.writable ? 'writable' : 'read-only'}${c.id === registry.active ? ', active' : ''})`,
+              )
+              .join(', ')}]`,
+        )
+        .join('; ')}. Target any environment with connection: "db@env", "@env", or env: "<env>".`
+    : undefined;
+  return {
+    connections: enriched.map((c) => ({
+      id: c.id,
+      name: c.name,
+      database: c.database,
+      ...(c.env ? { env: c.env } : {}),
+      tier: c.tier,
       dialect: c.dialect,
       tables: c.tables,
       active: c.id === registry.active,
       writable: c.writable,
+      ...(c.rows === false ? { rows: false } : {}),
+      ...(c.hidesColumns ? { hidesColumns: true } : {}),
+      siblings: c.siblings,
       /* The trust boundary as a number: data rows this session has handed
          to the caller from this connection. Zero is an auditable answer. */
       rowsReadThisSession: sessionEgress.get(c.id) ?? 0,
     })),
+    databases,
+    ...(note ? { note } : {}),
   };
 }
 
