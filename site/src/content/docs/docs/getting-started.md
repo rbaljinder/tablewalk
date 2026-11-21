@@ -33,18 +33,19 @@ Add `--open` to have it open your browser, and `--port <n>` to listen somewhere 
 
 Run `npx tablewalk` alone and the page offers the sample database or a form to connect one. A connection added here is read-only. Only a [config file](/docs/connections/) can make one writable.
 
-![The welcome page: "Follow the data", with buttons to open the sample database or connect one](/shots/connect.webp?v=2)
+![The welcome page: "Follow the data", with buttons to open the sample database or connect one](/shots/connect.webp?v=3)
 
 ## The first page
 
-Once a database is open, the home page reads the schema for you: the tables it centers on, the ones that record events, the longest chain of references, and a table to start at. Under that is a diagram of every table and foreign key. The sidebar lists every table with its row count, and the query bar at the top takes [a question in one line](/docs/query/).
+Once a database is open, the home page reads the schema for you: the tables it centers on, the ones that record events, the longest chain of references, and starter tables to walk from, alongside one-click launchers for **Check shape & perf** and **Join paths**. Under that is an interactive entity diagram of every table and foreign key — hover any table card to illuminate its foreign-key neighborhood. The sidebar filters by **All**, **Tables** or **Views** with approximate row counts, and the query bar at the top takes [a question in one line](/docs/query/).
 
-![The home page of the sample database: what the schema centers on, the sidebar of tables, and the query bar](/shots/home.webp?v=2)
+![The home page of the sample database: what the schema centers on, the sidebar of tables, and the query bar](/shots/home.webp?v=3)
 
 From here:
 
 - Click a table to see its rows, then a row to see [the record and everything related to it](/docs/browsing/).
-- Press `⌘K` to jump to any table, page or recent query.
+- Click **Check shape & perf** or **Join paths** (or press `⌘K`) to inspect missing foreign-key indexes, live scan and index health, data anomalies, and shortest multi-hop joins.
+- Press `⌘K` to jump to any table, page, sibling environment or recent query.
 - Press `?` for the query language, with examples that run against your own tables.
 - Choose **Preferences** in the `···` menu for the look: Graphite and cobalt by default, with Fog and moss and other palettes, light or dark.
 - Choose **Take the tour** in the `···` menu for a short walk through the screen.

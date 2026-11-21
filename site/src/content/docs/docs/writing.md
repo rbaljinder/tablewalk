@@ -18,7 +18,7 @@ tablewalk never writes to a database unless that connection's config says `"writ
 
 In write mode a record's fields become editors. Changes stay pending ("1 unsaved change") until you **Discard** them or choose **Review & apply**. The review names the record, the old and new values, and the exact SQL with its parameters:
 
-![The "Apply this change?" dialog: an UPDATE on customer 2 that sets a new email, guarded by the old one](/shots/write.webp?v=2)
+![The "Apply this change?" dialog: an UPDATE on customer 2 that sets a new email, guarded by the old one](/shots/write.webp?v=3)
 
 The `WHERE` names the whole primary key and the value you started from, so a row someone else changed in the meantime is not overwritten. An update that would touch anything other than exactly one row is refused. A write waits up to five seconds (`--lock-timeout`) for a row another transaction holds, and is then refused so you can retry.
 
@@ -33,7 +33,7 @@ The `WHERE` names the whole primary key and the value you started from, so a row
 
 ## SQL that writes
 
-On a writable connection the SQL editor offers **Run as write…**, which runs the statement on the write connection after one more confirmation. It cannot be undone from tablewalk.
+On a writable connection the SQL editor offers **Run as write…**, which runs the statement on the write connection after one more confirmation (with an explicit production banner when targeting a `prod` environment). It cannot be undone from tablewalk.
 
 ## How reads stay read-only
 
@@ -44,4 +44,4 @@ On a writable connection the SQL editor offers **Run as write…**, which runs t
 
 ## Agents
 
-A coding agent connected over [MCP](/docs/mcp/) gets the write tools only when a connection is writable, and they write only to that connection. Deleting through MCP shows the impact first and asks for confirmation.
+A coding agent connected over [MCP](/docs/mcp/) gets the write tools only when a connection is writable, and they write only to that connection (`dryRun: true` on `insert`, `update` and `insert_graph` checks constraints inside a rolled-back transaction first). When a `prod` environment is active, write tools refuse implicit calls unless `connection` or `env: "prod"` is named explicitly. Deleting through MCP shows the impact first and asks for confirmation.

@@ -12,7 +12,7 @@ const notFound = Astro.locals.starlightRoute.id === '404';
 const release = /-(?:rc|beta|alpha)/.test(version) ? `${version} · release candidate` : version;
 const { title = data.title, tagline, actions = [] } = data.hero || {};
 const alt =
-  'A customer record in tablewalk: Harbour Freight, its fields, its six invoices listed under them, and a Related rail beside them counting every table that points at it.';
+  'A customer record in tablewalk: Harbour Freight, its fields, its two invoices listed under them, and a Related rail beside them counting every table that points at it.';
 ---
 
 {
@@ -47,8 +47,8 @@ const alt =
     <div class="tw-window-bar" aria-hidden="true"><span></span><span></span><span></span><b>localhost:4111/demo/customer/~1</b></div>
     {/* A phone shows the page drawn at its own width (record-phone.webp), not the desk shrunk to a third. */}
     <picture>
-      <source media="(max-width: 40rem)" srcset="/shots/record-phone.webp?v=2" width="780" height="1440" />
-      <img src="/shots/record.webp?v=2" {alt} width="1280" height="800" loading="eager" fetchpriority="high" />
+      <source media="(max-width: 40rem)" srcset="/shots/record-phone.webp?v=3" width="780" height="1440" />
+      <img src="/shots/record.webp?v=3" {alt} width="1280" height="800" loading="eager" fetchpriority="high" />
     </picture>
   </figure>
 </div>

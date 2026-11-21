@@ -172,11 +172,16 @@ statement preview and undo as the record view. Pin a page with the star beside
 its name and the home screen offers it — along with the records you were last
 looking at, and every page there is.
 
-**Check the shape** (⌘K, or the `···` menu) runs the same `lint` an agent and
-a build get, for the person who can actually add the index: keyless tables,
-foreign keys with nothing behind them, references with no delete rule,
-timestamps with no zone — grouped by table, each cost said once, and every
-heading opens the table it is about.
+**Check the shape** (⌘K, the `···` menu, or **Check shape & perf** / **Join paths**
+on the home page) opens a four-tab diagnostics cockpit over the active
+connection: static **Schema & perf** (`lint` — keyless tables, unindexed
+foreign keys, missing `ON DELETE` rules, naive timestamps), live **Index & scan
+health** (`perf` — sequential-scan hotspots, unused or duplicate indexes, table
+bloat and stale planner stats), bounded **Data anomalies** (`anomalies` —
+temporal inversions, dangling soft-delete lifecycles, almost-always-populated
+nullable FKs), and **Join paths** (`path` — shortest `to-one` and `to-many`
+routes between any two tables), each with ready-to-run `CREATE INDEX` or
+`SELECT … JOIN …` statements you can copy or **Open in SQL**.
 
 **Find a value** (⌘K, or the `···` menu) answers the question you have when a
 string arrives from somewhere else and you cannot yet name the table it
@@ -280,7 +285,7 @@ real row out of development, put it into a test database, tear it down after.
 Rows entering an agent's context leave the machine — point it at development
 databases. Where you want that enforced rather than remembered, mark a
 connection `"rows": false`: the catalog, row counts, null fractions, plans,
-`lint` and `anomalies` still answer, and everything that would return a value out of a row
+`lint`, `perf` and `anomalies` still answer, and everything that would return a value out of a row
 refuses — at the adapter, so every endpoint and every tool at once. A server
 whose connections are all shape-only does not list `query`, `sql`, `record`,
 `breakdown` or `export` at all.
@@ -295,23 +300,30 @@ a query or configured view that names or traverses one is refused, and raw SQL
 (`sql`, `explain`, `verify_ddl`) is withheld and refused on that connection.
 Where PII or secrets should stay visible in shape and deterministically masked in
 values, set `"redact": true` (and optional `"redactColumns": ["notes"]`, or pass
-`--redact` / `TABLEWALK_REDACT=1`), and bound total session egress with
-`"maxRows": 5000` (or `--max-rows 5000` / `TABLEWALK_MAX_ROWS=5000`). A
-database role without `SELECT` on sensitive tables is stronger still.
+`--redact` / `TABLEWALK_REDACT=1`), bound total session egress with
+`"maxRows": 5000` (or `--max-rows 5000` / `TABLEWALK_MAX_ROWS=5000`), and scope
+large schemas to an N-hop foreign-key neighborhood with `"focus": ["invoice"]`
+(`--focus invoice --focus-hops 1`). A database role without `SELECT` on
+sensitive tables is stronger still.
 
 For a local secret vault or ephemeral agent session, pipe the config in memory
 instead of writing secrets to disk — `--config <(vault read db/staging)`,
 `{ vault read db/staging; cat; } | npx tablewalk --mcp --config -`, or
-`TABLEWALK_CONFIG_JSON` — with inline `"secrets"` / `"dotenv"` variables
-resolved only inside `Registry.environment`, `"active": "billing@staging"` and
-`"only": true` to expose one target, `--lazy` so MCP handshake answers before
-the database is dialed, `"lease": { "idleSeconds": 30, "maxSeconds": 300 }` (or
-`--lease 5m`) to evict idle sockets and close connections when the lease ends,
-`--query "invoice status = open"` / `--call schema_summary` for a single fast
-JSON lookup, or `--batch calls.jsonl` (including `{ vault read db/staging; cat calls.jsonl; } | npx tablewalk --config - --batch -`) to stream multiple queries and tool calls as NDJSON over one session before closing all connections.
+`TABLEWALK_CONFIG_JSON` — with inline `"secrets"` / `"dotenv"` variables or
+`"credentialCommand"` resolved only inside `Registry.environment`,
+`"active": "billing@staging"` and `"only": true` to expose one target, `--lazy`
+so MCP handshake answers before the database is dialed,
+`"lease": { "idleSeconds": 30, "maxSeconds": 300 }` (or `--lease 5m`) to evict
+idle sockets and close connections when the lease ends, `--audit-log stderr` for
+zero-PII JSONL tool receipts, `--query "invoice status = open" --format tsv` /
+`--call breakdown --args '{"q":"invoice count by status"}' --all-envs --format md`
+for compact one-shot lookups, or `--batch calls.jsonl` (including
+`{ vault read db/staging; cat calls.jsonl; } | npx tablewalk --config - --batch -`)
+to stream multiple queries and tool calls as NDJSON over one session before closing all connections.
 
 A call is bounded in time and in what it counts. Statements run under a
-30-second cap, and `sql` takes `timeout_ms` to lower it for one statement:
+30-second cap (or `"timeoutMs"` / `--timeout-ms` per connection or environment),
+and `sql` takes `timeout_ms` to lower it for one statement:
 Postgres sets it inside the statement's transaction, and SQLite, which cannot interrupt a statement
 in-process, runs `sql` in a separate process that the cap stops — the reads
 tablewalk compiles for SQLite are bounded by their limits instead. A client
@@ -337,9 +349,11 @@ beside the schema brief. Reading them does not run them; `query`, `sql` and
 the current record, query or schema with its deep link and exact MCP call.
 
 And you can watch all of it: the **Agent console** (⌘K → "Agent console")
-drives the same tools by hand through the same code path and streams a live
-trail of external MCP calls hitting the shared server — stats, token cost, Undo
-sync, and one-click deep links back into the UI.
+organizes all twenty-eight tools into five searchable workflow sections, offers an
+**All envs** fan-out pill for read-only calls, drives the same tools by hand
+through the same code path, and streams a live trail of external MCP calls
+hitting the shared server — stats, token cost, Undo sync, and one-click deep
+links back into the UI.
 
 ## A config file, and a team's surfaces
 
@@ -367,11 +381,13 @@ on should live in version control rather than in one person's browser.
 Connections that share a logical `database` (either declared explicitly with
 `"database"` and `"env"`, or inferred from names like `app-local`, `app_staging`,
 `app (prod)`, or `app-replica`) appear as one promotion pipeline across the top
-bar, the SQL editor, and the Connections screen — switching environments keeps
-your current table, query, or record open when that table exists on the other
-side, while top-level `"environments"` policies apply shared `writable`, `rows`,
-`lease`, `blocklist`, `redact` and `maxRows` defaults across every database in
-that tier. In MCP, every tool accepts `"connection": "app@staging"`, `"@staging"`, or
+bar, the drag-resizable SQL editor (including **Compare envs** parallel `SELECT`
+tabs), the Agent console (**All envs** fan-out), and the Connections screen —
+switching environments keeps your current table, query, or record open when that
+table exists on the other side, while top-level `"environments"` policies apply
+shared `writable`, `rows`, `lease`, `blocklist`, `redact`, `maxRows`,
+`timeoutMs` and `focus` defaults across every database in that tier. In MCP,
+every tool accepts `"connection": "app@staging"`, `"@staging"`, or
 `"env": "staging"`, and implicit writes while a `prod` environment is active are
 refused unless `"connection"` or `"env": "prod"` is named explicitly.
 
