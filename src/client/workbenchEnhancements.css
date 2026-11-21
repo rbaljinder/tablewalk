@@ -1,0 +1,194 @@
+@layer theme {
+  /* ---------- single-line inline filter chip bar (Workbench table room) ---------- */
+
+  body:not(.app-mode) .grid-host + .host-contents > .applist-filterbar {
+    margin: 0;
+    padding: var(--space-1h) var(--space-4h);
+    border-bottom: 1px solid var(--line);
+    background: var(--ground);
+  }
+
+  body.wb-filters-collapsed:not(.app-mode) .grid-host + .host-contents > .applist-filterbar {
+    display: none;
+  }
+
+  body:not(.app-mode) .grid-host + .host-contents > .applist-filterbar .applist-fields {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  body:not(.app-mode) .grid-host + .host-contents > .applist-filterbar .applist-field {
+    display: inline-flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-1h);
+    margin: 0;
+    padding: 1px var(--space-1) 1px var(--space-2h);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+
+  body:not(.app-mode) .grid-host + .host-contents > .applist-filterbar .applist-field:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  body:not(.app-mode) .grid-host + .host-contents > .applist-filterbar .applist-field-label {
+    margin: 0;
+    font: 500 var(--text-xs) var(--code);
+    color: var(--ink-subtle);
+    white-space: nowrap;
+  }
+
+  body:not(.app-mode) .grid-host + .host-contents > .applist-filterbar .applist-field :is(.applist-quick, [data-slot='select-trigger']) {
+    block-size: 24px;
+    min-block-size: 24px;
+    inline-size: 7.5rem;
+    min-inline-size: 5rem;
+    padding: 0 var(--space-1h);
+    border: 0;
+    border-radius: var(--radius-item);
+    background: transparent;
+    font-size: var(--text-xs);
+    box-shadow: none;
+  }
+
+  body:not(.app-mode) .grid-host + .host-contents > .applist-filterbar .applist-go {
+    block-size: 26px;
+    min-block-size: 26px;
+    padding: 0 var(--space-3);
+    align-self: center;
+    background: var(--surface);
+    font: 500 var(--text-xs) var(--face-ui, var(--sans));
+  }
+
+  body:not(.app-mode) .grid-host + .host-contents > .applist-filterbar .applist-toggle {
+    font: 500 var(--text-xs) var(--face-ui, var(--sans));
+    color: var(--ink-muted);
+    padding: var(--space-1) var(--space-2);
+  }
+
+  .wb-filter-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    block-size: 26px;
+    padding: 0 var(--space-2h);
+    margin-inline-end: var(--space-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink-muted);
+    font: 500 var(--text-xs) var(--face-ui, var(--sans));
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .wb-filter-toggle.is-open {
+    color: var(--accent-ink, var(--ink));
+    border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+    background: var(--accent-soft);
+  }
+
+  /* ---------- segmented sidebar scope & focus badge ---------- */
+
+  .wb-sidebar-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-1h);
+    padding: 0 var(--space-3) var(--space-2);
+    border-bottom: 1px solid var(--line);
+    margin-block-end: var(--space-1h);
+  }
+
+  .wb-sidebar-seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    padding: 1px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+
+  .wb-sidebar-seg-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 1px var(--space-2);
+    border: 0;
+    border-radius: var(--radius-item);
+    background: transparent;
+    color: var(--ink-muted);
+    font: 500 var(--text-xs) var(--face-ui, var(--sans));
+    cursor: pointer;
+  }
+
+  .wb-sidebar-seg-btn.active {
+    background: var(--accent-soft);
+    color: var(--accent-ink, var(--ink));
+  }
+
+  .wb-sidebar-seg-count {
+    font: var(--text-xs) var(--figures, var(--code));
+    opacity: 0.8;
+  }
+
+  .wb-sidebar-focus-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px var(--space-2);
+    border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+    border-radius: var(--radius);
+    background: var(--accent-soft);
+    color: var(--accent-ink, var(--ink));
+    font: 500 var(--text-xs) var(--face-ui, var(--sans));
+  }
+
+  .sidebar[data-sidebar-kind='tables'] #table-list > li:has(.view-tag) {
+    display: none;
+  }
+
+  .sidebar[data-sidebar-kind='views'] #table-list > li:not(:has(.view-tag)) {
+    display: none;
+  }
+
+  /* ---------- schema landing polish ---------- */
+
+  body:not(.app-mode) .landing-top > .shape {
+    padding-block: var(--space-3h) var(--space-4);
+  }
+
+  body:not(.app-mode) .landing-starts {
+    margin-block-start: var(--space-4);
+    padding-block-start: var(--space-3h);
+  }
+
+  .wb-landing-tool {
+    font-size: var(--text-xs);
+    padding: var(--space-1h) var(--space-3);
+  }
+
+  body:not(.app-mode) .landing-top ~ .diagram .diagram-title {
+    font: 600 var(--text-sm) var(--face-ui, var(--sans));
+    color: var(--ink-muted);
+    letter-spacing: 0;
+  }
+
+  @media (hover: hover) {
+    .wb-filter-toggle:hover {
+      border-color: var(--line-strong);
+      color: var(--ink);
+    }
+
+    .wb-sidebar-seg-btn:not(.active):hover {
+      background: var(--raised);
+      color: var(--ink);
+    }
+  }
+}

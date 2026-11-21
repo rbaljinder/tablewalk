@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.0-rc.21
+
+Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.77`.
+
+- **Refined Instrument Pro** Workbench UI modernization across all four workspace pillars while reducing cold
+  first-paint JavaScript:
+  - **Workspace & Grid Density:** Single-line inline key-value quick-filter chips with a collapsible **Filters** toggle
+    in the table tab bar (~80px of vertical height reclaimed above row 1), tightened topbar/breadcrumb/tab/result-head
+    rhythm, sorted column header tinting, and a segmented sidebar scope bar (**All · Tables · Views**) plus a
+    **Focused** table-count pill on neighborhood-scoped connections.
+  - **Framed Floating Modals & Diagnostic Cockpit:** **Check the shape** and **Find a value** now open as bounded
+    floating dialogs over a dimmed scrim carrying active `db@env` and `masked` posture badges; **Check the shape**
+    upgrades to an underline tab bar with live severity-tinted count badges, inline monospace remediation SQL previews,
+    1-click **Open in SQL** across schema/index findings, and generated multi-hop `SELECT … JOIN …` statements (**Copy
+    JOIN SQL** / **Open in SQL**) in **Join paths**.
+  - **Schema Landing & ER Viewport Polish:** De-duplicated connection titles above the overview ER diagram, accurate
+    relational subtitles on runner-up starter chips, 1-click **Check shape & perf** and **Join paths** launchers on the
+    landing header, and cobalt foreign-key neighborhood edge/node illumination on ER hover.
+  - **Agent Console & SQL Split Ergonomics:** Instant tool search and 5-category grouping (*Schema & graph*, *Query &
+    walk*, *Diagnostics & perf*, *Migrations & order*, *Safe writes*) across the twenty-eight MCP tools plus an **All
+    envs** parallel read fan-out target pill in **Agent console**, and a drag-resizable top split handle plus 1-click
+    **Compare envs** parallel `SELECT` fan-out tabs in the **SQL** drawer.
+
 ## 1.0.0-rc.20
 
 Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.77`.

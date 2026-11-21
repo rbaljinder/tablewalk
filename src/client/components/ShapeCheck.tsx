@@ -86,10 +86,49 @@ interface ShapeConn {
   database?: string;
   env?: string;
   tier?: EnvironmentTier;
+  redactsRows?: boolean;
 }
 
 function quoteIdent(ident: string): string {
   return /^[a-z_][a-z0-9_]*$/.test(ident) ? ident : `"${ident.replace(/"/g, '""')}"`;
+}
+
+function qualifiedTableName(meta: TableMeta | undefined, fallback: string): string {
+  const baseName = meta?.name ?? fallback;
+  return meta?.schema && meta.schema !== 'public' && meta.schema !== 'main'
+    ? `${quoteIdent(meta.schema)}.${quoteIdent(baseName)}`
+    : quoteIdent(baseName);
+}
+
+function buildJoinSqlForPath(path: ForeignKeyPath, tables: TableMeta[]): string | null {
+  if (!path.hops.length) return null;
+  const byId = new Map(tables.map((t) => [t.id, t]));
+  const startId = path.hops[0].from;
+  const lines = [
+    ['SELECT', `t0.*, t${path.hops.length}.*`].join(' '),
+    ['FROM', qualifiedTableName(byId.get(startId), startId), 't0'].join(' '),
+  ];
+  for (let i = 0; i < path.hops.length; i++) {
+    const hop = path.hops[i];
+    const nextTable = qualifiedTableName(byId.get(hop.to), hop.to);
+    const leftAlias = `t${i}`;
+    const rightAlias = `t${i + 1}`;
+    const pairs = hop.via.map((viaCol, cIdx) => {
+      const targetCol = hop.targetColumns[cIdx] ?? hop.targetColumns[0] ?? 'id';
+      return hop.direction === 'to-one'
+        ? `${leftAlias}.${quoteIdent(viaCol)} = ${rightAlias}.${quoteIdent(targetCol)}`
+        : `${leftAlias}.${quoteIdent(targetCol)} = ${rightAlias}.${quoteIdent(viaCol)}`;
+    });
+    lines.push(['JOIN', nextTable, rightAlias, 'ON', pairs.join(' AND ')].join(' '));
+  }
+  lines.push(['LIMIT', '50;'].join(' '));
+  return lines.join('\n');
+}
+
+function badgeToneFor(counts: { high: number; medium: number; low: number }): string {
+  if (counts.high > 0) return ' tone-high';
+  if (counts.medium > 0) return ' tone-medium';
+  return '';
 }
 
 function indexDdlFor(tableMeta: TableMeta | undefined, finding: Finding): string | null {
@@ -101,10 +140,7 @@ function indexDdlFor(tableMeta: TableMeta | undefined, finding: Finding): string
   }
   if (!cols.length) return null;
   const baseName = tableMeta?.name ?? finding.table;
-  const qualified =
-    tableMeta?.schema && tableMeta.schema !== 'public' && tableMeta.schema !== 'main'
-      ? `${quoteIdent(tableMeta.schema)}.${quoteIdent(baseName)}`
-      : quoteIdent(baseName);
+  const qualified = qualifiedTableName(tableMeta, finding.table);
   const idxName = `idx_${baseName.replace(/[^a-zA-Z0-9_]/g, '_')}_${cols.join('_').replace(/[^a-zA-Z0-9_]/g, '_')}`;
   return `CREATE INDEX ${quoteIdent(idxName)} ON ${qualified} (${cols.map(quoteIdent).join(', ')});`;
 }
@@ -234,115 +270,144 @@ export function ShapeCheckDialog({ onClose, initialTab = 'lint' }: { onClose: ()
   const diffTables = diffResult.tables ?? [];
   const compareLabel = compareTarget ? (compareTarget.env ? `${compareTarget.database}@${compareTarget.env}` : compareTarget.name) : '';
 
+  const openSqlInEditor = (sqlText: string) => {
+    close();
+    void import('../sql.js').then((m) => m.openSql(sqlText));
+  };
+
   return (
-    <Modal className="conn-manager shape-check" ref={dialog} onClose={onClose} ariaLabel={say('checkTheShape')} plain backdrop={false}>
-      <div className="conn-inner">
+    <Modal className="shape-check-dialog shape-check" ref={dialog} onClose={onClose} ariaLabel={say('checkTheShape')} plain backdrop>
+      <div className="shape-dialog-head">
+        <div className="shape-dialog-title-row">
+          <h2>{say('checkTheShape')}</h2>
+          {activeConn ? (
+            <span className={`env-pill compact tone-${activeConn.tier}`}>
+              <span className="env-pill-dot" aria-hidden="true" />
+              <span>{activeConn.env ? `${activeConn.database}@${activeConn.env}` : activeConn.name}</span>
+            </span>
+          ) : null}
+          {activeConn?.redactsRows ? <span className="conn-badge">{say('maskedBadge')}</span> : null}
+        </div>
+        <button type="button" className="shape-dialog-close" aria-label={say('common.close')} onClick={close}>
+          ×
+        </button>
+      </div>
+
+      <div className="shape-check-tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-label={say('tabSchemaPerf')}
+          aria-selected={tab === 'lint'}
+          className={`shape-check-tab${tab === 'lint' ? ' active' : ''}`}
+          onClick={() => setTab('lint')}
+        >
+          <span>{say('tabSchemaPerf')}</span>
+          {lint.isSuccess ? <span className={`shape-tab-badge${badgeToneFor(counts)}`}>{findings.length}</span> : null}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-label={say('tabLivePerf')}
+          aria-selected={tab === 'perf'}
+          className={`shape-check-tab${tab === 'perf' ? ' active' : ''}`}
+          onClick={() => setTab('perf')}
+        >
+          <span>{say('tabLivePerf')}</span>
+          {perf.isSuccess ? <span className={`shape-tab-badge${badgeToneFor(perfCounts)}`}>{perfList.length}</span> : null}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-label={say('tabAnomalies')}
+          aria-selected={tab === 'anomalies'}
+          className={`shape-check-tab${tab === 'anomalies' ? ' active' : ''}`}
+          onClick={() => setTab('anomalies')}
+        >
+          <span>{say('tabAnomalies')}</span>
+          {anomalies.isSuccess ? <span className={`shape-tab-badge${badgeToneFor(anomalyCounts)}`}>{anomalyList.length}</span> : null}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-label={say('tabJoinPaths')}
+          aria-selected={tab === 'paths'}
+          className={`shape-check-tab${tab === 'paths' ? ' active' : ''}`}
+          onClick={() => setTab('paths')}
+        >
+          <span>{say('tabJoinPaths')}</span>
+        </button>
+        {siblingsFirst.length > 0 ? (
+          <button
+            type="button"
+            role="tab"
+            aria-label={say('tabEnvDrift')}
+            aria-selected={tab === 'drift'}
+            className={`shape-check-tab${tab === 'drift' ? ' active' : ''}`}
+            onClick={() => setTab('drift')}
+          >
+            <span>{say('tabEnvDrift')}</span>
+            {drift.isSuccess ? (
+              <span className={`shape-tab-badge${diffTables.length > 0 ? ' tone-medium' : ''}`}>{diffTables.length}</span>
+            ) : null}
+          </button>
+        ) : null}
+      </div>
+
+      <div className="shape-dialog-body">
         {tab === 'lint' && lint.isPending ? (
           <p className="loading">{say('readingTheCatalog')}</p>
         ) : tab === 'lint' && lint.isError ? (
           <p className="note">{(lint.error as Error).message}</p>
-        ) : (
+        ) : tab === 'lint' ? (
           <>
-            <div className="conn-head">
-              <h2>{say('checkTheShape')}</h2>
-              <button type="button" className="ghost" aria-label={say('common.close')} onClick={close}>
-                ×
-              </button>
-            </div>
-            <div className="shape-check-tabs" role="tablist">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === 'lint'}
-                className={`shape-check-tab${tab === 'lint' ? ' active' : ''}`}
-                onClick={() => setTab('lint')}
-              >
-                {say('tabSchemaPerf')}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === 'perf'}
-                className={`shape-check-tab${tab === 'perf' ? ' active' : ''}`}
-                onClick={() => setTab('perf')}
-              >
-                {say('tabLivePerf')}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === 'anomalies'}
-                className={`shape-check-tab${tab === 'anomalies' ? ' active' : ''}`}
-                onClick={() => setTab('anomalies')}
-              >
-                {say('tabAnomalies')}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === 'paths'}
-                className={`shape-check-tab${tab === 'paths' ? ' active' : ''}`}
-                onClick={() => setTab('paths')}
-              >
-                {say('tabJoinPaths')}
-              </button>
-              {siblingsFirst.length > 0 ? (
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === 'drift'}
-                  className={`shape-check-tab${tab === 'drift' ? ' active' : ''}`}
-                  onClick={() => setTab('drift')}
-                >
-                  {say('tabEnvDrift')}
-                </button>
-              ) : null}
-            </div>
-
-            {tab === 'lint' ? (
-              <>
-                <p className="find-note">
-                  <span>
-                    {findings.length
-                      ? say('highMediumLowRead', { high: counts.high, medium: counts.medium, low: counts.low })
-                      : say('nothingToReportNoMissing')}
-                  </span>
-                </p>
-                {groupFindings(findings).map(([table, list]) => {
-                  const meta = findTable(table) as TableMeta | undefined;
-                  return (
-                    <div key={table} className="shape-check-group">
-                      {/* Every finding is about a table, and the useful next move is looking at it. */}
-                      <div className="shape-check-group-head">
-                        <button
-                          type="button"
-                          className="shape-check-table"
-                          title={say('openTable', { table })}
-                          onClick={() => {
-                            close();
-                            go(tableView(meta?.id ?? table), 'reset');
-                          }}
-                        >
-                          <span>{meta?.name ?? table}</span>
-                          <span className="shape-check-count">{`${list.length}`}</span>
-                        </button>
-                        {meta?.approxRows !== undefined ? (
-                          <span className="shape-check-approx">{say('approxRowsTag', { rows: formatNumber(meta.approxRows) })}</span>
-                        ) : null}
-                      </div>
-                      {byRule(list).map(([rule, found]) => (
-                        <div key={rule} className={`shape-check-rule-group tone-${found[0].severity ?? 'low'}`}>
-                          <p className="shape-check-why">
-                            <span className="shape-check-rule">{rule}</span>
-                            <span>{rules[rule]?.why ?? found[0].why ?? ''}</span>
-                          </p>
-                          {found.map((finding, i) => {
-                            const ddl = indexDdlFor(meta, finding);
-                            const key = `${table}:${rule}:${i}`;
-                            return (
-                              <div key={i} className="shape-check-item shape-check-item-row">
-                                <span>{finding.message}</span>
-                                {ddl ? (
+            <p className="find-note">
+              <span>
+                {findings.length
+                  ? say('highMediumLowRead', { high: counts.high, medium: counts.medium, low: counts.low })
+                  : say('nothingToReportNoMissing')}
+              </span>
+            </p>
+            {groupFindings(findings).map(([table, list]) => {
+              const meta = findTable(table) as TableMeta | undefined;
+              return (
+                <div key={table} className="shape-check-group">
+                  {/* Every finding is about a table, and the useful next move is looking at it. */}
+                  <div className="shape-check-group-head">
+                    <button
+                      type="button"
+                      className="shape-check-table"
+                      title={say('openTable', { table })}
+                      onClick={() => {
+                        close();
+                        go(tableView(meta?.id ?? table), 'reset');
+                      }}
+                    >
+                      <span>{meta?.name ?? table}</span>
+                      <span className="shape-check-count">{`${list.length}`}</span>
+                    </button>
+                    {meta?.approxRows !== undefined ? (
+                      <span className="shape-check-approx">{say('approxRowsTag', { rows: formatNumber(meta.approxRows) })}</span>
+                    ) : null}
+                  </div>
+                  {byRule(list).map(([rule, found]) => (
+                    <div key={rule} className={`shape-check-rule-group tone-${found[0].severity ?? 'low'}`}>
+                      <p className="shape-check-why">
+                        <span className="shape-check-rule">{rule}</span>
+                        <span>{rules[rule]?.why ?? found[0].why ?? ''}</span>
+                      </p>
+                      {found.map((finding, i) => {
+                        const ddl = indexDdlFor(meta, finding);
+                        const key = `${table}:${rule}:${i}`;
+                        return (
+                          <div key={i} className="shape-check-item-block">
+                            <div className="shape-check-item shape-check-item-row">
+                              <span>{finding.message}</span>
+                            </div>
+                            {ddl ? (
+                              <div className="shape-check-sql-box">
+                                <code className="shape-check-sql-code">{ddl}</code>
+                                <div className="shape-check-btn-group">
                                   <button
                                     type="button"
                                     className="shape-check-inline-btn"
@@ -351,70 +416,80 @@ export function ShapeCheckDialog({ onClose, initialTab = 'lint' }: { onClose: ()
                                   >
                                     {copiedKey === key ? say('copiedIndexSql') : say('copyIndexSql')}
                                   </button>
-                                ) : null}
+                                  <button type="button" className="shape-check-inline-btn" onClick={() => openSqlInEditor(ddl)}>
+                                    {say('openInSql')}
+                                  </button>
+                                </div>
                               </div>
-                            );
-                          })}
-                        </div>
-                      ))}
+                            ) : null}
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </>
-            ) : tab === 'perf' ? (
-              perf.isPending ? (
-                <p className="loading">{say('scanningPerfStats')}</p>
-              ) : perf.isError ? (
-                <p className="note">{(perf.error as Error).message}</p>
-              ) : (
-                <>
-                  <p className="find-note">
-                    <span>
-                      {perfList.length
-                        ? say('perfSummary', {
-                            high: perfCounts.high,
-                            medium: perfCounts.medium,
-                            low: perfCounts.low,
-                            tables: formatNumber(perfResult.scannedTables ?? 0),
-                          })
-                        : say('noPerfFindings')}
-                    </span>
-                  </p>
-                  {groupFindings(perfList).map(([table, list]) => {
-                    const meta = findTable(table) as TableMeta | undefined;
-                    const approx = meta?.approxRows ?? list.find((f) => f.approxRows !== undefined)?.approxRows;
-                    return (
-                      <div key={table} className="shape-check-group">
-                        <div className="shape-check-group-head">
-                          <button
-                            type="button"
-                            className="shape-check-table"
-                            title={say('openTable', { table })}
-                            onClick={() => {
-                              close();
-                              go(tableView(meta?.id ?? table), 'reset');
-                            }}
-                          >
-                            <span>{meta?.name ?? table}</span>
-                            <span className="shape-check-count">{`${list.length}`}</span>
-                          </button>
-                          {approx !== undefined ? (
-                            <span className="shape-check-approx">{say('approxRowsTag', { rows: formatNumber(approx) })}</span>
-                          ) : null}
-                        </div>
-                        {byRule(list).map(([rule, found]) => (
-                          <div key={rule} className={`shape-check-rule-group tone-${found[0].severity ?? 'low'}`}>
-                            <p className="shape-check-why">
-                              <span className="shape-check-rule">{rule}</span>
-                              <span>{perfRules[rule]?.why ?? found[0].why ?? ''}</span>
-                            </p>
-                            {found.map((finding, i) => {
-                              const sqlText = finding.suggestedSql;
-                              const key = `perf:${table}:${rule}:${i}`;
-                              return (
-                                <div key={i} className="shape-check-item shape-check-item-row">
-                                  <span>{finding.message}</span>
-                                  {sqlText ? (
+                  ))}
+                </div>
+              );
+            })}
+          </>
+        ) : tab === 'perf' ? (
+          perf.isPending ? (
+            <p className="loading">{say('scanningPerfStats')}</p>
+          ) : perf.isError ? (
+            <p className="note">{(perf.error as Error).message}</p>
+          ) : (
+            <>
+              <p className="find-note">
+                <span>
+                  {perfList.length
+                    ? say('perfSummary', {
+                        high: perfCounts.high,
+                        medium: perfCounts.medium,
+                        low: perfCounts.low,
+                        tables: formatNumber(perfResult.scannedTables ?? 0),
+                      })
+                    : say('noPerfFindings')}
+                </span>
+              </p>
+              {groupFindings(perfList).map(([table, list]) => {
+                const meta = findTable(table) as TableMeta | undefined;
+                const approx = meta?.approxRows ?? list.find((f) => f.approxRows !== undefined)?.approxRows;
+                return (
+                  <div key={table} className="shape-check-group">
+                    <div className="shape-check-group-head">
+                      <button
+                        type="button"
+                        className="shape-check-table"
+                        title={say('openTable', { table })}
+                        onClick={() => {
+                          close();
+                          go(tableView(meta?.id ?? table), 'reset');
+                        }}
+                      >
+                        <span>{meta?.name ?? table}</span>
+                        <span className="shape-check-count">{`${list.length}`}</span>
+                      </button>
+                      {approx !== undefined ? (
+                        <span className="shape-check-approx">{say('approxRowsTag', { rows: formatNumber(approx) })}</span>
+                      ) : null}
+                    </div>
+                    {byRule(list).map(([rule, found]) => (
+                      <div key={rule} className={`shape-check-rule-group tone-${found[0].severity ?? 'low'}`}>
+                        <p className="shape-check-why">
+                          <span className="shape-check-rule">{rule}</span>
+                          <span>{perfRules[rule]?.why ?? found[0].why ?? ''}</span>
+                        </p>
+                        {found.map((finding, i) => {
+                          const sqlText = finding.suggestedSql;
+                          const key = `perf:${table}:${rule}:${i}`;
+                          return (
+                            <div key={i} className="shape-check-item-block">
+                              <div className="shape-check-item shape-check-item-row">
+                                <span>{finding.message}</span>
+                              </div>
+                              {sqlText ? (
+                                <div className="shape-check-sql-box">
+                                  <code className="shape-check-sql-code">{sqlText}</code>
+                                  <div className="shape-check-btn-group">
                                     <button
                                       type="button"
                                       className="shape-check-inline-btn"
@@ -423,170 +498,203 @@ export function ShapeCheckDialog({ onClose, initialTab = 'lint' }: { onClose: ()
                                     >
                                       {copiedKey === key ? say('copiedIndexSql') : say('copySql')}
                                     </button>
-                                  ) : null}
+                                    <button type="button" className="shape-check-inline-btn" onClick={() => openSqlInEditor(sqlText)}>
+                                      {say('openInSql')}
+                                    </button>
+                                  </div>
                                 </div>
-                              );
-                            })}
-                          </div>
-                        ))}
+                              ) : null}
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
-                </>
-              )
-            ) : tab === 'anomalies' ? (
-              anomalies.isPending ? (
-                <p className="loading">{say('scanningDataAnomalies')}</p>
-              ) : anomalies.isError ? (
-                <p className="note">{(anomalies.error as Error).message}</p>
-              ) : (
-                <>
-                  <p className="find-note">
-                    <span>
-                      {anomalyList.length
-                        ? say('anomaliesSummary', {
-                            high: anomalyCounts.high,
-                            medium: anomalyCounts.medium,
-                            low: anomalyCounts.low,
-                            tables: formatNumber(anomalyResult.scannedTables ?? 0),
-                          })
-                        : say('noAnomaliesFound')}
-                    </span>
-                  </p>
-                  {groupFindings(anomalyList).map(([table, list]) => {
-                    const meta = findTable(table) as TableMeta | undefined;
-                    return (
-                      <div key={table} className="shape-check-group">
-                        <button
-                          type="button"
-                          className="shape-check-table"
-                          title={say('openTable', { table })}
-                          onClick={() => {
-                            close();
-                            go(tableView(meta?.id ?? table), 'reset');
-                          }}
-                        >
-                          <span>{meta?.name ?? table}</span>
-                          <span className="shape-check-count">{`${list.length}`}</span>
-                        </button>
-                        {byRule(list).map(([rule, found]) => (
-                          <div key={rule} className={`shape-check-rule-group tone-${found[0].severity ?? 'low'}`}>
-                            <p className="shape-check-why">
-                              <span className="shape-check-rule">{rule}</span>
-                              <span>{anomalyRules[rule]?.why ?? found[0].why ?? ''}</span>
-                            </p>
-                            {found.map((finding, i) => (
-                              <div key={i} className="shape-check-item shape-check-item-row">
-                                <span>{finding.message}</span>
-                                {finding.query ? (
-                                  <button type="button" className="shape-check-inline-btn" onClick={() => walkQueryHint(finding.query!)}>
-                                    {say('walkRows')}
-                                  </button>
-                                ) : null}
-                              </div>
-                            ))}
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </>
-              )
-            ) : tab === 'paths' ? (
-              schemaTables.length < 2 ? (
-                <p className="find-note">{say('needTwoTablesForPath')}</p>
-              ) : (
-                <>
-                  <div className="shape-check-path-bar">
-                    <label className="shape-check-path-field">
-                      <span>{say('pathFromLabel')}</span>
-                      <select
-                        className="shape-check-path-select"
-                        aria-label={say('pathFromLabel')}
-                        value={fromTable}
-                        onChange={(e) => setSelectedFrom(e.currentTarget.value)}
-                      >
-                        {schemaTables.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.id}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    ))}
+                  </div>
+                );
+              })}
+            </>
+          )
+        ) : tab === 'anomalies' ? (
+          anomalies.isPending ? (
+            <p className="loading">{say('scanningDataAnomalies')}</p>
+          ) : anomalies.isError ? (
+            <p className="note">{(anomalies.error as Error).message}</p>
+          ) : (
+            <>
+              <p className="find-note">
+                <span>
+                  {anomalyList.length
+                    ? say('anomaliesSummary', {
+                        high: anomalyCounts.high,
+                        medium: anomalyCounts.medium,
+                        low: anomalyCounts.low,
+                        tables: formatNumber(anomalyResult.scannedTables ?? 0),
+                      })
+                    : say('noAnomaliesFound')}
+                </span>
+              </p>
+              {groupFindings(anomalyList).map(([table, list]) => {
+                const meta = findTable(table) as TableMeta | undefined;
+                return (
+                  <div key={table} className="shape-check-group">
                     <button
                       type="button"
-                      className="shape-check-inline-btn"
-                      title={say('swapTablesTitle')}
+                      className="shape-check-table"
+                      title={say('openTable', { table })}
                       onClick={() => {
-                        setSelectedFrom(toTable);
-                        setSelectedTo(fromTable);
+                        close();
+                        go(tableView(meta?.id ?? table), 'reset');
                       }}
                     >
-                      {say('swapTables')}
+                      <span>{meta?.name ?? table}</span>
+                      <span className="shape-check-count">{`${list.length}`}</span>
                     </button>
-                    <label className="shape-check-path-field">
-                      <span>{say('pathToLabel')}</span>
-                      <select
-                        className="shape-check-path-select"
-                        aria-label={say('pathToLabel')}
-                        value={toTable}
-                        onChange={(e) => setSelectedTo(e.currentTarget.value)}
-                      >
-                        {schemaTables.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.id}
-                          </option>
+                    {byRule(list).map(([rule, found]) => (
+                      <div key={rule} className={`shape-check-rule-group tone-${found[0].severity ?? 'low'}`}>
+                        <p className="shape-check-why">
+                          <span className="shape-check-rule">{rule}</span>
+                          <span>{anomalyRules[rule]?.why ?? found[0].why ?? ''}</span>
+                        </p>
+                        {found.map((finding, i) => (
+                          <div key={i} className="shape-check-item shape-check-item-row">
+                            <span>{finding.message}</span>
+                            {finding.query ? (
+                              <button type="button" className="shape-check-inline-btn" onClick={() => walkQueryHint(finding.query!)}>
+                                {say('walkRows')}
+                              </button>
+                            ) : null}
+                          </div>
                         ))}
-                      </select>
-                    </label>
+                      </div>
+                    ))}
                   </div>
-                  {fromTable === toTable ? (
-                    <p className="find-note">{say('selectDifferentTables')}</p>
-                  ) : pathQuery.isPending ? (
-                    <p className="loading">{say('findingPaths')}</p>
-                  ) : pathQuery.isError ? (
-                    <p className="note">{(pathQuery.error as Error).message}</p>
-                  ) : !pathsList.length ? (
-                    <p className="find-note">{say('noPathsFound', { from: fromTable, to: toTable })}</p>
-                  ) : (
-                    <>
-                      <p className="find-note">{say('pathsSummary', { count: pathsList.length, from: fromTable, to: toTable })}</p>
-                      {pathsList.map((p, idx) => (
-                        <div key={idx} className="shape-check-group">
-                          <div className={`shape-check-rule-group tone-${p.unindexedHops > 0 ? 'medium' : 'low'}`}>
-                            <div className="shape-check-path-head">
-                              <div className="shape-check-path-badges">
-                                <span className="conn-badge">{say('hopsBadge', { count: p.length })}</span>
-                                {p.unindexedHops > 0 ? (
-                                  <span className="conn-badge">{say('unindexedHopsBadge', { count: p.unindexedHops })}</span>
-                                ) : (
-                                  <span className="conn-badge">{say('allHopsIndexed')}</span>
-                                )}
-                              </div>
+                );
+              })}
+            </>
+          )
+        ) : tab === 'paths' ? (
+          schemaTables.length < 2 ? (
+            <p className="find-note">{say('needTwoTablesForPath')}</p>
+          ) : (
+            <>
+              <div className="shape-check-path-bar">
+                <label className="shape-check-path-field">
+                  <span>{say('pathFromLabel')}</span>
+                  <select
+                    className="shape-check-path-select"
+                    aria-label={say('pathFromLabel')}
+                    value={fromTable}
+                    onChange={(e) => setSelectedFrom(e.currentTarget.value)}
+                  >
+                    {schemaTables.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="shape-check-inline-btn"
+                  title={say('swapTablesTitle')}
+                  onClick={() => {
+                    setSelectedFrom(toTable);
+                    setSelectedTo(fromTable);
+                  }}
+                >
+                  {say('swapTables')}
+                </button>
+                <label className="shape-check-path-field">
+                  <span>{say('pathToLabel')}</span>
+                  <select
+                    className="shape-check-path-select"
+                    aria-label={say('pathToLabel')}
+                    value={toTable}
+                    onChange={(e) => setSelectedTo(e.currentTarget.value)}
+                  >
+                    {schemaTables.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              {fromTable === toTable ? (
+                <p className="find-note">{say('selectDifferentTables')}</p>
+              ) : pathQuery.isPending ? (
+                <p className="loading">{say('findingPaths')}</p>
+              ) : pathQuery.isError ? (
+                <p className="note">{(pathQuery.error as Error).message}</p>
+              ) : !pathsList.length ? (
+                <p className="find-note">{say('noPathsFound', { from: fromTable, to: toTable })}</p>
+              ) : (
+                <>
+                  <p className="find-note">{say('pathsSummary', { count: pathsList.length, from: fromTable, to: toTable })}</p>
+                  {pathsList.map((p, idx) => {
+                    const joinSql = buildJoinSqlForPath(p, schemaTables);
+                    const joinKey = `join-sql:${idx}`;
+                    return (
+                      <div key={idx} className="shape-check-group">
+                        <div className={`shape-check-rule-group tone-${p.unindexedHops > 0 ? 'medium' : 'low'}`}>
+                          <div className="shape-check-path-head">
+                            <div className="shape-check-path-badges">
+                              <span className="conn-badge">{say('hopsBadge', { count: p.length })}</span>
+                              {p.unindexedHops > 0 ? (
+                                <span className="shape-hop-status is-unindexed">
+                                  {say('unindexedHopsBadge', { count: p.unindexedHops })}
+                                </span>
+                              ) : (
+                                <span className="shape-hop-status is-indexed">{say('allHopsIndexed')}</span>
+                              )}
+                            </div>
+                            <div className="shape-check-btn-group">
                               {p.queryHint ? (
                                 <button type="button" className="shape-check-inline-btn" onClick={() => walkQueryHint(p.queryHint!)}>
                                   {say('walkRows')}
                                 </button>
                               ) : null}
+                              {joinSql ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="shape-check-inline-btn"
+                                    title={joinSql}
+                                    onClick={() => void copySql(joinKey, joinSql)}
+                                  >
+                                    {copiedKey === joinKey ? say('copiedJoinSql') : say('copyJoinSql')}
+                                  </button>
+                                  <button type="button" className="shape-check-inline-btn" onClick={() => openSqlInEditor(joinSql)}>
+                                    {say('openInSql')}
+                                  </button>
+                                </>
+                              ) : null}
                             </div>
-                            {p.queryHint ? <pre className="shape-check-query-hint">{p.queryHint}</pre> : null}
-                            <div className="shape-check-hop-list">
-                              {p.hops.map((hop, hIdx) => {
-                                const hopKey = `path:${idx}:${hIdx}`;
-                                return (
-                                  <div key={hIdx} className="shape-check-hop">
-                                    <div className="shape-check-hop-main">
-                                      <span>{hop.from}</span>
-                                      <span className="conn-badge">{hop.direction === 'to-one' ? say('hopToOne') : say('hopToMany')}</span>
-                                      <span>{`${hop.to} (${hop.via.join(', ')})`}</span>
-                                      {hop.scannedApproxRows !== undefined ? (
-                                        <span className="shape-check-approx">
-                                          {say('approxRowsTag', { rows: formatNumber(hop.scannedApproxRows) })}
-                                        </span>
-                                      ) : null}
-                                      {hop.indexed === false ? <span className="conn-badge">{say('unindexedBadge')}</span> : null}
-                                    </div>
-                                    {hop.suggestedIndex ? (
+                          </div>
+                          {p.queryHint ? <pre className="shape-check-query-hint">{p.queryHint}</pre> : null}
+                          <div className="shape-check-hop-list">
+                            {p.hops.map((hop, hIdx) => {
+                              const hopKey = `path:${idx}:${hIdx}`;
+                              return (
+                                <div key={hIdx} className="shape-check-hop">
+                                  <div className="shape-check-hop-main">
+                                    <span className="shape-hop-table">{hop.from}</span>
+                                    <span className="conn-badge">{hop.direction === 'to-one' ? say('hopToOne') : say('hopToMany')}</span>
+                                    <span className="shape-hop-table">{hop.to}</span>
+                                    <span className="shape-hop-via">{`(${hop.via.join(', ')})`}</span>
+                                    {hop.scannedApproxRows !== undefined ? (
+                                      <span className="shape-check-approx">
+                                        {say('approxRowsTag', { rows: formatNumber(hop.scannedApproxRows) })}
+                                      </span>
+                                    ) : null}
+                                    {hop.indexed === false ? (
+                                      <span className="shape-hop-status is-unindexed">{say('unindexedBadge')}</span>
+                                    ) : hop.indexed === true ? (
+                                      <span className="shape-hop-status is-indexed">{say('indexedBadge')}</span>
+                                    ) : null}
+                                  </div>
+                                  {hop.suggestedIndex ? (
+                                    <div className="shape-check-btn-group">
                                       <button
                                         type="button"
                                         className="shape-check-inline-btn"
@@ -595,97 +703,104 @@ export function ShapeCheckDialog({ onClose, initialTab = 'lint' }: { onClose: ()
                                       >
                                         {copiedKey === hopKey ? say('copiedIndexSql') : say('copyIndexSql')}
                                       </button>
-                                    ) : null}
-                                  </div>
-                                );
-                              })}
-                            </div>
+                                      <button
+                                        type="button"
+                                        className="shape-check-inline-btn"
+                                        onClick={() => openSqlInEditor(hop.suggestedIndex!)}
+                                      >
+                                        {say('openInSql')}
+                                      </button>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
-                      ))}
-                    </>
-                  )}
-                </>
-              )
-            ) : (
-              <>
-                <div className="shape-check-drift-bar">
-                  <span className="shape-check-drift-label">{say('compareAgainst')}</span>
-                  {siblingsFirst.map((c) => {
-                    const activeChoice = c.id === compareTarget?.id;
-                    return (
-                      <button
-                        key={c.id}
-                        type="button"
-                        className={`env-pill tone-${c.tier}${activeChoice ? ' active' : ''}`}
-                        aria-pressed={activeChoice}
-                        onClick={() => setSelectedCompare(c.id)}
-                      >
-                        <span className="env-pill-dot" aria-hidden="true" />
-                        <span>{c.env ? `${c.database}@${c.env}` : c.name}</span>
-                      </button>
+                      </div>
                     );
                   })}
-                </div>
-                {drift.isPending ? (
-                  <p className="loading">{say('comparingEnvironments')}</p>
-                ) : drift.isError ? (
-                  <p className="note">{(drift.error as Error).message}</p>
-                ) : diffResult.same || !diffTables.length ? (
-                  <p className="find-note">{say('driftIdentical', { other: compareLabel })}</p>
-                ) : (
-                  <>
-                    <p className="find-note">{say('driftSummary', { count: diffTables.length, other: compareLabel })}</p>
-                    {diffTables.map((td) => {
-                      const meta = findTable(td.table) as TableMeta | undefined;
-                      return (
-                        <div key={td.table} className="shape-check-group">
-                          <button
-                            type="button"
-                            className="shape-check-table"
-                            disabled={td.onlyIn === 'right'}
-                            title={say('openTable', { table: td.table })}
-                            onClick={() => {
-                              if (td.onlyIn === 'right') return;
-                              close();
-                              go(tableView(meta?.id ?? td.table), 'reset');
-                            }}
-                          >
-                            <span>{meta?.name ?? td.table}</span>
-                          </button>
-                          <div className="shape-check-rule-group tone-medium">
-                            {td.onlyIn === 'left' ? <p className="shape-check-diff-line">{say('onlyHere')}</p> : null}
-                            {td.onlyIn === 'right' ? (
-                              <p className="shape-check-diff-line">{say('onlyInOther', { other: compareLabel })}</p>
-                            ) : null}
-                            {td.columnsOnlyLeft?.length ? (
-                              <p className="shape-check-diff-line">{say('colsOnlyHere', { columns: td.columnsOnlyLeft.join(', ') })}</p>
-                            ) : null}
-                            {td.columnsOnlyRight?.length ? (
-                              <p className="shape-check-diff-line">{say('colsOnlyOther', { columns: td.columnsOnlyRight.join(', ') })}</p>
-                            ) : null}
-                            {td.changed?.map((ch, idx) => (
-                              <p key={idx} className="shape-check-diff-line">
-                                {say('colChanged', { column: ch.column, what: ch.what, left: ch.left, right: ch.right })}
-                              </p>
-                            ))}
-                            {td.keysOnlyLeft?.length ? (
-                              <p className="shape-check-diff-line">{say('keysOnlyHere', { keys: td.keysOnlyLeft.join('; ') })}</p>
-                            ) : null}
-                            {td.keysOnlyRight?.length ? (
-                              <p className="shape-check-diff-line">{say('keysOnlyOther', { keys: td.keysOnlyRight.join('; ') })}</p>
-                            ) : null}
-                            {td.deleteRuleChanged?.map((dr, idx) => (
-                              <p key={idx} className="shape-check-diff-line">
-                                {say('deleteRuleDiff', { key: dr.key, left: dr.left, right: dr.right })}
-                              </p>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </>
-                )}
+                </>
+              )}
+            </>
+          )
+        ) : (
+          <>
+            <div className="shape-check-drift-bar">
+              <span className="shape-check-drift-label">{say('compareAgainst')}</span>
+              {siblingsFirst.map((c) => {
+                const activeChoice = c.id === compareTarget?.id;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className={`env-pill tone-${c.tier}${activeChoice ? ' active' : ''}`}
+                    aria-pressed={activeChoice}
+                    onClick={() => setSelectedCompare(c.id)}
+                  >
+                    <span className="env-pill-dot" aria-hidden="true" />
+                    <span>{c.env ? `${c.database}@${c.env}` : c.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {drift.isPending ? (
+              <p className="loading">{say('comparingEnvironments')}</p>
+            ) : drift.isError ? (
+              <p className="note">{(drift.error as Error).message}</p>
+            ) : diffResult.same || !diffTables.length ? (
+              <p className="find-note">{say('driftIdentical', { other: compareLabel })}</p>
+            ) : (
+              <>
+                <p className="find-note">{say('driftSummary', { count: diffTables.length, other: compareLabel })}</p>
+                {diffTables.map((td) => {
+                  const meta = findTable(td.table) as TableMeta | undefined;
+                  return (
+                    <div key={td.table} className="shape-check-group">
+                      <button
+                        type="button"
+                        className="shape-check-table"
+                        disabled={td.onlyIn === 'right'}
+                        title={say('openTable', { table: td.table })}
+                        onClick={() => {
+                          if (td.onlyIn === 'right') return;
+                          close();
+                          go(tableView(meta?.id ?? td.table), 'reset');
+                        }}
+                      >
+                        <span>{meta?.name ?? td.table}</span>
+                      </button>
+                      <div className="shape-check-rule-group tone-medium">
+                        {td.onlyIn === 'left' ? <p className="shape-check-diff-line">{say('onlyHere')}</p> : null}
+                        {td.onlyIn === 'right' ? (
+                          <p className="shape-check-diff-line">{say('onlyInOther', { other: compareLabel })}</p>
+                        ) : null}
+                        {td.columnsOnlyLeft?.length ? (
+                          <p className="shape-check-diff-line">{say('colsOnlyHere', { columns: td.columnsOnlyLeft.join(', ') })}</p>
+                        ) : null}
+                        {td.columnsOnlyRight?.length ? (
+                          <p className="shape-check-diff-line">{say('colsOnlyOther', { columns: td.columnsOnlyRight.join(', ') })}</p>
+                        ) : null}
+                        {td.changed?.map((ch, idx) => (
+                          <p key={idx} className="shape-check-diff-line">
+                            {say('colChanged', { column: ch.column, what: ch.what, left: ch.left, right: ch.right })}
+                          </p>
+                        ))}
+                        {td.keysOnlyLeft?.length ? (
+                          <p className="shape-check-diff-line">{say('keysOnlyHere', { keys: td.keysOnlyLeft.join('; ') })}</p>
+                        ) : null}
+                        {td.keysOnlyRight?.length ? (
+                          <p className="shape-check-diff-line">{say('keysOnlyOther', { keys: td.keysOnlyRight.join('; ') })}</p>
+                        ) : null}
+                        {td.deleteRuleChanged?.map((dr, idx) => (
+                          <p key={idx} className="shape-check-diff-line">
+                            {say('deleteRuleDiff', { key: dr.key, left: dr.left, right: dr.right })}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
               </>
             )}
           </>

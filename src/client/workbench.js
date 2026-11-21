@@ -10,7 +10,6 @@
  */
 import { initComplete } from './complete.js';
 import { selectConnection, whenManageConnections } from './connections.js';
-import { initSql, openSql } from './sql.js';
 import { initUndo, refreshUndo, undoDescription, undoLast, undoToast } from './undo.js';
 import { loadSavedPages } from '@mistriwork/kit/client/savedPages.js';
 import { loadSavedSql, savedStatements } from './sqlsaved.js';
@@ -46,6 +45,8 @@ const openConnections = () => (connManagerLoaded ??= import('./connmanager.js'))
 const closeConnectionManagement = () => {
   if (connManagerLoaded) void connManagerLoaded.then((m) => m.closeConnectionManagement());
 };
+/** @param {string} [sql] */
+const openSql = (sql) => void import('./sql.js').then((m) => m.openSql(sql));
 const openAsk = (opts) => void import('./ask.js').then((m) => m.openAsk(opts));
 const openFindValue = (val) => void import('./findvalue.js').then((m) => m.openFindValue(val));
 /** @param {import('./components/ShapeCheck.js').ShapeTab} [tab] */
@@ -212,6 +213,7 @@ function start(boot) {
       $('table-filter').select();
     }
   });
+  void import('./workbenchEnhancements.js').then((m) => m.initWorkbenchEnhancements({ openShapeCheck }));
 }
 
 /* The palette's Workbench places are offered where the Workbench's menu is. */
@@ -259,7 +261,7 @@ function menu(at) {
      a reload never offered a write the journal still held (kept through a restart by `tablewalk journal`).
      `loadStores` asks, once a connection is known. */
   if (at === 'sql') {
-    initSql();
+    void import('./sql.js').then((m) => m.initSql());
     initUndo();
   }
   if (at === 'schema')

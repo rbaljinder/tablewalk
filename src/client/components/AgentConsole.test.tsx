@@ -207,6 +207,11 @@ test('target connection bar displays environment/posture badges and forwards pin
     await user.click(screen.getByRole('button', { name: 'Call tool' }));
     await screen.findByText('rowsRead 1');
     expect(calls).toEqual([{ name: 'query', arguments: { q: 'customer', connection: 'billing-staging' } }]);
+
+    calls.length = 0;
+    await user.click(within(targetGroup).getByRole('button', { name: 'All envs (3)' }));
+    await user.click(screen.getByRole('button', { name: 'Call tool' }));
+    expect(calls).toEqual([{ name: 'query', arguments: { q: 'customer', envs: 'all' } }]);
   } finally {
     (state as Record<string, unknown>).activeConnection = 'demo';
     delete (state as Record<string, unknown>).connections;

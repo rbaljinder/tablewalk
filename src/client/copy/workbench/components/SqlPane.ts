@@ -31,4 +31,9 @@ export const say = defineMessages({
   sqlEnvironmentsLabel: '{database} SQL target environments',
   switchSqlToName: 'Switch SQL editor to {name}',
   productionWriteWarning: 'Production environment ({target}) — this write executes directly against production and cannot be undone here.',
+  resizeSqlPane: 'Drag to resize SQL panel',
+  compareEnvs: 'Compare envs',
+  compareEnvsTitle: 'Run this read-only SELECT across all sibling environments in parallel',
+  compareEnvsFailed: 'Cross-environment compare failed.',
+  fanoutErrorBadge: 'error',
 });

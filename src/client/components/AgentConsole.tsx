@@ -74,6 +74,61 @@ function Badges({ tool }: { tool: Tool }) {
   );
 }
 
+const NON_FANOUT_TOOLS = new Set(['connections', 'diff', 'export', 'verify_ddl']);
+
+type ToolCategoryKey = 'catSchemaGraph' | 'catQueryWalk' | 'catDiagnostics' | 'catMigrations' | 'catSafeWrites';
+
+const CATEGORY_ORDER: ToolCategoryKey[] = ['catSchemaGraph', 'catQueryWalk', 'catDiagnostics', 'catMigrations', 'catSafeWrites'];
+
+function categoryOfTool(tool: Tool): ToolCategoryKey {
+  if (!tool.annotations?.readOnlyHint && tool.name !== 'export') return 'catSafeWrites';
+  if (
+    tool.name === 'connections' ||
+    tool.name === 'refresh' ||
+    tool.name === 'schema_summary' ||
+    tool.name === 'tables' ||
+    tool.name === 'table' ||
+    tool.name === 'path'
+  ) {
+    return 'catSchemaGraph';
+  }
+  if (tool.name === 'lint' || tool.name === 'perf' || tool.name === 'anomalies' || tool.name === 'profile' || tool.name === 'explain') {
+    return 'catDiagnostics';
+  }
+  if (
+    tool.name === 'diff' ||
+    tool.name === 'change_impact' ||
+    tool.name === 'verify_ddl' ||
+    tool.name === 'order' ||
+    tool.name === 'fixture'
+  ) {
+    return 'catMigrations';
+  }
+  return 'catQueryWalk';
+}
+
+function categoryLabel(cat: ToolCategoryKey): string {
+  switch (cat) {
+    case 'catSchemaGraph':
+      return say('catSchemaGraph');
+    case 'catQueryWalk':
+      return say('catQueryWalk');
+    case 'catDiagnostics':
+      return say('catDiagnostics');
+    case 'catMigrations':
+      return say('catMigrations');
+    case 'catSafeWrites':
+      return say('catSafeWrites');
+  }
+}
+
+function canFanOutTool(tool: Tool | undefined): boolean {
+  if (!tool) return false;
+  return Boolean(tool.annotations?.readOnlyHint) && !NON_FANOUT_TOOLS.has(tool.name);
+}
+
+const ALL_ENVS_TARGET = '__all_envs__';
+
 export function AgentConsole({ onClose }: { onClose: () => void }) {
   const panel = useRef<HTMLDivElement>(null);
   const seenWriteSeq = useRef(0);
@@ -91,6 +146,7 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
     refetchIntervalInBackground: false,
   });
   const [selected, setSelected] = useState<string | null>(null);
+  const [toolFilter, setToolFilter] = useState('');
   const [pinnedTarget, setPinnedTarget] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<Call[]>([]);
   const [answer, setAnswer] = useState<
@@ -137,7 +193,16 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
       </div>
     );
   const list = tools.data;
-  const tool = list.find((t) => t.name === selected) ?? list[0];
+  const filterNorm = toolFilter.trim().toLowerCase();
+  const filteredTools = filterNorm
+    ? list.filter((t) => t.name.toLowerCase().includes(filterNorm) || (t.description ?? '').toLowerCase().includes(filterNorm))
+    : list;
+  const groupedTools = CATEGORY_ORDER.map((cat) => ({
+    cat,
+    items: filteredTools.filter((t) => categoryOfTool(t) === cat),
+  })).filter((g) => g.items.length > 0);
+
+  const tool = list.find((t) => t.name === selected) ?? filteredTools[0] ?? list[0];
   const connState = state as {
     activeConnection?: string;
     connections?: Array<{
@@ -157,7 +222,11 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
   };
   const enrichedConnections = enrichConnectionsWithEnvironments((connState.connections ?? []).map((c) => ({ ...c, name: c.name ?? c.id })));
   const activeId = connState.activeConnection;
-  const targetId = pinnedTarget && enrichedConnections.some((c) => c.id === pinnedTarget) ? pinnedTarget : activeId;
+  const activeConn = enrichedConnections.find((c) => c.id === activeId) ?? enrichedConnections[0];
+  const siblingEnvCount = activeConn ? 1 + (activeConn.siblings?.length ?? 0) : 0;
+  const fanoutEligible = siblingEnvCount > 1 && canFanOutTool(tool);
+  const isAllEnvs = fanoutEligible && pinnedTarget === ALL_ENVS_TARGET;
+  const targetId = !isAllEnvs && pinnedTarget && enrichedConnections.some((c) => c.id === pinnedTarget) ? pinnedTarget : activeId;
 
   const pick = (name: string) => {
     setSelected(name);
@@ -165,13 +234,16 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
   };
   const call = async (args: Record<string, unknown>) => {
     setAnswer({ kind: 'running', tool: tool.name });
-    const effectiveArgs =
-      targetId &&
-      targetId !== activeId &&
-      args.connection === undefined &&
-      args.env === undefined &&
-      tool.name !== 'connections' &&
-      (tool.name !== 'diff' || (args.from === undefined && args.fromEnv === undefined))
+    const effectiveArgs = isAllEnvs
+      ? args.envs === undefined
+        ? { ...args, envs: 'all' }
+        : args
+      : targetId &&
+          targetId !== activeId &&
+          args.connection === undefined &&
+          args.env === undefined &&
+          tool.name !== 'connections' &&
+          (tool.name !== 'diff' || (args.from === undefined && args.fromEnv === undefined))
         ? tool.name === 'diff'
           ? { ...args, from: targetId }
           : { ...args, connection: targetId }
@@ -221,22 +293,61 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
         </div>
       </div>
       <div className="agent-body">
-        <div className="agent-tools" role="listbox" aria-label={say('tools')}>
-          {list.map((t) => (
-            <button
-              key={t.name}
-              type="button"
-              className={`agent-tool${t.name === tool?.name ? ' active' : ''}`}
-              role="option"
-              aria-selected={t.name === tool?.name}
-              onClick={() => pick(t.name)}
-            >
-              <span className="agent-tool-name">{t.name}</span>
-              <span className="agent-tool-badges">
-                <Badges tool={t} />
-              </span>
-            </button>
-          ))}
+        <div className="agent-rail">
+          {list.length > 6 ? (
+            <input
+              type="search"
+              className="agent-tool-search"
+              aria-label={say('filterToolsLabel')}
+              placeholder={say('filterToolsPlaceholder', { count: list.length })}
+              value={toolFilter}
+              onChange={(e) => setToolFilter(e.currentTarget.value)}
+            />
+          ) : null}
+          <div className="agent-tools" role="listbox" aria-label={say('tools')}>
+            {groupedTools.length === 0 ? (
+              <p className="note">{say('noMatchingTools', { query: toolFilter.trim() })}</p>
+            ) : list.length > 6 ? (
+              groupedTools.map(({ cat, items }) => (
+                <div key={cat} role="presentation">
+                  <div className="agent-cat-head" aria-hidden="true">
+                    {categoryLabel(cat)}
+                  </div>
+                  {items.map((t) => (
+                    <button
+                      key={t.name}
+                      type="button"
+                      className={`agent-tool${t.name === tool?.name ? ' active' : ''}`}
+                      role="option"
+                      aria-selected={t.name === tool?.name}
+                      onClick={() => pick(t.name)}
+                    >
+                      <span className="agent-tool-name">{t.name}</span>
+                      <span className="agent-tool-badges">
+                        <Badges tool={t} />
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ))
+            ) : (
+              filteredTools.map((t) => (
+                <button
+                  key={t.name}
+                  type="button"
+                  className={`agent-tool${t.name === tool?.name ? ' active' : ''}`}
+                  role="option"
+                  aria-selected={t.name === tool?.name}
+                  onClick={() => pick(t.name)}
+                >
+                  <span className="agent-tool-name">{t.name}</span>
+                  <span className="agent-tool-badges">
+                    <Badges tool={t} />
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
         </div>
         <div className="agent-main">
           {enrichedConnections.length > 0 ? (
@@ -244,7 +355,7 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
               <span className="agent-target-label">{say('targetConnectionLabel')}</span>
               <div className="agent-target-list">
                 {enrichedConnections.map((conn) => {
-                  const current = conn.id === targetId;
+                  const current = !isAllEnvs && conn.id === targetId;
                   const rowsRead = activity.data?.egress?.[conn.id] ?? 0;
                   const connMax = activity.data?.maxRows?.[conn.id] ?? conn.maxRows;
                   return (
@@ -277,6 +388,17 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
                     </button>
                   );
                 })}
+                {fanoutEligible ? (
+                  <button
+                    type="button"
+                    className={`agent-target-pill${isAllEnvs ? ' active' : ''}`}
+                    aria-pressed={isAllEnvs}
+                    title={say('allEnvsTitle')}
+                    onClick={() => setPinnedTarget(isAllEnvs ? null : ALL_ENVS_TARGET)}
+                  >
+                    <span>{say('allEnvsPill', { count: siblingEnvCount })}</span>
+                  </button>
+                ) : null}
               </div>
             </div>
           ) : null}
@@ -285,7 +407,7 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
               <ToolForm
                 key={tool.name}
                 tool={tool}
-                targetConnection={targetId}
+                targetConnection={isAllEnvs ? undefined : targetId}
                 onCall={call}
                 onBadJson={(message) => setAnswer({ kind: 'error', message })}
               />

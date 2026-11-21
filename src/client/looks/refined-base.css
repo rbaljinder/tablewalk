@@ -45,7 +45,7 @@
 
     /* ---------- the bar ---------- */
 
-    & .topbar { gap: var(--space-4); padding-block: var(--space-2h); background: var(--surface); border-bottom: 1px solid var(--line); }
+    & .topbar { gap: var(--space-3h); padding-block: var(--space-1h); background: var(--surface); border-bottom: 1px solid var(--line); }
     & body.write-mode .topbar { border-bottom-color: var(--status-critical); }
     & .brand-name { font: 600 var(--text-md) var(--face-ui); letter-spacing: -0.01em; }
     & .conn-picker [data-slot='select-trigger'] {
@@ -59,7 +59,7 @@
       padding: 0 var(--space-4); block-size: var(--control-h); font: 500 var(--text-base) var(--face-ui);
       border-radius: var(--radius);
     }
-    & .icon-button { font: 500 var(--text-sm) var(--face-ui); color: var(--ink-muted); padding: var(--space-2) var(--space-3); }
+    & .icon-button { font: 500 var(--text-sm) var(--face-ui); color: var(--ink-muted); padding: var(--space-1h) var(--space-2h); }
     & .icon-button:hover { color: var(--ink); background: var(--raised); border-color: transparent; } /* motion-ok: colour only */
     & .tn-search-key {
       font: 500 var(--text-xs) var(--face-ui); color: var(--ink-subtle);
@@ -69,31 +69,34 @@
     /* ---------- the table list ---------- */
 
     & .sidebar { border-right: 1px solid var(--line); }
-    & #table-filter { padding-block: var(--space-2h); font: var(--text-base) var(--face-ui); }
+    & #table-filter { padding-block: var(--space-2); font: var(--text-base) var(--face-ui); }
     & #table-list button {
       font: var(--text-base) var(--face-ui); color: var(--ink); border-radius: var(--radius-item);
-      padding-block: var(--space-2h); border: none;
+      padding-block: var(--space-2); border: none;
     }
     & #table-list button:hover { background: var(--raised); } /* motion-ok: colour only */
     & #table-list button[aria-current='true'] { background: var(--accent-soft); color: var(--accent-ink); font-weight: 500; }
     & #table-list .rows { font: var(--text-xs) var(--figures); color: var(--ink-subtle); font-variant-numeric: tabular-nums; }
     & #table-list button[aria-current='true'] .rows { color: var(--accent-ink); }
-    & #table-list .view-tag { font: 500 var(--text-xs) var(--face-ui); color: var(--ink-subtle); }
+    & #table-list .view-tag {
+      font: 500 var(--text-xs) var(--face-ui); color: var(--ink-subtle);
+      padding: 0 var(--space-1h); border: 1px solid var(--line); border-radius: var(--radius-item); background: var(--surface);
+    }
     & .sidebar-reveal { font: 500 var(--text-sm) var(--face-ui); color: var(--ink-muted); border-color: var(--line); background: var(--surface); }
 
     /* ---------- trail, tabs, filters, a result's head ---------- */
 
-    & .crumbs-host { background: var(--ground); border-bottom: 1px solid var(--line); }
-    & .crumbs { font: var(--text-base) var(--face-ui); }
+    & .crumbs-host { padding-block: var(--space-1h); background: var(--ground); border-bottom: 1px solid var(--line); }
+    & .crumbs { font: var(--text-sm) var(--face-ui); }
     & .crumbs .sep { color: var(--ink-subtle); }
     & .crumbs .current { color: var(--ink); font-weight: 500; }
     & .crumbs button:not(.crumb-home) { color: var(--ink-muted); }
     & .tabs { border-bottom: 1px solid var(--line); }
-    & .tab { font: 500 var(--text-base) var(--face-ui); color: var(--ink-muted); padding-block: var(--space-3); }
+    & .tab { font: 500 var(--text-base) var(--face-ui); color: var(--ink-muted); padding-block: var(--space-2); }
     & .tab:hover { color: var(--ink); } /* motion-ok: colour only */
     & .tab[aria-selected='true'] { color: var(--ink); }
-    & .applist-filterbar { gap: var(--space-3); }
-    & .applist-field-label { font: 500 var(--text-sm) var(--face-ui); color: var(--ink-muted); }
+    & .applist-filterbar { gap: var(--space-2h); }
+    & .applist-field-label { font: 500 var(--text-xs) var(--face-ui); color: var(--ink-muted); }
     & .applist-quick, & .applist-field [data-slot='select-trigger'], & .picker-input, & .conn-filter, & .cell-edit, & .edit-field-surface :is(input, select, textarea) {
       border-radius: var(--radius); font-family: var(--face-ui);
     }
@@ -102,10 +105,10 @@
     & :is(.applist-quick, .applist-field [data-slot='select-trigger'], .applist-go, #table-filter, .prefs [data-slot='select-trigger'], .prefs-foot > button) {
       block-size: var(--control-h); padding-block: 0; background: var(--field-fill);
     }
-    & .applist-go { font: 500 var(--text-base) var(--face-ui); border: 1px solid var(--line-strong); border-radius: var(--radius); align-self: end; }
+    & .applist-go { font: 500 var(--text-sm) var(--face-ui); border: 1px solid var(--line-strong); border-radius: var(--radius); align-self: end; }
     & .applist-go:hover { background: var(--raised); } /* motion-ok: colour only */
-    & .result-head { align-items: baseline; row-gap: var(--space-2); }
-    & .result-head .result-title { font: 600 var(--text-lg) var(--face-ui); letter-spacing: -0.012em; }
+    & .result-head { align-items: center; padding-block: var(--space-2); row-gap: var(--space-1h); }
+    & .result-head .result-title { font: 600 var(--text-md) var(--face-ui); letter-spacing: -0.012em; }
     & .result-head .stat { font: var(--text-sm) var(--face-ui); color: var(--ink-muted); font-variant-numeric: tabular-nums; }
     & .result-head .stat { white-space: nowrap; }
     & .result-head .stat-order { color: var(--ink-muted); }

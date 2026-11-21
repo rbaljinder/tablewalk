@@ -1,0 +1,66 @@
+@layer look {
+  .sql-resize-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    block-size: 7px;
+    cursor: ns-resize;
+    background: var(--ground);
+    border-bottom: 1px solid var(--line);
+    touch-action: none;
+    user-select: none;
+    flex: none;
+  }
+
+  .sql-resize-grip {
+    inline-size: 2.25rem;
+    block-size: 2px;
+    border-radius: 999px;
+    background: var(--line-strong);
+  }
+
+  .sql-fanout-tabs {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-5);
+    border-bottom: 1px solid var(--line);
+    background: var(--ground);
+  }
+
+  .sql-fanout-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1h);
+    padding: var(--space-1) var(--space-2h);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink-muted);
+    font: 500 var(--text-xs) var(--face-ui, var(--sans));
+    cursor: pointer;
+  }
+
+  .sql-fanout-tab.active {
+    color: var(--ink);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  .sql-fanout-meta {
+    font: var(--text-xs) var(--figures, var(--code));
+    color: var(--ink-subtle);
+  }
+
+  @media (hover: hover) {
+    .sql-resize-handle:hover .sql-resize-grip {
+      background: var(--accent);
+    }
+
+    .sql-fanout-tab:not(.active):hover {
+      background: var(--raised);
+      color: var(--ink);
+    }
+  }
+}

@@ -53,4 +53,9 @@ export const say = defineMessages({
   keysOnlyHere: 'Foreign keys only here: {keys}',
   keysOnlyOther: 'Foreign keys missing here: {keys}',
   deleteRuleDiff: '{key} ON DELETE: {left} vs {right}',
+  openInSql: 'Open in SQL',
+  copyJoinSql: 'Copy JOIN SQL',
+  copiedJoinSql: 'Copied JOIN SQL',
+  maskedBadge: 'masked',
+  indexedBadge: 'indexed',
 });
