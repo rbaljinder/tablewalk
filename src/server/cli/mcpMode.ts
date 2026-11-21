@@ -19,6 +19,7 @@ export async function serveMcpMode(
   registry: Registry,
   shelf: { views?: ViewDef[]; queries: SavedQuery[]; pages: PageDef[] },
   packageVersion: () => Promise<string>,
+  input?: NodeJS.ReadableStream,
 ): Promise<void> {
   /* The version is what the package says it is, best-effort — serverInfo is
      a courtesy field. */
@@ -30,23 +31,43 @@ export async function serveMcpMode(
     setToolProfile(opts.tools);
   } catch (err) {
     console.error(`tablewalk: ${startupReport(err)}`);
+    await registry.closeAll().catch(() => {});
     process.exit(1);
   }
   setAdvertiseOutputSchema(opts.outputSchema);
   /* OpenTelemetry, when OTEL_* says so: a span per tool call, and the
      statements beneath it. Nothing is loaded otherwise. */
   const telemetry = await startTelemetry(process.env, version, undefined, 'tablewalk');
-  process.stdin.once('close', () => {
+  const stream = input ?? process.stdin;
+  stream.once('close', () => {
     void telemetry.shutdown();
   });
-  serveMcp(registry, version, {
-    /* The same config the browser reads, so the shelf an agent sees is the
-       shelf the team keeps — not a second list that drifts. */
-    views: shelf.views,
-    queries: shelf.queries,
-    pages: shelf.pages,
-    savedPages: (connection) => layoutsFor(connection, pagesPath()),
-  });
+  let shuttingDown = false;
+  const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    void (async () => {
+      await registry.closeAll().catch(() => {});
+      await registry.closeServices().catch(() => {});
+      await telemetry.shutdown().catch(() => {});
+      process.stdout.write('', () => process.exit(0));
+    })();
+  };
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
+  serveMcp(
+    registry,
+    version,
+    {
+      /* The same config the browser reads, so the shelf an agent sees is the
+         shelf the team keeps — not a second list that drifts. */
+      views: shelf.views,
+      queries: shelf.queries,
+      pages: shelf.pages,
+      savedPages: (connection) => layoutsFor(connection, pagesPath()),
+    },
+    { input: stream },
+  );
   console.log('tablewalk: speaking MCP on stdio');
 }
 

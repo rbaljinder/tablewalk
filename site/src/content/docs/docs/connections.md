@@ -25,16 +25,21 @@ Connections appear in the picker at the top of the page, and each opens when it 
 | --- | --- |
 | `name` | The name in the picker, and the first segment of every [address](/docs/browsing/#addresses). |
 | `url` | A SQLite path (`.db`, `.sqlite`, `.sqlite3`, `sqlite:<path>`) or a `postgres://` URL. |
+| `database` / `env` | Optional logical database group (`"billing"`) and environment (`"local"`, `"staging"`, `"prod"`), grouping sibling environments across the UI and MCP (`billing@staging`). |
 | `schemas` | PostgreSQL only: the schemas to read. All user schemas when left out. |
 | `writable` | `true` allows [writes](/docs/writing/) on this connection. Off by default, and enforced by the server. |
 | `rows` | `false` makes the connection shape-only: the catalog, counts, plans and lint answer, and anything that would return a value from a row is refused. |
 | `hidden` | Columns to leave out everywhere, by table: `{ "account": ["password_hash"], "*": ["*_token"] }`. A query naming one is refused, and so is raw SQL on that connection. |
+| `blocklist` | Tables and fields withheld from agents and queries: `{ "tables": ["audit_*", "*_secrets"], "fields": { "*": ["*_token"], "customer": ["tax_id"] } }` (top-level or per connection). Blocked tables, fields and foreign keys touching them disappear from the catalog and are refused across every tool, view and write; `sql`, `explain` and `verify_ddl` are withheld and refused. |
+| `lease` | Bound connection lifetime (`120`, `"5m"`, or `{ "idleSeconds": 30, "maxSeconds": 300, "exitOnExpire": true }`), top-level or per connection: lowers PostgreSQL `minIdle` to `0`, closes idle adapters after `idleSeconds`, and expires the session at `maxSeconds`. |
 | `pool` | PostgreSQL only: `{ "read": 8, "idleSeconds": 300, "minIdle": 2 }` (`read` 1 to 64, default 4; `idleSeconds` 1 to 86400, default 300 or `TABLEWALK_POOL_IDLE`; `minIdle` 0 to 64, default 2 warm readers). |
 | `replicas` | PostgreSQL only: read replica URLs. Lists and counts read from them in turn; a record, every write and the catalog stay on the primary. |
 | `backstop` | Leave it out. `"rls"` marks a connection that signs in as a tenant App's restricted role, which sees no tenant row, so tablewalk refuses it at start (and `tablewalk journal` and `--mcp` with it), by name. Use the owner's URL instead. |
 | `migrations` | Where `tablewalk migrate` finds its files: `{ "dir": "db/migrations", "table": "flyway_schema_history" }`. |
 
-`rows` and `hidden` are enforced at the adapter, so the page, the export and every [MCP](/docs/mcp/) tool obey them at once. A database role without `SELECT` on a column is stronger still.
+`rows`, `hidden` and `blocklist` are enforced at the adapter, so the page, the export and every [MCP](/docs/mcp/) tool obey them at once. A database role without `SELECT` on a table or column is stronger still.
+
+A config can also be piped from a secret vault with `--config -`, `--config <(vault ...)`, or `TABLEWALK_CONFIG_JSON`, carrying in-memory `"secrets"` or `"dotenv"` variables that resolve `${VAR}` placeholders without touching `process.env`, the keychain or disk.
 
 ## Passwords
 

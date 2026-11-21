@@ -281,11 +281,26 @@ refuses — at the adapter, so every endpoint and every tool at once. A server
 whose connections are all shape-only does not list `query`, `sql`, `record`,
 `breakdown` or `export` at all.
 
-Where only some columns must stay behind (a password hash, an API token), give
-the connection `"hidden": { "account": ["password_hash"], "*": ["*_token"] }`
-instead: the catalog and every answer leave those columns out, a query that
-names one is refused, and raw SQL and `verify_ddl` are refused on that connection. A database
-role without `SELECT` on them is stronger still.
+Where only some columns or tables must stay behind (a password hash, an API
+token, an internal audit or secrets table), give the connection
+`"hidden": { "account": ["password_hash"], "*": ["*_token"] }` or a
+`"blocklist": { "tables": ["audit_*", "*_secrets"], "fields": { "*": ["*_token"], "customer": ["tax_id"] } }`
+(top-level or per connection): the catalog, foreign-key graph and every answer
+leave blocked tables and fields out, a query or view that names or traverses one
+is refused, and raw SQL (`sql`, `explain`, `verify_ddl`) is withheld and
+refused on that connection. A database role without `SELECT` on them is stronger
+still.
+
+For a local secret vault or ephemeral agent session, pipe the config in memory
+instead of writing secrets to disk — `--config <(vault read db/staging)`,
+`{ vault read db/staging; cat; } | npx tablewalk --mcp --config -`, or
+`TABLEWALK_CONFIG_JSON` — with inline `"secrets"` / `"dotenv"` variables
+resolved only inside `Registry.environment`, `"active": "billing@staging"` and
+`"only": true` to expose one target, `--lazy` so MCP handshake answers before
+the database is dialed, `"lease": { "idleSeconds": 30, "maxSeconds": 300 }` (or
+`--lease 5m`) to evict idle sockets and close connections when the lease ends,
+or `--query "invoice status = open"` / `--call schema_summary` for a single
+fast JSON lookup that closes its connection on exit.
 
 A call is bounded in time and in what it counts. Statements run under a
 30-second cap, and `sql` takes `timeout_ms` to lower it for one statement:
@@ -607,10 +622,18 @@ mistri --app <dir>            an App, served: the App framework's, npx @mistriwo
                               proxy's own address (10.0.0.7). A separate list
                               from --trust-proxy; repeatable or
                               comma-separated, or set TABLEWALK_AUTH_PROXY_FROM
-      --config <path>         read connections from this file; the paths in
-                              it are relative to its folder. A file that lists
-                              Apps is mistri's to serve, and is refused
+      --config <path|->       read connections from this file, or - for piped
+                              vault JSON or .env lines on stdin (or set
+                              TABLEWALK_CONFIG_JSON); paths in a file are
+                              relative to its folder. A file that lists Apps is
+                              mistri's to serve, and is refused
       --no-config             ignore any config file
+      --connection <name>     select the active connection at startup (id, name,
+                              or db@env)
+      --env <name>            select the active environment at startup (local,
+                              staging, prod)
+      --lease <duration>      bound connection lifetime (e.g. 120, 5m): close
+                              idle connections and expire when the lease ends
       --base-path <path>      the path a reverse proxy serves this server
                               under, like /tools: every address, asset, API
                               call, cookie and link carries it. Or "basePath"
@@ -625,8 +648,15 @@ mistri --app <dir>            an App, served: the App framework's, npx @mistriwo
       --open                  open a browser once the server is up
       --mcp                   speak MCP on stdio instead of serving HTTP
                               (the database browser's tools; no App)
+      --lazy                  with --mcp: answer handshake before dialing the
+                              database (automatic for piped --config -)
       --tools <name>          explore, migrate, seed, or full (the default)
       --output-schema         advertise each tool's output shape in tools/list
+      --query <q>             run one query or breakdown, print JSON, close all
+                              connections, and exit
+      --call <tool>           run one MCP tool by name, print JSON, close all
+                              connections, and exit
+      --args <json>           with --call or --query: JSON object of arguments
       --export <fmt>          print the schema as md, mermaid or json, then exit
                               (an App's brief, types, openapi and asyncapi are
                               mistri's)

@@ -101,10 +101,20 @@ Options:
                       keep the process before it is cut (default 10, 1 to 300).
                       Hold the drain and this inside the platform's stop
                       timeout. Or set TABLEWALK_SHUTDOWN_GRACE.
-      --config <path> Read connections from this file; the paths in it are
-                      relative to its folder. A file that lists Apps is
-                      mistri's to serve, and is refused here.
+      --config <path|->
+                      Read connections from this file, or - for piped vault JSON
+                      or .env lines on stdin (or set TABLEWALK_CONFIG_JSON);
+                      paths in a file are relative to its folder. A file that
+                      lists Apps is mistri's to serve, and is refused here.
       --no-config     Ignore any config file
+      --connection <name>
+                      Select the active connection at startup (id, name, or
+                      db@env)
+      --env <name>    Select the active environment at startup (local, staging,
+                      prod)
+      --lease <duration>
+                      Bound connection lifetime (e.g. 120, 5m): close idle
+                      connections and expire the session when the lease ends
       --base-path <path>
                       The path a reverse proxy serves this server under, like
                       /tools: every address, asset, API call, cookie and
@@ -123,11 +133,18 @@ Options:
       --open          Open a browser once the server is up
       --mcp           Speak MCP on stdio for coding agents, instead of HTTP:
                       the database browser's tools, which serve no App
+      --lazy          With --mcp: answer handshake and tools/list before dialing
+                      the database (on automatically for piped --config -)
       --tools <name>  Offer one job's worth of tools instead of all of them:
                       explore, migrate, seed, or full (the default).
       --output-schema Advertise each tool's output shape in tools/list. Off by
                       default: it is half the listing's size, and most agents
                       never read it. Answers carry the same fields either way.
+      --query <q>     Run one query or breakdown in the query language, print
+                      JSON, close all connections, and exit.
+      --call <tool>   Run one MCP tool by name, print JSON, close all
+                      connections, and exit.
+      --args <json>   With --call or --query: JSON object of tool arguments.
       --export <fmt>  Print the schema as md, mermaid or json, then exit.
       --lint [fmt]    Report what the shape will cost — missing keys,
                       unindexed references, naive timestamps — as text or

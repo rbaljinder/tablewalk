@@ -32,6 +32,21 @@ claude mcp add tablewalk -- npx tablewalk --mcp --db postgres://localhost/app
 
 Every answer carries a `link` the person beside the agent can open in the page, and says what it cost in rows and milliseconds. When tablewalk is running locally in the browser, external MCP clients can also connect directly over Streamable HTTP at `http://localhost:4111/mcp` (or bridge stdio via `TABLEWALK_MCP_URL=http://localhost:4111/mcp`) so the browser and the agent share one connection pool, Undo stack and live activity trail. To see what an agent receives — or watch external MCP calls live — open **Agent console** from the `···` menu or `⌘K`, or pick **Copy brief for agent** to put the current view, key and MCP call onto the clipboard.
 
+### Vault configs, leases and fast agent lookups
+
+When credentials live in a secret vault, pipe a JSON config straight into `tablewalk` so secrets stay in memory and connections close automatically when the agent finishes:
+
+```sh
+# MCP session over a vault config with lazy startup, a 5-minute lease, and a table/field blocklist
+{ vault get db/billing-staging; cat; } | npx tablewalk --mcp --config - --env staging --lease 5m
+
+# Process substitution or one-shot JSON lookup (closes all connections on exit)
+npx tablewalk --config <(vault get db/billing) --env staging --query "invoice status = open limit 10"
+npx tablewalk --config <(vault get db/billing) --call schema_summary
+```
+
+Piped JSON configs can include `"secrets"` (or `.env` text under `"dotenv"`), `"active": "billing@staging"`, `"only": true` to expose only the selected target, `"lazy": true` (default for piped `--mcp` configs so `initialize` and `tools/list` answer before dialing the database), `"lease": { "idleSeconds": 30, "maxSeconds": 300 }`, and `"blocklist": { "tables": ["audit_*"], "fields": { "*": ["*_token"], "customer": ["tax_id"] } }`.
+
 ![The Agent console running the record tool on customer 1, with the answer and its cost](/shots/agent.webp?v=2)
 
 ## The tools

@@ -35,8 +35,11 @@ A path typed on the command line is relative to the current directory; a path wr
 | --- | --- |
 | `-d, --db <target>` | A SQLite file path or a `postgres://` URL. `DATABASE_URL` is used when nothing else names a connection. |
 | `--schema <name>` | PostgreSQL only; repeatable. All user schemas by default. |
-| `--config <path>` | Read connections from this file. See [Connections and config](/docs/connections/). |
+| `--config <path\|->` | Read connections from this file, a process-substitution FIFO, or `-` for piped vault JSON or `.env` lines on stdin. See [Connections and config](/docs/connections/). |
 | `--no-config` | Ignore any config file. |
+| `--connection <name>` | Select the active connection at startup (`id`, `name`, or `db@env`). |
+| `--env <name>` | Select the active environment at startup (`local`, `staging`, `prod`). |
+| `--lease <duration>` | Bound connection lifetime (`120`, `5m`): close idle connections and expire when the lease ends. |
 | `--demo` | Build a throwaway sample database and open it. Nothing of yours is touched. |
 | `--openapi <spec.json\|url>` | Serve the REST API a spec describes, read-only, drafted in memory. |
 | `--api-url <url>` | With `--openapi`: the API's base URL, when the spec does not give a usable one. |
@@ -79,8 +82,12 @@ See [Deploying](/docs/deploying/#behind-a-proxy) for when you need these.
 | Option | |
 | --- | --- |
 | `--mcp` | Speak MCP on stdio instead of serving HTTP. |
+| `--lazy` | With `--mcp`: answer handshake and `tools/list` before dialing the database (automatic for piped `--config -`). |
 | `--tools <name>` | One job's worth of tools: `explore`, `migrate`, `seed` or `full` (the default). |
 | `--output-schema` | Advertise each tool's output shape. Off by default. |
+| `--query <q>` | Run one query or breakdown in the query language, print JSON, close all connections, and exit. |
+| `--call <tool>` | Run one MCP tool by name, print JSON, close all connections, and exit. |
+| `--args <json>` | With `--call` or `--query`: JSON object of tool arguments. |
 
 ## Checking a schema
 
@@ -169,6 +176,8 @@ Exit codes: 1 could not run, 2 refused (read-only, or an HTTP API).
 | Variable | |
 | --- | --- |
 | `DATABASE_URL` | One connection, when no config names any. |
+| `TABLEWALK_CONFIG_JSON` | Inline JSON config in memory (for vault wrappers), when `--config` is not passed. |
+| `TABLEWALK_MCP_URL` | With `--mcp`: bridge stdio MCP calls to a running loopback server (`http://localhost:4111/mcp`). |
 | `PORT` | The port, when no `--port` is given, as Cloud Run and most platforms set it. |
 | `TABLEWALK_CONFIG`, `TABLEWALK_HOST`, `TABLEWALK_PORT` | In the [container image](/docs/deploying/) only: the config file, interface and port. |
 | `TABLEWALK_ALLOWED_HOSTS` | Extra `Host` names, comma-separated. |

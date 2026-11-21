@@ -106,12 +106,40 @@ export function getConnectionEnvMeta(registry: Registry, id: string): Connection
   return envMetaByRegistry.get(registry)?.get(id);
 }
 
+export interface ConnectionConfigExtras {
+  blocklist?: unknown;
+  blockedTables?: unknown;
+  blockedFields?: unknown;
+  blockedColumns?: unknown;
+  lease?: unknown;
+}
+
+const configExtrasByRegistry = new WeakMap<Registry, Map<string, ConnectionConfigExtras>>();
+
+export function setConnectionConfigExtras(registry: Registry, id: string, extras: ConnectionConfigExtras | undefined): void {
+  let map = configExtrasByRegistry.get(registry);
+  if (!extras || Object.values(extras).every((v) => v === undefined)) {
+    map?.delete(id);
+    return;
+  }
+  if (!map) {
+    map = new Map();
+    configExtrasByRegistry.set(registry, map);
+  }
+  map.set(id, extras);
+}
+
+export function getConnectionConfigExtras(registry: Registry, id: string): ConnectionConfigExtras | undefined {
+  return configExtrasByRegistry.get(registry)?.get(id);
+}
+
 export function removeConnectionEnvMeta(registry: Registry, id: string): void {
   envMetaByRegistry.get(registry)?.delete(id);
+  configExtrasByRegistry.get(registry)?.delete(id);
 }
 
 /**
- * Hydrate explicit `database`/`group` and `env`/`environment` metadata from raw `tablewalk.json` text.
+ * Hydrate explicit `database`/`group`, `env`/`environment`, and `blocklist`/`lease` metadata from raw `tablewalk.json` text.
  */
 export function loadConfigEnvMeta(registry: Registry, rawConfigJsonText: string): void {
   let parsed: { connections?: unknown };
@@ -130,16 +158,33 @@ export function loadConfigEnvMeta(registry: Registry, rawConfigJsonText: string)
     if (!name) continue;
     const database = typeof rec.database === 'string' ? rec.database.trim() : typeof rec.group === 'string' ? rec.group.trim() : '';
     const env = typeof rec.env === 'string' ? rec.env.trim() : typeof rec.environment === 'string' ? rec.environment.trim() : '';
-    if (!database && !env) continue;
+    const hasExtras =
+      rec.blocklist !== undefined ||
+      rec.blockedTables !== undefined ||
+      rec.blockedFields !== undefined ||
+      rec.blockedColumns !== undefined ||
+      rec.lease !== undefined;
+    if (!database && !env && !hasExtras) continue;
     const match =
       configs.find((c) => c.source === 'config' && c.name === name && !usedIds.has(c.id)) ??
       configs.find((c) => c.name === name && !usedIds.has(c.id));
     if (match) {
       usedIds.add(match.id);
-      setConnectionEnvMeta(registry, match.id, {
-        ...(database ? { database } : {}),
-        ...(env ? { env } : {}),
-      });
+      if (database || env) {
+        setConnectionEnvMeta(registry, match.id, {
+          ...(database ? { database } : {}),
+          ...(env ? { env } : {}),
+        });
+      }
+      if (hasExtras) {
+        setConnectionConfigExtras(registry, match.id, {
+          ...(rec.blocklist !== undefined ? { blocklist: rec.blocklist } : {}),
+          ...(rec.blockedTables !== undefined ? { blockedTables: rec.blockedTables } : {}),
+          ...(rec.blockedFields !== undefined ? { blockedFields: rec.blockedFields } : {}),
+          ...(rec.blockedColumns !== undefined ? { blockedColumns: rec.blockedColumns } : {}),
+          ...(rec.lease !== undefined ? { lease: rec.lease } : {}),
+        });
+      }
     }
   }
 }
@@ -152,11 +197,11 @@ function describeEnvList(entries: ReadonlyArray<EnrichedConnection<PublicConnect
   return entries.map((c) => `${c.database}@${c.env ?? c.tier} (${c.id})`).join(', ');
 }
 
-export async function openFor(
+export function resolveConnectionEntry(
   registry: Registry,
   asked: unknown,
   options?: { env?: unknown; write?: boolean; fallbackConnection?: string },
-): Promise<Open> {
+): EnrichedConnection<PublicConnection> {
   const rawAsked = typeof asked === 'string' ? asked.trim() : '';
   const rawEnv = typeof options?.env === 'string' ? options.env.trim() : '';
   const enriched = listEnrichedConnections(registry);
@@ -292,6 +337,15 @@ export async function openFor(
     const wanted = rawAsked || options?.fallbackConnection || registry.active;
     throw new ToolError('not_found', `No connection called "${String(wanted)}". Known: ${known}.`);
   }
+  return entry;
+}
+
+export async function openFor(
+  registry: Registry,
+  asked: unknown,
+  options?: { env?: unknown; write?: boolean; fallbackConnection?: string },
+): Promise<Open> {
+  const entry = resolveConnectionEntry(registry, asked, options);
   const { adapter, schema } = await registry.open(entry.id);
   return { adapter, schema, id: entry.id };
 }

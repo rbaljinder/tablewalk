@@ -93,10 +93,11 @@ export async function verifyDdl(
   if (!config || config.http || (schema.dialect !== 'sqlite' && schema.dialect !== 'postgres')) {
     throw new ToolError('forbidden', `${schema.dialect} connections cannot verify DDL in this build.`);
   }
-  if (config.hidden) {
+  const listed = registry.list().find((c) => c.id === id);
+  if (config.hidden || listed?.hidesColumns) {
     throw new ToolError(
       'forbidden',
-      `"${config.name}" hides columns ("hidden" in tablewalk.json), so raw DDL verification is refused for the same reason raw SQL is.`,
+      `"${config.name}" restricts tables or columns ("hidden" or "blocklist"), so raw DDL verification is refused for the same reason raw SQL is.`,
     );
   }
 
@@ -194,7 +195,10 @@ export async function verifyDdl(
     }
     mode = 'rollback';
     const rawTarget = registry.openableUrlOf(id) ?? config.url;
-    const resolved = await resolveConnection(config.name, rawTarget, { secrets: options.trusted !== false });
+    const resolved = await resolveConnection(config.name, rawTarget, {
+      secrets: options.trusted !== false,
+      environment: registry.environment,
+    });
     const manager = new PgConnectionManager(resolved.url, undefined, undefined, {
       readers: 1,
       writers: 1,

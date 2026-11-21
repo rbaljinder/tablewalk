@@ -14,6 +14,7 @@ import {
   agentActivity,
   agentTools,
   answerMcpHttp,
+  getConnectionConfigExtras,
   getConnectionEnvMeta,
   listEnrichedConnections,
   removeConnectionEnvMeta,
@@ -467,18 +468,24 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
       // The cache and search services travel with it: saving must not delete what it does not list.
       const configs = registry.configs();
       await saveConfig(target, configs, registry.serviceConfigs(), registry.sections, registry.keptEntries());
-      if (configs.some((c) => Boolean(getConnectionEnvMeta(registry, c.id)))) {
+      if (configs.some((c) => Boolean(getConnectionEnvMeta(registry, c.id) || getConnectionConfigExtras(registry, c.id)))) {
         const { readFile, writeFile } = await import('node:fs/promises');
         const parsed = JSON.parse(await readFile(target, 'utf8')) as { connections?: Array<Record<string, unknown>> };
         if (Array.isArray(parsed.connections)) {
           const used = new Set<number>();
           for (const cfg of configs) {
             const meta = getConnectionEnvMeta(registry, cfg.id);
+            const extras = getConnectionConfigExtras(registry, cfg.id);
             const idx = parsed.connections.findIndex((entry, i) => !used.has(i) && entry && entry.name === cfg.name);
             if (idx >= 0) {
               used.add(idx);
               if (meta?.database) parsed.connections[idx].database = meta.database;
               if (meta?.env) parsed.connections[idx].env = meta.env;
+              if (extras) {
+                for (const [k, v] of Object.entries(extras)) {
+                  if (v !== undefined) parsed.connections[idx][k] = v;
+                }
+              }
             }
           }
           await writeFile(target, `${JSON.stringify(parsed, null, 2)}\n`);

@@ -37,6 +37,11 @@ Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly
   from the topbar, `⌘K` palette, SQL editor and Agent console while keeping the open table, query or record, and can be
   targeted by MCP tools with `env` or `db@env` / `@env` selectors (with implicit unaddressed writes to `prod` refused
   when non-production siblings exist).
+- Piped vault configs (`--config -`, process-substitution FIFOs, `TABLEWALK_CONFIG_JSON`) load connections and inline
+  `"secrets"` / `"dotenv"` variables in memory without writing to disk, support `--lazy` MCP handshake and fast one-shot
+  `--query <q>` / `--call <tool> [--args <json>]` CLI lookups, enforce `"lease"` (`idleSeconds`, `maxSeconds`, `--lease`)
+  with deterministic connection teardown on idle/expiry/EOF, and enforce top-level or per-connection `"blocklist"` rules
+  (`tables` and `fields` wildcards) across every catalog, query, view, profile, export and write while refusing raw SQL.
 - `tablewalk journal` resolves credentials and refuses in-memory SQLite and unsupported schemes before touching the
   filesystem; `--diff` and `--lint` close their connections and let stdout drain before exiting; the desktop app
   replaces its server and updates `lastDatabase` only after the new database opens, falling back to Welcome if a

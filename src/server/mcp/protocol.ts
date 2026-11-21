@@ -56,7 +56,12 @@ function instructionsFor(registry: Registry): string {
  * already pointed every log at stderr. One JSON message per line, both ways,
  * which is the whole framing.
  */
-export function serveMcp(registry: Registry, version: string, shelf: Shelf = { views: [], queries: [], pages: [] }): void {
+export function serveMcp(
+  registry: Registry,
+  version: string,
+  shelf: Shelf = { views: [], queries: [], pages: [] },
+  options: { input?: NodeJS.ReadableStream } = {},
+): void {
   bindShelf(registry, shelf);
   const write = (message: Record<string, unknown>) => {
     process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -68,7 +73,7 @@ export function serveMcp(registry: Registry, version: string, shelf: Shelf = { v
   const subscribed = new Set<string>();
   const notify = (method: string, params: Record<string, unknown>) => write({ jsonrpc: '2.0', method, params });
 
-  const rl = createInterface({ input: process.stdin });
+  const rl = createInterface({ input: options.input ?? process.stdin });
   /* Requests run in the order they arrive, one at a time.
 
      Dispatch used to fire per line without awaiting, which let a pipelining
@@ -134,18 +139,14 @@ export function serveMcp(registry: Registry, version: string, shelf: Shelf = { v
     if (msg.method === 'tools/call' && (typeof msg.id === 'string' || typeof msg.id === 'number')) waiting.add(msg.id);
     inOrder = inOrder.catch(() => {}).then(() => dispatch(msg));
   });
-  /* Exit only after the work is done and stdout has drained — both, in that
-     order. A client that writes its calls and closes stdin — a script, a
-     test — has ended the *questions*, not the answers: the dispatch chain
-     may still be opening a connection for the very call the client is
-     waiting on, and exiting on close alone raced it. SQLite answered fast
-     enough to win that race by accident; a Postgres connect did not. Then
-     the empty write: process.exit truncates a large in-flight pipe write,
-     and a reply cut mid-string is worse than a late one. */
+  /* Exit only after the work is done, database connections are closed, and
+     stdout has drained — in that order. */
   rl.on('close', () => {
     void inOrder
       .catch(() => {})
-      .then(() => {
+      .then(async () => {
+        await registry.closeAll().catch(() => {});
+        await registry.closeServices().catch(() => {});
         process.stdout.write('', () => process.exit(0));
       });
   });

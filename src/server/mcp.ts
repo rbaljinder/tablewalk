@@ -27,10 +27,13 @@ export { agentTools, runTool, setAdvertiseOutputSchema, setToolProfile, toolCoun
 export { bindShelf } from './mcp/shelf.js';
 export {
   agentActivity,
+  getConnectionConfigExtras,
   getConnectionEnvMeta,
   listEnrichedConnections,
   loadConfigEnvMeta,
   removeConnectionEnvMeta,
+  resolveConnectionEntry,
+  setConnectionConfigExtras,
   setConnectionEnvMeta,
 } from './mcp/toolkit.js';
 export { setElicitor } from './mcp/tools/write.js';
