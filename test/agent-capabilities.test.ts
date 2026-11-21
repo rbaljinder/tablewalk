@@ -336,10 +336,30 @@ describe('transactional dryRun writes and verify_ddl', () => {
     assert.equal(dupFail.structuredContent?.failedAt, 1);
     assert.match(String(((dupFail.structuredContent?.errors ?? []) as string[])[0]), /UNIQUE/i);
 
-    // Guards: transaction escape, reserved tables, and hidden-column connections.
-    const commitGuard = await runTool(registry, 'verify_ddl', { connection: 'ro', sql: 'COMMIT' });
-    assert.equal(commitGuard.isError, true);
-    assert.equal(commitGuard._meta?.['tablewalk/code'], 'invalid_argument');
+    // SQLite CREATE TRIGGER with inner semicolons and nested CASE...END stays one whole statement.
+    const triggerOk = await runTool(registry, 'verify_ddl', {
+      connection: 'ro',
+      sql: `CREATE TRIGGER trg_invoice_touch AFTER INSERT ON invoice BEGIN
+        UPDATE customer SET email = email WHERE id = NEW.customer_id;
+        UPDATE invoice SET notes = CASE WHEN NEW.total > 100 THEN 'high' ELSE 'std' END WHERE id = NEW.id;
+      END`,
+    });
+    assert.equal(triggerOk.isError, false, triggerOk.content[0]?.text);
+    assert.equal(triggerOk.structuredContent?.valid, true);
+    assert.equal(triggerOk.structuredContent?.statements, 1);
+
+    // Guards: allowlist refuses transaction escape, PREPARE TRANSACTION, SET, SELECT setval, database DDL, reserved tables, and hidden-column connections.
+    for (const badSql of [
+      'COMMIT',
+      "PREPARE TRANSACTION 'x'; DROP TABLE customer; CREATE TABLE escaped(id INT)",
+      'SET LOCAL statement_timeout = 0; SELECT 1',
+      "SELECT setval('customer_id_seq', 999)",
+      'CREATE DATABASE another_db',
+    ]) {
+      const guard = await runTool(registry, 'verify_ddl', { connection: 'ro', sql: badSql });
+      assert.equal(guard.isError, true, `Expected verify_ddl to refuse: ${badSql}`);
+      assert.equal(guard._meta?.['tablewalk/code'], 'invalid_argument');
+    }
 
     const reservedGuard = await runTool(registry, 'verify_ddl', {
       connection: 'ro',

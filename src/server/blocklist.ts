@@ -7,9 +7,10 @@
  * before handing an MCP session or CLI lookup to an agent.
  *
  * Built on `@mistriwork/engine/server/columnGrants.js` (`accessibleSchema`,
- * `resourceChecks`, `authorizeColumnWrites`), so blocked tables, blocked
- * columns, and every foreign-key edge touching either are pruned from the
- * catalog and refused across queries, views, breakdowns, records, profiles,
+ * `resourceChecks`, `authorizeColumnWrites`), so blocked tables, database SQL
+ * views (whose stored query could project or alias blocked objects), blocked
+ * columns, and every foreign-key edge touching them are pruned from the catalog
+ * and refused across queries, configured views, breakdowns, records, profiles,
  * exports, shelf resources and writes, while raw SQL and DDL verification are
  * refused outright.
  */
@@ -176,6 +177,12 @@ function compileGrant(schema: DatabaseSchema, rules: BlocklistRules): CompiledSt
   const cuts = new Map<string, Set<string>>();
 
   for (const table of schema.tables) {
+    /* Database SQL views (`CREATE VIEW`) execute opaque SQL stored inside the
+       database and can read or alias blocked tables and columns; withhold them
+       whenever a blocklist is active. Configured `views` in tablewalk.json
+       still run and are checked against `grant`. */
+    if (table.isView) continue;
+
     const tableBlocked = tableMatchers.some((re) => re.test(table.id) || re.test(table.name));
     if (tableBlocked) continue;
 
@@ -245,9 +252,13 @@ export function withoutBlockedCatalog(schema: DatabaseSchema, rules: BlocklistRu
 }
 
 /**
- * Wrap an opened `Adapter` + `DatabaseSchema` so every blocked table and field
- * is invisible in the catalog and refused across every read, view, breakdown,
- * profile, DDL lookup, raw SQL call, and write.
+ * Build an allowlisted `Adapter` facade so every blocked table, database view,
+ * and blocked field is invisible in the catalog and refused across every read,
+ * configured view, breakdown, profile, DDL lookup, raw SQL call, and write.
+ *
+ * Constructed as a plain object containing only explicitly guarded `Adapter`
+ * methods (never inheriting the adapter's prototype or copying unlisted methods
+ * such as `triggers`, `triggerKeys`, or `privileges`).
  */
 export function applyBlocklist(
   adapter: Adapter,
@@ -260,7 +271,7 @@ export function applyBlocklist(
   const refused = (what: string) =>
     new Refusal(
       `"${name}" blocks tables or fields ("blocklist"): ${what}. ` +
-        'Blocked tables and columns are withheld from this connection, so nothing can read or write them.',
+        'Blocked tables, database views, and blocked columns are withheld from this connection, so nothing can read or write them.',
     );
 
   let full = introspected;
@@ -278,15 +289,10 @@ export function applyBlocklist(
       return fn();
     } catch (error) {
       if (error instanceof AppAccessDenied) {
-        throw refused('this request names a blocked table or field, or traverses a relationship into one');
+        throw refused('this request names a blocked table, database view, or field, or traverses a relationship into one');
       }
       throw error;
     }
-  };
-
-  const from = <K extends keyof Adapter>(key: K): Adapter[K] => {
-    const method = adapter[key];
-    return (typeof method === 'function' ? method.bind(adapter) : undefined) as Adapter[K];
   };
 
   const authorized = <Tx extends Parameters<typeof authorizeColumnWrites>[2]>(tx: Tx): Tx => {
@@ -324,21 +330,32 @@ export function applyBlocklist(
     const found = findTable(full, tableRef);
     const id = found?.id ?? tableRef;
     if (!state.grant.readable.has(id)) {
-      throw refused(`table "${tableRef}" is on the blocklist`);
+      throw refused(
+        found?.isView ? `database view "${tableRef}" is withheld while a blocklist is active` : `table "${tableRef}" is on the blocklist`,
+      );
     }
     return id;
   };
 
-  const wrapped = Object.create(Object.getPrototypeOf(adapter)) as Adapter;
-  Object.assign(wrapped, adapter);
-  wrapped.close = from('close');
-  wrapped.introspect = async () => {
-    refresh(await adapter.introspect());
-    return withoutBlockedCatalog(full, rules);
+  const wrapped: Adapter = {
+    dialect: adapter.dialect,
+    close: adapter.close.bind(adapter),
+    introspect: async () => {
+      refresh(await adapter.introspect());
+      return withoutBlockedCatalog(full, rules);
+    },
+    query: async (request) => adapter.query(checked(() => checks.queryFor(request))),
+    count: async (table, filter, limit) =>
+      adapter.count(
+        table,
+        checked(() => checks.filterFor(table, filter)),
+        limit,
+      ),
   };
-  if (adapter.poolStats) wrapped.poolStats = from('poolStats');
-  if (adapter.privileges) wrapped.privileges = from('privileges');
-  if (adapter.triggers) wrapped.triggers = from('triggers');
+
+  if (adapter.poolStats) {
+    wrapped.poolStats = adapter.poolStats.bind(adapter);
+  }
   if (adapter.estimateCount) {
     const est = adapter.estimateCount.bind(adapter);
     wrapped.estimateCount = async (table) => {
@@ -346,13 +363,6 @@ export function applyBlocklist(
       return est(table);
     };
   }
-  wrapped.query = async (request) => adapter.query(checked(() => checks.queryFor(request)));
-  wrapped.count = async (table, filter, limit) =>
-    adapter.count(
-      table,
-      checked(() => checks.filterFor(table, filter)),
-      limit,
-    );
   if (adapter.countEach) {
     const countEach = adapter.countEach.bind(adapter);
     wrapped.countEach = async (items, limit) =>
@@ -461,13 +471,18 @@ export function applyBlocklist(
       return cut ? { ...result, columns: result.columns.filter((column) => !cut.has(column.column)) } : result;
     };
   }
-  if (adapter.insert)
+  if (adapter.insert) {
     wrapped.insert = (request) => authorized(adapter as unknown as Parameters<typeof authorizeColumnWrites>[2]).insert(request);
-  if (adapter.update)
+  }
+  if (adapter.update) {
     wrapped.update = (request) => authorized(adapter as unknown as Parameters<typeof authorizeColumnWrites>[2]).update(request);
-  if (adapter.remove)
+  }
+  if (adapter.remove) {
     wrapped.remove = (request) => authorized(adapter as unknown as Parameters<typeof authorizeColumnWrites>[2]).remove(request);
-  if (adapter.transaction) wrapped.transaction = (run) => adapter.transaction!((tx) => run(authorized(tx)));
+  }
+  if (adapter.transaction) {
+    wrapped.transaction = (run) => adapter.transaction!((tx) => run(authorized(tx)));
+  }
   if (adapter.scopeTransaction) {
     const scopeTx = adapter.scopeTransaction.bind(adapter);
     wrapped.scopeTransaction = (scope, run) => scopeTx(scope, (tx, catalog) => run(authorized(tx), withoutBlockedCatalog(catalog, rules)));

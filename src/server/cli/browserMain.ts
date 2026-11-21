@@ -214,7 +214,7 @@ export const main: Main = async () => {
     import('@mistriwork/engine/server/config/locations.js'),
     import('@mistriwork/engine/adapters/writeLanes.js'),
   ]);
-  const registry = new Registry();
+  let registry = new Registry();
   let config: Awaited<ReturnType<typeof readStartupConfig>>;
   let mcpInputStream: NodeJS.ReadableStream | undefined;
   let startupMeta: { active?: string; only?: boolean; lazy?: boolean } = {};
@@ -222,8 +222,9 @@ export const main: Main = async () => {
   if (maybePiped) {
     const { loadPipedVaultConfig } = await import('./vaultConfig.js');
     try {
-      const loaded = await loadPipedVaultConfig(opts.config, opts.mcp, registry, extra.lease);
+      const loaded = await loadPipedVaultConfig(opts.config, opts.mcp, extra.lease);
       if (loaded.namesApps) return refuseApp('a config file that lists Apps', rawArgv);
+      registry = loaded.registry;
       mcpInputStream = loaded.remainingStdin;
       startupMeta = { active: loaded.active, only: loaded.only, lazy: loaded.lazy };
       if ((opts as { targetFromEnvironment?: boolean }).targetFromEnvironment && registry.list().length) {
@@ -251,6 +252,8 @@ export const main: Main = async () => {
       const { loadConfigEnvMeta } = await import('../mcp/toolkit.js');
       loadConfigEnvMeta(registry, config.loadedConfigText);
     }
+    /* Checked inline here so plain `serve` and `--mcp` do not import `vaultConfig.js` + `blocklist.js`
+       (test/cli-startup.test.ts holds plain `serve` at <= 260 modules). */
     const needsExtended =
       Boolean(extra.lease) ||
       Boolean(
@@ -262,13 +265,15 @@ export const main: Main = async () => {
     if (needsExtended) {
       const { applyExtendedDiskConfig } = await import('./vaultConfig.js');
       try {
-        startupMeta = applyExtendedDiskConfig(
+        const upgraded = applyExtendedDiskConfig(
           registry,
           config.loadedConfigText,
           config.configPath ?? 'tablewalk.json',
           opts.mcp,
           extra.lease,
         );
+        registry = upgraded.registry;
+        startupMeta = { active: upgraded.active, only: upgraded.only, lazy: upgraded.lazy };
       } catch (err) {
         console.error(`tablewalk: ${(err as Error).message}`);
         await registry.closeAll().catch(() => {});
@@ -348,14 +353,6 @@ export const main: Main = async () => {
       source: 'argument',
     });
     registry.setActive(added.id);
-    if (extra.lease && !maybePiped) {
-      /* Install CLI `--lease` on a direct `--db` / positional target when no config file was loaded. */
-      const { installConnectionPolicies, parseLeaseSpec } = await import('./vaultConfig.js');
-      const parsedLease = parseLeaseSpec(extra.lease, '--lease');
-      if (parsedLease) {
-        installConnectionPolicies(registry, { blocklists: new Map(), connectionLeases: new Map(), sessionLease: parsedLease }, opts.mcp);
-      }
-    }
   }
 
   if (extra.connection || extra.env || startupMeta.active || startupMeta.only) {

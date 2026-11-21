@@ -213,6 +213,18 @@ describe("the database browser's tools, against a real Postgres", { skip: liveSk
       });
       assert.equal(nullFail.isError, false);
       assert.equal(nullFail.structuredContent?.valid, false);
+
+      /* Transaction escapes, session timeout overrides, and non-transactional sequence calls are refused upfront. */
+      for (const badPgSql of [
+        `PREPARE TRANSACTION 'tw_escape'; DROP TABLE ${FIXTURE}.customer; CREATE TABLE ${FIXTURE}.escaped(id int)`,
+        `SET LOCAL statement_timeout = 0; SELECT pg_sleep(8)`,
+        `SELECT setval('${FIXTURE}.customer_id_seq', 999)`,
+        `ALTER TABLE ${FIXTURE}.customer ADD COLUMN seq_leak int DEFAULT setval('${FIXTURE}.customer_id_seq', 999)`,
+      ]) {
+        const refused = await runTool(registry, 'verify_ddl', { connection: 'pg_rw', sql: badPgSql });
+        assert.equal(refused.isError, true, `Expected Postgres verify_ddl to refuse: ${badPgSql}`);
+        assert.equal(refused._meta?.['tablewalk/code'], 'invalid_argument');
+      }
     });
   });
 });

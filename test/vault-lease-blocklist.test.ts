@@ -2,18 +2,22 @@
  * End-to-end verification of vault/piped configuration, connection leases,
  * table & field blocklists, lazy MCP startup, and fast one-shot CLI lookups:
  *   1. Table & field blocklist (`blocklist.tables`, `blocklist.fields`, wildcards,
- *      array shorthand, PK-covered table withholding, FK pruning, views, find,
- *      profile, export, raw SQL withholding/refusal, and write enforcement)
- *   2. Piped vault configs (`--config -`, `{ vault; cat; } | tablewalk --mcp --config -`,
- *      named FIFOs / `<(vault ...)`, `TABLEWALK_CONFIG_JSON`, single-connection shorthand,
- *      in-memory `secrets` / `dotenv`, `active` + `only: true`, `--lazy`, `--query`, `--call`)
- *   3. Connection leases (`idleSeconds` eviction + transparent re-open, `maxSeconds`
- *      expiry refusal, and `--mcp --lease` clean process auto-exit)
+ *      array shorthand, PK-covered table withholding, database SQL view withholding,
+ *      FK pruning, configured views, find, profile, export, raw SQL withholding/refusal,
+ *      write enforcement, and allowlisted Adapter / PolicyRegistry boundaries)
+ *   2. Piped vault configs (`--config -`, `{ vault; cat; } | tablewalk --mcp --config -`
+ *      for both JSON and `.env` headers, named FIFOs / `<(vault ...)`, `TABLEWALK_CONFIG_JSON`,
+ *      single-connection shorthand, in-memory `secrets` / `dotenv`, `active` + `only: true`,
+ *      `--lazy`, `--query`, `--call`, and CLI target inheritance of top-level `blocklist`)
+ *   3. Connection leases (in-place `idleSeconds` eviction keeping `active` stable +
+ *      transparent re-open, `maxSeconds` expiry refusal, and `--mcp --lease` clean auto-exit)
+ *   4. HTTP browser blocklist enforcement + `POST /api/connections/save` preservation of
+ *      top-level `blocklist`, `lease`, and existing `secrets`
  */
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { createWriteStream, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,7 +25,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { Registry } from '@mistriwork/engine/host';
 import { createApp } from './support/createApp.js';
 import { agentTools, answerMcpHttp, bindShelf, runTool } from '../src/server/mcp.js';
-import { applyExtendedDiskConfig, installConnectionPolicies, parseLeaseSpec } from '../src/server/cli/vaultConfig.js';
+import { PolicyRegistry, applyExtendedDiskConfig, parseLeaseSpec } from '../src/server/cli/vaultConfig.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const BIN = join(ROOT, 'src/server/index.ts');
@@ -77,6 +81,10 @@ function buildVaultTestDb(path: string, tag = 'staging'): void {
       access_token TEXT PRIMARY KEY,
       owner_label TEXT NOT NULL
     );
+    /* Database SQL views over blocked tables and aliased blocked columns! */
+    CREATE VIEW v_audit AS SELECT id, customer_id, event, payload FROM audit_log;
+    CREATE VIEW v_customer AS SELECT id, email, tax_id AS ssn_code FROM customer;
+
     INSERT INTO country (code, name) VALUES ('US', 'United States'), ('CA', 'Canada');
     INSERT INTO customer (name, email, tax_id, password_hash, api_token, country_code)
       VALUES ('Alice Vault', 'alice@example.com', '999-11-2222', 'pbkdf2$supersecret', 'tok_live_98765', 'US');
@@ -135,13 +143,13 @@ function runCliProcess(
   });
 }
 
-describe('1. Table & field blocklist enforcement across catalog, reads, views, exports, and writes', () => {
+describe('1. Table & field blocklist enforcement across catalog, SQL views, reads, exports, writes, and PolicyRegistry', () => {
   const dbPath = join(DIR, 'blocklist.sqlite');
   let registry: Registry;
 
   before(async () => {
     buildVaultTestDb(dbPath, 'block');
-    registry = new Registry();
+    const base = new Registry();
     const rawConfig = JSON.stringify({
       blocklist: {
         tables: ['audit_*'],
@@ -176,16 +184,15 @@ describe('1. Table & field blocklist enforcement across catalog, reads, views, e
     });
     const parsed = JSON.parse(rawConfig) as {
       connections: Array<{ name: string; url: string; writable: boolean }>;
-      views: unknown[];
     };
-    const added = registry.add({
+    const added = base.add({
       name: parsed.connections[0].name,
       url: parsed.connections[0].url,
       writable: true,
       source: 'config',
     });
-    registry.setActive(added.id);
-    applyExtendedDiskConfig(registry, rawConfig, 'test-blocklist.json', true);
+    base.setActive(added.id);
+    registry = applyExtendedDiskConfig(base, rawConfig, 'test-blocklist.json', true).registry;
 
     const { parseViewsConfig } = await import('@mistriwork/engine/shared/view.js');
     bindShelf(registry, {
@@ -199,7 +206,9 @@ describe('1. Table & field blocklist enforcement across catalog, reads, views, e
     await registry.closeAll();
   });
 
-  test('withholds raw SQL tools and strips blocked tables, PK-covered tables, blocked fields, and FKs from catalog & shelf', async () => {
+  test('withholds raw SQL tools, database SQL views, blocked tables, PK-covered tables, blocked fields, FKs, and unlisted adapter methods', async () => {
+    assert.ok(registry instanceof PolicyRegistry);
+
     const tools = agentTools(registry).map((t) => t.name);
     assert.ok(!tools.includes('sql'), 'sql must be withheld when blocklist is active');
     assert.ok(!tools.includes('explain'), 'explain must be withheld when blocklist is active');
@@ -210,8 +219,16 @@ describe('1. Table & field blocklist enforcement across catalog, reads, views, e
     const tablesRes = await runTool(registry, 'tables', {});
     assert.ok(!tablesRes.isError);
     const tableNames = ((tablesRes.structuredContent as { tables: Array<{ id: string }> }).tables ?? []).map((t) => t.id).sort();
-    /* audit_log (audit_*), internal_secrets (exact), and pk_token_map (PK matches *_token) are all withheld! */
+    /* audit_log, internal_secrets, pk_token_map, AND database views v_audit + v_customer are ALL withheld! */
     assert.deepEqual(tableNames, ['country', 'customer', 'invoice']);
+
+    /* PolicyRegistry guards dialedAdapter() and omits unlisted adapter methods (`triggers`, `privileges`, prototype methods). */
+    assert.equal(registry.dialedAdapter('billing'), undefined, 'dialedAdapter must not expose raw adapter under blocklist');
+    const { adapter } = await registry.open('billing');
+    assert.equal(Object.getPrototypeOf(adapter), Object.prototype, 'Blocklisted adapter must be a plain allowlisted facade');
+    assert.equal(adapter.triggers, undefined);
+    assert.equal(adapter.triggerKeys, undefined);
+    assert.equal(adapter.privileges, undefined);
 
     const connRes = await runTool(registry, 'connections', {});
     const connEntry = ((connRes.structuredContent as { connections: Array<{ hidesColumns?: boolean; tables?: number }> }).connections ??
@@ -240,10 +257,12 @@ describe('1. Table & field blocklist enforcement across catalog, reads, views, e
       'Incoming FK from blocked audit_log must be pruned',
     );
 
-    const auditRes = await runTool(registry, 'table', { table: 'audit_log' });
-    assert.equal(auditRes.isError, true);
+    for (const withheldObject of ['audit_log', 'v_audit', 'v_customer']) {
+      const res = await runTool(registry, 'table', { table: withheldObject });
+      assert.equal(res.isError, true, `table "${withheldObject}" must be refused`);
+    }
 
-    /* Shelf schema resource must also omit every blocked table and column. */
+    /* Shelf schema resource must also omit every blocked table, database view, and column. */
     const { parseViewsConfig } = await import('@mistriwork/engine/shared/view.js');
     const shelfRead = await answerMcpHttp(
       registry,
@@ -270,16 +289,22 @@ describe('1. Table & field blocklist enforcement across catalog, reads, views, e
       { version: '1.0.0-test' },
     );
     const shelfText = JSON.stringify(shelfRead);
-    assert.ok(!shelfText.includes('audit_log'));
-    assert.ok(!shelfText.includes('internal_secrets'));
-    assert.ok(!shelfText.includes('pk_token_map'));
-    assert.ok(!shelfText.includes('tax_id'));
-    assert.ok(!shelfText.includes('password_hash'));
-    assert.ok(!shelfText.includes('api_token'));
-    assert.ok(!shelfText.includes('internal_secret'));
+    for (const secretIdent of [
+      'audit_log',
+      'internal_secrets',
+      'pk_token_map',
+      'v_audit',
+      'v_customer',
+      'tax_id',
+      'password_hash',
+      'api_token',
+      'internal_secret',
+    ]) {
+      assert.ok(!shelfText.includes(secretIdent), `Shelf schema must not leak "${secretIdent}"`);
+    }
   });
 
-  test('enforces blocklist across query, breakdown, views, record, find, profile, export, raw SQL, and writes', async () => {
+  test('enforces blocklist across query, SQL views, configured views, record, find, profile, export, raw SQL, and writes', async () => {
     /* Allowed query omits blocked columns. */
     const qOk = await runTool(registry, 'query', { q: 'customer' });
     assert.ok(!qOk.isError);
@@ -290,16 +315,14 @@ describe('1. Table & field blocklist enforcement across catalog, reads, views, e
     assert.equal('password_hash' in qStruct.rows[0], false);
     assert.equal('api_token' in qStruct.rows[0], false);
 
-    /* Filtering on a blocked column or querying a blocked table fails. */
-    const qBlockedCol = await runTool(registry, 'query', { q: 'customer tax_id = "999-11-2222"' });
-    const qBlockedColStruct = qBlockedCol.structuredContent as { errors?: unknown[] } | undefined;
-    assert.ok(qBlockedCol.isError || (qBlockedColStruct?.errors?.length ?? 0) > 0, 'Querying blocked column must fail');
+    /* Filtering on a blocked column, querying a blocked table, or querying a database SQL view fails! */
+    for (const forbiddenQuery of ['customer tax_id = "999-11-2222"', 'audit_log', 'v_audit', 'v_customer']) {
+      const res = await runTool(registry, 'query', { q: forbiddenQuery });
+      const struct = res.structuredContent as { errors?: unknown[] } | undefined;
+      assert.ok(res.isError || (struct?.errors?.length ?? 0) > 0, `Query "${forbiddenQuery}" must fail`);
+    }
 
-    const qBlockedTbl = await runTool(registry, 'query', { q: 'audit_log' });
-    const qBlockedTblStruct = qBlockedTbl.structuredContent as { errors?: unknown[] } | undefined;
-    assert.ok(qBlockedTbl.isError || (qBlockedTblStruct?.errors?.length ?? 0) > 0, 'Querying blocked table must fail');
-
-    /* Named views: safe view works, views touching blocked column or blocked table are refused. */
+    /* Named configured views: safe view works, views touching blocked column or blocked table are refused. */
     const safeView = await runTool(registry, 'query', { view: 'safe_invoices' });
     assert.ok(!safeView.isError, safeView.content[0]?.text);
     assert.equal((safeView.structuredContent as { rows: unknown[] }).rows.length, 2);
@@ -325,7 +348,7 @@ describe('1. Table & field blocklist enforcement across catalog, reads, views, e
       ['invoice'],
     );
 
-    /* `find` value sweep never searches blocked tables or blocked columns! */
+    /* `find` value sweep never searches blocked tables, blocked columns, OR database SQL views (`v_audit`, `v_customer`)! */
     for (const secretProbe of [
       '999-11-2222',
       'pbkdf2$supersecret',
@@ -337,20 +360,20 @@ describe('1. Table & field blocklist enforcement across catalog, reads, views, e
       const found = await runTool(registry, 'find', { value: secretProbe });
       assert.ok(!found.isError);
       const matches = (found.structuredContent as { matches?: unknown[] }).matches ?? [];
-      assert.equal(matches.length, 0, `find must not match blocked secret "${secretProbe}"`);
+      assert.equal(matches.length, 0, `find must not match blocked secret "${secretProbe}" (including via SQL views)`);
     }
     const foundAllowed = await runTool(registry, 'find', { value: 'Alice Vault' });
     assert.equal(((foundAllowed.structuredContent as { matches?: unknown[] }).matches ?? []).length, 1);
 
-    /* `profile` omits blocked columns and refuses blocked tables. */
+    /* `profile` omits blocked columns and refuses blocked tables and SQL views. */
     const prof = await runTool(registry, 'profile', { table: 'customer' });
     assert.ok(!prof.isError);
     const profCols = ((prof.structuredContent as { columns: Array<{ column: string }> }).columns ?? []).map((c) => c.column);
     assert.deepEqual(profCols, ['id', 'name', 'email', 'country_code']);
-    const profBlocked = await runTool(registry, 'profile', { table: 'audit_log' });
-    assert.equal(profBlocked.isError, true);
+    assert.equal((await runTool(registry, 'profile', { table: 'audit_log' })).isError, true);
+    assert.equal((await runTool(registry, 'profile', { table: 'v_customer' })).isError, true);
 
-    /* `export` writes only allowed columns to disk. */
+    /* `export` writes only allowed columns to disk and refuses database views. */
     const exp = await runTool(registry, 'export', { query: 'customer', format: 'json' });
     assert.ok(!exp.isError, exp.content[0]?.text);
     const expPath = (exp.structuredContent as { path: string }).path;
@@ -359,6 +382,7 @@ describe('1. Table & field blocklist enforcement across catalog, reads, views, e
     assert.ok(!exportedJson.includes('999-11-2222'));
     assert.ok(!exportedJson.includes('pbkdf2$supersecret'));
     assert.ok(!exportedJson.includes('tok_live_98765'));
+    assert.equal((await runTool(registry, 'export', { query: 'v_customer', format: 'csv' })).isError, true);
 
     /* Direct calls to raw SQL / DDL tools are refused even if invoked by name. */
     for (const [tool, args] of [
@@ -393,9 +417,53 @@ describe('1. Table & field blocklist enforcement across catalog, reads, views, e
     });
     assert.equal(insBlockedTable.isError, true, 'Inserting into a blocked table must fail');
   });
+
+  test('applies top-level blocklist to CLI positional/--db targets (even with "connections": []) and later session connections', async () => {
+    const topLevelConfigPath = join(DIR, 'toplevel-only.json');
+    writeFileSync(
+      topLevelConfigPath,
+      JSON.stringify({
+        blocklist: {
+          tables: ['audit_*', 'internal_secrets'],
+          fields: {
+            '*': ['*_token', 'password*'],
+            customer: ['tax_id'],
+          },
+        },
+        connections: [],
+      }),
+    );
+
+    /* Exact reviewer reproduction: `tablewalk --config toplevel.json <db> --query audit_log` must fail! */
+    const blockedCli = await runCliProcess(['--config', topLevelConfigPath, dbPath, '--query', 'audit_log'], {
+      env: { XDG_CONFIG_HOME: join(DIR, 'xdg-toplevel') },
+    });
+    const blockedCliParsed = blockedCli.code === 0 ? (JSON.parse(blockedCli.stdout) as { errors?: unknown[] }) : undefined;
+    assert.ok(
+      blockedCli.code !== 0 || (blockedCliParsed?.errors?.length ?? 0) > 0,
+      'CLI positional target must enforce top-level blocklist on audit_log',
+    );
+
+    const allowedCli = await runCliProcess(['--config', topLevelConfigPath, dbPath, '--query', 'customer'], {
+      env: { XDG_CONFIG_HOME: join(DIR, 'xdg-toplevel') },
+    });
+    assert.equal(allowedCli.code, 0, allowedCli.stderr);
+    const custOut = JSON.parse(allowedCli.stdout) as { columns: string[] };
+    assert.deepEqual(custOut.columns, ['id', 'name', 'email', 'country_code']);
+
+    /* Session connections added later onto a PolicyRegistry inherit top-level defaultBlocklist (pruning audit_log, pk_token_map, and SQL views). */
+    const sessionAdded = registry.add({ name: 'session-later', url: dbPath, source: 'session' });
+    const sessionTables = await runTool(registry, 'tables', { connection: sessionAdded.id });
+    assert.deepEqual(((sessionTables.structuredContent as { tables: Array<{ id: string }> }).tables ?? []).map((t) => t.id).sort(), [
+      'country',
+      'customer',
+      'internal_secrets',
+      'invoice',
+    ]);
+  });
 });
 
-describe('2. Piped vault configs, in-memory secrets, lazy MCP combined stdin, FIFO, and fast one-shot CLI', () => {
+describe('2. Piped vault configs, in-memory secrets, lazy MCP combined stdin (JSON & .env), FIFO, and fast CLI', () => {
   const stagingDb = join(DIR, 'vault-staging.sqlite');
   const prodDb = join(DIR, 'vault-prod.sqlite');
   const isolatedXdg = join(DIR, 'xdg-empty');
@@ -431,7 +499,6 @@ describe('2. Piped vault configs, in-memory secrets, lazy MCP combined stdin, FI
     assert.equal(result.rows.length, 1);
     assert.equal(result.rows[0].total, 420.5);
     assert.equal('internal_secret' in result.rows[0], false);
-    /* Secrets/configs must never be persisted to XDG_CONFIG_HOME. */
     assert.equal(
       existsSync(isolatedXdg) ? readdirSync(isolatedXdg).length : 0,
       0,
@@ -439,7 +506,7 @@ describe('2. Piped vault configs, in-memory secrets, lazy MCP combined stdin, FI
     );
   });
 
-  test('supports combined stdin ({ vault; cat; } | tablewalk --mcp --config -) with lazy startup, only: true, and clean EOF exit', async () => {
+  test('supports combined stdin ({ vault; cat; } | tablewalk --mcp --config -) for BOTH JSON and .env headers without waiting for EOF', async () => {
     const mcpVaultConfig = JSON.stringify({
       secrets: {
         STAGING_URL: stagingDb,
@@ -477,9 +544,8 @@ describe('2. Piped vault configs, in-memory secrets, lazy MCP combined stdin, FI
       }),
     ].join('\n');
 
-    const combinedStdin = `${mcpVaultConfig}\n${rpcLines}\n`;
     const { code, stdout, stderr } = await runCliProcess(['--mcp', '--config', '-'], {
-      stdin: combinedStdin,
+      stdin: `${mcpVaultConfig}\n${rpcLines}\n`,
       env: { XDG_CONFIG_HOME: isolatedXdg },
     });
 
@@ -490,32 +556,69 @@ describe('2. Piped vault configs, in-memory secrets, lazy MCP combined stdin, FI
       .filter(Boolean)
       .map((line) => JSON.parse(line) as { id: number; result?: Record<string, unknown> });
 
-    const initMsg = messages.find((m) => m.id === 1);
-    assert.ok(initMsg?.result?.protocolVersion, 'MCP initialize succeeded');
-
-    /* Because `lazy: true` and `only: true`, before `query` runs only `billing-staging` is listed and `tables` is undefined (unopened)! */
-    const connsMsg = messages.find((m) => m.id === 2);
-    const connsStruct = (connsMsg?.result as { structuredContent?: { connections: Array<{ id: string; tables?: number }> } })
-      ?.structuredContent;
-    assert.equal(connsStruct?.connections.length, 1, 'only: true should expose solely the selected target connection');
+    assert.ok(messages.find((m) => m.id === 1)?.result?.protocolVersion);
+    const connsStruct = (
+      messages.find((m) => m.id === 2)?.result as {
+        structuredContent?: { connections: Array<{ id: string; tables?: number }> };
+      }
+    )?.structuredContent;
+    assert.equal(connsStruct?.connections.length, 1);
     assert.equal(connsStruct?.connections[0]?.id, 'billing-staging');
-    assert.equal(connsStruct?.connections[0]?.tables, undefined, 'lazy MCP must not dial/introspect the database before first query');
+    assert.equal(connsStruct?.connections[0]?.tables, undefined);
 
-    /* `tools/list` omits raw SQL tools under blocklist. */
-    const listMsg = messages.find((m) => m.id === 3);
-    const listedNames = ((listMsg?.result as { tools?: Array<{ name: string }> })?.tools ?? []).map((t) => t.name);
+    const listedNames = ((messages.find((m) => m.id === 3)?.result as { tools?: Array<{ name: string }> })?.tools ?? []).map((t) => t.name);
     assert.ok(!listedNames.includes('sql'));
     assert.ok(listedNames.includes('query'));
 
-    /* Subsequent `query` opens on demand and enforces the blocklist. */
-    const queryMsg = messages.find((m) => m.id === 4);
-    const queryStruct = (queryMsg?.result as { structuredContent?: { columns: string[]; rows: unknown[] } })?.structuredContent;
+    const queryStruct = (
+      messages.find((m) => m.id === 4)?.result as {
+        structuredContent?: { columns: string[]; rows: unknown[] };
+      }
+    )?.structuredContent;
     assert.deepEqual(queryStruct?.columns, ['id', 'name', 'email', 'country_code']);
     assert.equal(queryStruct?.rows.length, 1);
+
+    /* Now verify `.env` piped with `--mcp --config -` while keeping stdin open until RPC replies arrive! */
+    const dotenvMcpChild = spawn(process.execPath, ['--import', 'tsx', BIN, '--mcp', '--config', '-', '--db', '${DOTENV_MCP_URL}'], {
+      cwd: ROOT,
+      env: { ...process.env, XDG_CONFIG_HOME: isolatedXdg },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let dotenvStdout = '';
+    dotenvMcpChild.stdout.setEncoding('utf8');
+    const gotReply = new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => {
+        dotenvMcpChild.kill('SIGKILL');
+        reject(new Error('Piped .env --mcp --config - waited for EOF instead of answering live!'));
+      }, 6000);
+      dotenvMcpChild.stdout.on('data', (chunk: string) => {
+        dotenvStdout += chunk;
+        const lines = dotenvStdout.trim().split('\n').filter(Boolean);
+        if (lines.length >= 2) {
+          clearTimeout(t);
+          resolve();
+        }
+      });
+    });
+
+    /* Write `.env` + RPC WITHOUT closing stdin (`end()` is NOT called yet)! */
+    dotenvMcpChild.stdin.write(
+      `# Vault .env header\nexport DOTENV_MCP_URL="${stagingDb}"\n` +
+        `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {} } })}\n` +
+        `${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'query', arguments: { q: 'country' } } })}\n`,
+    );
+    await gotReply;
+    dotenvMcpChild.stdin.end();
+    const dotenvExit = await new Promise<number | null>((r) => dotenvMcpChild.on('close', r));
+    assert.equal(dotenvExit, 0);
+    const dotenvReplies = dotenvStdout
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as { id: number; result?: { structuredContent?: { rows?: unknown[] } } });
+    assert.equal(dotenvReplies.find((m) => m.id === 2)?.result?.structuredContent?.rows?.length, 2);
   });
 
   test('reads named FIFO (--config <fifo>) once without losing stream contents and supports TABLEWALK_CONFIG_JSON + --call', async () => {
-    /* 1. Named FIFO (same kernel mechanism as bash `<(vault get)`). */
     const fifoPath = join(DIR, 'vault.fifo');
     execFileSync('mkfifo', [fifoPath]);
     const fifoPayload = JSON.stringify({
@@ -531,7 +634,6 @@ describe('2. Piped vault configs, in-memory secrets, lazy MCP combined stdin, FI
     const cliPromise = runCliProcess(['--config', fifoPath, '--call', 'table', '--args', JSON.stringify({ table: 'invoice' })], {
       env: { XDG_CONFIG_HOME: isolatedXdg },
     });
-    /* Write to FIFO concurrently so reader and writer unblock together. */
     await new Promise<void>((resolve, reject) => {
       const ws = createWriteStream(fifoPath, { encoding: 'utf8' });
       ws.on('error', reject);
@@ -547,7 +649,6 @@ describe('2. Piped vault configs, in-memory secrets, lazy MCP combined stdin, FI
       ['id', 'customer_id', 'status', 'total'],
     );
 
-    /* 2. `TABLEWALK_CONFIG_JSON` with `--call schema_summary`. */
     const envRes = await runCliProcess(['--call', 'schema_summary'], {
       env: {
         XDG_CONFIG_HOME: isolatedXdg,
@@ -560,46 +661,54 @@ describe('2. Piped vault configs, in-memory secrets, lazy MCP combined stdin, FI
   });
 });
 
-describe('3. Connection leases: idle eviction, transparent re-open, maxSeconds expiry, and MCP auto-exit', () => {
+describe('3. Connection leases: in-place idle eviction (keeping active stable), re-open, maxSeconds expiry, and MCP auto-exit', () => {
   const leaseDb = join(DIR, 'lease.sqlite');
 
   before(() => {
     buildVaultTestDb(leaseDb, 'lease');
   });
 
-  test('evicts idle connections after idleSeconds, re-opens on demand, and refuses after maxSeconds', async () => {
-    const registry = new Registry();
-    const added = registry.add({ name: 'leased-db', url: leaseDb, source: 'config' });
-    registry.setActive(added.id);
-
+  test('evicts idle connections in place without moving active, re-opens on demand, and refuses after maxSeconds', async () => {
     const lease = parseLeaseSpec({ idleSeconds: 0.08, maxSeconds: 0.45, exitOnExpire: false }, 'test');
-    installConnectionPolicies(registry, { blocklists: new Map(), connectionLeases: new Map(), sessionLease: lease }, false);
+    const registry = new PolicyRegistry({ sessionLease: lease, mcpMode: false });
+    registry.add({ name: 'first-db', url: leaseDb, source: 'config' });
+    const second = registry.add({ name: 'leased-db', url: leaseDb, source: 'config' });
+    registry.setActive(second.id);
+
+    /* Sample `registry.active` on a tight 5ms interval across eviction & re-open to prove it never shifts to `first-db`. */
+    const observedActive = new Set<string | null>();
+    const watcher = setInterval(() => {
+      observedActive.add(registry.active);
+    }, 5);
 
     try {
-      assert.equal(registry.list()[0]?.connected, false);
+      assert.equal(registry.list().find((c) => c.id === second.id)?.connected, false);
 
-      /* First query opens the connection. */
       const first = await runTool(registry, 'query', { q: 'country' });
       assert.ok(!first.isError);
-      assert.equal(registry.list()[0]?.connected, true);
+      assert.equal(registry.list().find((c) => c.id === second.id)?.connected, true);
 
-      /* Wait past idleSeconds (80ms) -> adapter is evicted and closed. */
+      /* Wait past idleSeconds (80ms) -> adapter is evicted in place. */
       await new Promise((r) => setTimeout(r, 160));
-      assert.equal(registry.list()[0]?.connected, false, 'Idle connection must be closed after idleSeconds');
+      assert.equal(registry.list().find((c) => c.id === second.id)?.connected, false, 'Idle connection must be closed after idleSeconds');
+      assert.equal(registry.active, second.id);
 
       /* Query again while still inside maxSeconds (450ms) -> transparently re-opens! */
-      const second = await runTool(registry, 'query', { q: 'country' });
-      assert.ok(!second.isError, second.content[0]?.text);
-      assert.equal((second.structuredContent as { rows: unknown[] }).rows.length, 2);
+      const secondRun = await runTool(registry, 'query', { q: 'country' });
+      assert.ok(!secondRun.isError, secondRun.content[0]?.text);
+      assert.equal((secondRun.structuredContent as { rows: unknown[] }).rows.length, 2);
 
-      /* Wait past maxSeconds (450ms total from install) -> connection closes and refuses further calls. */
+      /* Wait past maxSeconds -> connection closes and refuses further calls. */
       await new Promise((r) => setTimeout(r, 340));
-      assert.equal(registry.list()[0]?.connected, false, 'Expired lease must close open connections');
+      assert.equal(registry.list().find((c) => c.id === second.id)?.connected, false);
 
       const expired = await runTool(registry, 'query', { q: 'country' });
       assert.equal(expired.isError, true);
       assert.match(expired.content[0]?.text ?? '', /lease expired/i);
+
+      assert.deepEqual([...observedActive], [second.id], 'active connection must never move during idle eviction');
     } finally {
+      clearInterval(watcher);
       await registry.closeAll();
     }
   });
@@ -617,7 +726,6 @@ describe('3. Connection leases: idle eviction, transparent re-open, maxSeconds e
       stderr += chunk;
     });
 
-    /* Send initialize while keeping stdin open (the way an idle MCP host holds the pipe). */
     child.stdin.write(
       `${JSON.stringify({
         jsonrpc: '2.0',
@@ -643,7 +751,7 @@ describe('3. Connection leases: idle eviction, transparent re-open, maxSeconds e
   });
 });
 
-describe('4. Piped .env secrets, breakdown --query dispatch, and HTTP browser blocklist enforcement', () => {
+describe('4. Piped .env breakdown CLI, HTTP browser blocklist enforcement, and Save config round-trip', () => {
   const envDb = join(DIR, 'dotenv-http.sqlite');
 
   before(() => {
@@ -664,30 +772,46 @@ describe('4. Piped .env secrets, breakdown --query dispatch, and HTTP browser bl
     assert.equal(parsed.rows.length, 2);
   });
 
-  test('enforces blocklist across HTTP browser routes (/api/tables and /api/query)', async () => {
-    const registry = new Registry();
-    const added = registry.add({ name: 'web-blocked', url: envDb, source: 'config' });
-    registry.setActive(added.id);
-    applyExtendedDiskConfig(
-      registry,
-      JSON.stringify({
+  test('enforces blocklist across HTTP routes and preserves top-level blocklist, lease, and existing secrets on Save', async () => {
+    const configPath = join(DIR, 'save-roundtrip.json');
+    const newSavePath = join(DIR, 'save-new-target.json');
+    const initialJson = JSON.stringify(
+      {
+        secrets: {
+          HTTP_DB_PATH: envDb,
+        },
+        lease: {
+          idleSeconds: 45,
+          maxSeconds: 600,
+        },
+        blocklist: {
+          tables: ['audit_*', 'internal_secrets'],
+          fields: ['*_token', '*_secret', 'password*'],
+        },
         connections: [
           {
             name: 'web-blocked',
+            database: 'billing',
+            env: 'staging',
             url: envDb,
             blocklist: {
-              tables: ['audit_*', 'internal_secrets'],
-              fields: ['*_token', '*_secret', 'password*', 'customer.tax_id'],
+              fields: { customer: ['tax_id'] },
             },
           },
         ],
-      }),
-      'web-blocked.json',
-      false,
+      },
+      null,
+      2,
     );
+    writeFileSync(configPath, initialJson);
+
+    const baseReg = new Registry();
+    const added = baseReg.add({ name: 'web-blocked', url: envDb, source: 'config' });
+    baseReg.setActive(added.id);
+    const { registry } = applyExtendedDiskConfig(baseReg, initialJson, configPath, false);
 
     const bound = { host: '127.0.0.1', port: 0 };
-    const server = createApp({ registry, bound });
+    const server = createApp({ registry, bound, configPath });
     await new Promise<void>((resolve) => {
       server.listen(0, '127.0.0.1', () => resolve());
     });
@@ -720,18 +844,40 @@ describe('4. Piped .env secrets, breakdown --query dispatch, and HTTP browser bl
       assert.ok(!queryJson.result.isError);
       assert.equal('tax_id' in queryJson.result.structuredContent.rows[0], false);
 
-      const queryBlocked = await fetch(`${base}/mcp`, {
+      /* 1. Save in place: top-level `blocklist`, `lease`, and on-disk `secrets` + per-connection `database`/`env`/`blocklist` all survive! */
+      const saveInPlace = await fetch(`${base}/api/connections/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 2,
-          method: 'tools/call',
-          params: { name: 'table', arguments: { table: 'audit_log' } },
-        }),
+        body: JSON.stringify({ path: configPath }),
       });
-      const blockedJson = (await queryBlocked.json()) as { result: { isError?: boolean } };
-      assert.equal(blockedJson.result.isError, true);
+      assert.equal(saveInPlace.status, 200);
+      const savedDisk = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown> & {
+        connections: Array<Record<string, unknown>>;
+      };
+      assert.deepEqual(savedDisk.blocklist, {
+        tables: ['audit_*', 'internal_secrets'],
+        fields: ['*_token', '*_secret', 'password*'],
+      });
+      assert.deepEqual(savedDisk.lease, { idleSeconds: 45, maxSeconds: 600 });
+      assert.deepEqual(savedDisk.secrets, { HTTP_DB_PATH: envDb });
+      assert.equal(savedDisk.connections[0]?.database, 'billing');
+      assert.equal(savedDisk.connections[0]?.env, 'staging');
+      assert.deepEqual(savedDisk.connections[0]?.blocklist, { fields: { customer: ['tax_id'] } });
+
+      /* 2. Save to a brand-new path: top-level `blocklist` and `lease` still survive, while `secrets` is NOT copied to a new file! */
+      const saveNew = await fetch(`${base}/api/connections/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: newSavePath }),
+      });
+      assert.equal(saveNew.status, 200);
+      const savedNewDisk = JSON.parse(readFileSync(newSavePath, 'utf8')) as Record<string, unknown>;
+      assert.deepEqual(savedNewDisk.blocklist, {
+        tables: ['audit_*', 'internal_secrets'],
+        fields: ['*_token', '*_secret', 'password*'],
+      });
+      assert.deepEqual(savedNewDisk.lease, { idleSeconds: 45, maxSeconds: 600 });
+      assert.equal(savedNewDisk.secrets, undefined, 'Secrets must not be written when saving to a brand-new path');
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));

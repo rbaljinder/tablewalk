@@ -286,10 +286,10 @@ token, an internal audit or secrets table), give the connection
 `"hidden": { "account": ["password_hash"], "*": ["*_token"] }` or a
 `"blocklist": { "tables": ["audit_*", "*_secrets"], "fields": { "*": ["*_token"], "customer": ["tax_id"] } }`
 (top-level or per connection): the catalog, foreign-key graph and every answer
-leave blocked tables and fields out, a query or view that names or traverses one
-is refused, and raw SQL (`sql`, `explain`, `verify_ddl`) is withheld and
-refused on that connection. A database role without `SELECT` on them is stronger
-still.
+leave blocked tables, database SQL views (`CREATE VIEW`) and blocked fields out,
+a query or configured view that names or traverses one is refused, and raw SQL
+(`sql`, `explain`, `verify_ddl`) is withheld and refused on that connection. A
+database role without `SELECT` on them is stronger still.
 
 For a local secret vault or ephemeral agent session, pipe the config in memory
 instead of writing secrets to disk — `--config <(vault read db/staging)`,

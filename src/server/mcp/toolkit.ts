@@ -114,7 +114,13 @@ export interface ConnectionConfigExtras {
   lease?: unknown;
 }
 
+export interface TopLevelConfigExtras {
+  blocklist?: unknown;
+  lease?: unknown;
+}
+
 const configExtrasByRegistry = new WeakMap<Registry, Map<string, ConnectionConfigExtras>>();
+const topLevelExtrasByRegistry = new WeakMap<Registry, TopLevelConfigExtras>();
 
 export function setConnectionConfigExtras(registry: Registry, id: string, extras: ConnectionConfigExtras | undefined): void {
   let map = configExtrasByRegistry.get(registry);
@@ -133,6 +139,18 @@ export function getConnectionConfigExtras(registry: Registry, id: string): Conne
   return configExtrasByRegistry.get(registry)?.get(id);
 }
 
+export function setTopLevelConfigExtras(registry: Registry, extras: TopLevelConfigExtras | undefined): void {
+  if (!extras || Object.values(extras).every((v) => v === undefined)) {
+    topLevelExtrasByRegistry.delete(registry);
+    return;
+  }
+  topLevelExtrasByRegistry.set(registry, extras);
+}
+
+export function getTopLevelConfigExtras(registry: Registry): TopLevelConfigExtras | undefined {
+  return topLevelExtrasByRegistry.get(registry);
+}
+
 export function removeConnectionEnvMeta(registry: Registry, id: string): void {
   envMetaByRegistry.get(registry)?.delete(id);
   configExtrasByRegistry.get(registry)?.delete(id);
@@ -142,13 +160,20 @@ export function removeConnectionEnvMeta(registry: Registry, id: string): void {
  * Hydrate explicit `database`/`group`, `env`/`environment`, and `blocklist`/`lease` metadata from raw `tablewalk.json` text.
  */
 export function loadConfigEnvMeta(registry: Registry, rawConfigJsonText: string): void {
-  let parsed: { connections?: unknown };
+  let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(rawConfigJsonText) as { connections?: unknown };
+    parsed = JSON.parse(rawConfigJsonText) as Record<string, unknown>;
   } catch {
     return;
   }
-  if (!Array.isArray(parsed?.connections)) return;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+  if (parsed.blocklist !== undefined || parsed.lease !== undefined) {
+    setTopLevelConfigExtras(registry, {
+      ...(parsed.blocklist !== undefined ? { blocklist: parsed.blocklist } : {}),
+      ...(parsed.lease !== undefined ? { lease: parsed.lease } : {}),
+    });
+  }
+  if (!Array.isArray(parsed.connections)) return;
   const configs = registry.configs();
   const usedIds = new Set<string>();
   for (const raw of parsed.connections) {
@@ -406,7 +431,6 @@ const MAX_ANSWER_TEXT = 32_768;
 interface ActivityState {
   seq: number;
   entries: AgentActivityEntry[];
-  egress: Map<string, number>;
 }
 
 const activityByRegistry = new WeakMap<Registry, ActivityState>();
@@ -414,7 +438,7 @@ const activityByRegistry = new WeakMap<Registry, ActivityState>();
 function stateFor(registry: Registry): ActivityState {
   let st = activityByRegistry.get(registry);
   if (!st) {
-    st = { seq: 0, entries: [], egress: new Map() };
+    st = { seq: 0, entries: [] };
     activityByRegistry.set(registry, st);
   }
   return st;
@@ -478,7 +502,6 @@ export function recordAgentActivity(
         ? entry.args.connection
         : (registry.active ?? undefined);
   const rowsRead = typeof stats.rowsRead === 'number' ? stats.rowsRead : undefined;
-  if (rowsRead && conn) st.egress.set(conn, (st.egress.get(conn) ?? 0) + rowsRead);
   const rawText = entry.answer.content[0]?.text ?? '';
   const boundedAnswer =
     rawText.length <= MAX_ANSWER_TEXT
@@ -527,7 +550,7 @@ export function agentActivity(
   return {
     seq: st.seq,
     calls,
-    egress: Object.fromEntries(st.egress),
+    egress: Object.fromEntries(sessionEgress),
   };
 }
 

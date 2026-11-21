@@ -29,12 +29,14 @@ export {
   agentActivity,
   getConnectionConfigExtras,
   getConnectionEnvMeta,
+  getTopLevelConfigExtras,
   listEnrichedConnections,
   loadConfigEnvMeta,
   removeConnectionEnvMeta,
   resolveConnectionEntry,
   setConnectionConfigExtras,
   setConnectionEnvMeta,
+  setTopLevelConfigExtras,
 } from './mcp/toolkit.js';
 export { setElicitor } from './mcp/tools/write.js';
 export { findValue } from './mcp/tools/schema.js';

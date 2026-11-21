@@ -16,6 +16,7 @@ import {
   answerMcpHttp,
   getConnectionConfigExtras,
   getConnectionEnvMeta,
+  getTopLevelConfigExtras,
   listEnrichedConnections,
   removeConnectionEnvMeta,
   setConnectionEnvMeta,
@@ -468,10 +469,21 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
       // The cache and search services travel with it: saving must not delete what it does not list.
       const configs = registry.configs();
       await saveConfig(target, configs, registry.serviceConfigs(), registry.sections, registry.keptEntries());
-      if (configs.some((c) => Boolean(getConnectionEnvMeta(registry, c.id) || getConnectionConfigExtras(registry, c.id)))) {
+      const topExtras = getTopLevelConfigExtras(registry);
+      const hasConnExtras = configs.some((c) => Boolean(getConnectionEnvMeta(registry, c.id) || getConnectionConfigExtras(registry, c.id)));
+      if (topExtras || hasConnExtras) {
         const { readFile, writeFile } = await import('node:fs/promises');
-        const parsed = JSON.parse(await readFile(target, 'utf8')) as { connections?: Array<Record<string, unknown>> };
-        if (Array.isArray(parsed.connections)) {
+        const parsed = JSON.parse(await readFile(target, 'utf8')) as Record<string, unknown> & {
+          connections?: Array<Record<string, unknown>>;
+        };
+        if (topExtras) {
+          for (const [k, v] of Object.entries(topExtras)) {
+            if (v !== undefined && parsed[k] === undefined) {
+              parsed[k] = v;
+            }
+          }
+        }
+        if (hasConnExtras && Array.isArray(parsed.connections)) {
           const used = new Set<number>();
           for (const cfg of configs) {
             const meta = getConnectionEnvMeta(registry, cfg.id);
@@ -488,8 +500,8 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
               }
             }
           }
-          await writeFile(target, `${JSON.stringify(parsed, null, 2)}\n`);
         }
+        await writeFile(target, `${JSON.stringify(parsed, null, 2)}\n`);
       }
     } catch (err) {
       send(res, 500, { error: `Could not write ${target}: ${(err as Error).message}` });
