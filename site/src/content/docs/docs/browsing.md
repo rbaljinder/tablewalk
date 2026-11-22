@@ -68,6 +68,16 @@ Every place has an address in the path, so you can bookmark it or send it to som
 
 A composite key names each part: `/demo/invoice_line/~invoice_id=1001,line_no=2` (the browser shows it percent-encoded). The same list is in the app under `?` → **Links you can write**.
 
+## Looks and preferences
+
+**Preferences** (`⌘K` or the `···` menu) sets color mode (**Match the system**, **Light** or **Dark**), density, list page sizes, and **Visual theme** (each persisted per browser, with zero extra CSS fetched until a look is worn). You can also open any look directly from a link:
+
+- **Instrument** (`?look=default`, or `?look=instrument&palette=stone`, `slate`, `ink`, `fog`) — the default hairline measuring grid in Inter and IBM Plex Mono.
+- **Braun** (`?look=braun`) — anodized aluminum housing, recessed dark digital LCD query and SQL readouts, tactile 3D push-buttons, and an International Orange `RUN` key.
+- **Broadsheet** (`?look=broadsheet`) — warm newsprint (or mahogany inkwell in dark mode), editorial serif masthead and headings, double masthead rules, dotted record leaders, and borderless horizontal tables.
+- **Obsidian** (`?look=obsidian`) — frameless matte shell with a floating rounded workspace island, elevated pill tabs, micro-bevel keycaps, and capsule foreign-key badges.
+- **Folio** (`?look=folio`), **Blueprint** (`?look=blueprint`) and **Console** (`?look=console`) — typeset book tables, architectural whiteprint/cyanotype drawings, and green-bar printout / phosphor CRT output, alongside eight shared Mistri themes with twelve selectable palettes each.
+
 ## Good to know
 
 - On PostgreSQL the row counts in the sidebar are the catalog's estimates, so a large table costs nothing to list.

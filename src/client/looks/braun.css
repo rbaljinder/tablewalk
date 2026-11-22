@@ -1,0 +1,301 @@
+/* Host look: Braun. "Industrial Tactile Hardware (Dieter Rams / Teenage Engineering): bead-blasted aluminum chassis, recessed digital LCD query & SQL readouts, 3D chicklet push-buttons, International Orange Run key." */
+@import '@mistriwork/kit/client/fonts/faces.css';
+
+@layer theme {
+  :root[data-host-look='braun'] {
+    --chassis: #dedcd4;
+    --ground: #e7e5de;
+    --surface: #f7f6f2;
+    --raised: #d5d2c8;
+    --field-fill: #fdfcf9;
+    --control-fill: #f4f2ec;
+    --line: #c9c6bc;
+    --line-strong: #9e9a8e;
+    --line-control: #7d796e;
+    --ink: #1c1c1a;
+    --ink-muted: #52504a;
+    --ink-subtle: #636059;
+    --accent: #e04619;
+    --accent-ink: #b8330c;
+    --on-accent: #ffffff;
+    --accent-soft: #e046191a;
+    --link: #125e52;
+    --focus: #e04619;
+    --status-good: #1f7343;
+    --status-warning: #9c5608;
+    --status-critical: #bf2d24;
+    --status-info: #3d52a6;
+    --row-hover: #efede6;
+    --head-band: #eae8e1;
+    --lcd-bg: #171c18;
+    --lcd-ink: #d4f2dc;
+    --lcd-muted: #8ab896;
+    --lcd-border: #0c0f0d;
+    --face-ui: Inter, 'Inter Variable', 'DIN Alternate', ui-sans-serif, system-ui, sans-serif;
+    --sans: var(--face-ui);
+    --data-face: var(--face-ui);
+    --figures: 'IBM Plex Mono', var(--code);
+    --radius: 4px;
+    --lcd-shadow: inset 0 2px 5px rgb(0 0 0 / 0.55), 0 1px 0 rgb(255 255 255 / 0.65);
+    --keycap-shadow: inset 0 1px 0 #ffffff, 0 2px 0 #a9a599, 0 3px 4px rgb(0 0 0 / 0.12);
+    --keycap-pressed: inset 0 1px 2px rgb(0 0 0 / 0.18);
+    --run-keycap: inset 0 1px 0 rgb(255 255 255 / 0.35), 0 2px 0 #912607, 0 3px 5px rgb(0 0 0 / 0.22);
+    --bezel-shadow: inset 0 1px 3px rgb(0 0 0 / 0.08), 0 1px 0 rgb(255 255 255 / 0.7);
+    --shadow-pop: 0 6px 18px rgb(20 20 18 / 0.16);
+    --shadow-panel: 0 -6px 28px rgb(20 20 18 / 0.2);
+    --shadow-modal: 0 24px 60px rgb(20 20 18 / 0.28);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root[data-host-look='braun']:not([data-theme='light']) {
+      --chassis: #1b1c1f;
+      --ground: #16171a;
+      --surface: #222428;
+      --raised: #2c2f35;
+      --field-fill: #191b1e;
+      --control-fill: #2a2d33;
+      --line: #32353c;
+      --line-strong: #494d57;
+      --line-control: #737885;
+      --ink: #ecebe6;
+      --ink-muted: #a8a7a0;
+      --ink-subtle: #94938c;
+      --accent: #f25a29;
+      --accent-ink: #ff8259;
+      --on-accent: #141210;
+      --accent-soft: #f25a2924;
+      --link: #6fd4be;
+      --focus: #f25a29;
+      --status-good: #62cf8e;
+      --status-warning: #f0b24c;
+      --status-critical: #f57870;
+      --status-info: #94adff;
+      --row-hover: #282b30;
+      --head-band: #1d1f23;
+      --lcd-bg: #0d110e;
+      --lcd-ink: #9ef5b4;
+      --lcd-muted: #66b37a;
+      --lcd-border: #050706;
+      --lcd-shadow: inset 0 2px 6px rgb(0 0 0 / 0.8), 0 1px 0 rgb(255 255 255 / 0.07);
+      --keycap-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 2px 0 #111215, 0 3px 5px rgb(0 0 0 / 0.45);
+      --keycap-pressed: inset 0 1px 3px rgb(0 0 0 / 0.55);
+      --run-keycap: inset 0 1px 0 rgb(255 255 255 / 0.35), 0 2px 0 #8c2505, 0 3px 6px rgb(0 0 0 / 0.5);
+      --bezel-shadow: inset 0 1px 3px rgb(0 0 0 / 0.45);
+      --shadow-pop: 0 0 0 1px #000000, 0 12px 32px rgb(0 0 0 / 0.6);
+      --shadow-panel: 0 0 0 1px #000000, 0 -8px 40px rgb(0 0 0 / 0.65);
+      --shadow-modal: 0 0 0 1px #000000, 0 28px 72px rgb(0 0 0 / 0.75);
+    }
+  }
+
+  :root[data-host-look='braun'][data-theme='dark'] {
+    --chassis: #1b1c1f;
+    --ground: #16171a;
+    --surface: #222428;
+    --raised: #2c2f35;
+    --field-fill: #191b1e;
+    --control-fill: #2a2d33;
+    --line: #32353c;
+    --line-strong: #494d57;
+    --line-control: #737885;
+    --ink: #ecebe6;
+    --ink-muted: #a8a7a0;
+    --ink-subtle: #94938c;
+    --accent: #f25a29;
+    --accent-ink: #ff8259;
+    --on-accent: #141210;
+    --accent-soft: #f25a2924;
+    --link: #6fd4be;
+    --focus: #f25a29;
+    --status-good: #62cf8e;
+    --status-warning: #f0b24c;
+    --status-critical: #f57870;
+    --status-info: #94adff;
+    --row-hover: #282b30;
+    --head-band: #1d1f23;
+    --lcd-bg: #0d110e;
+    --lcd-ink: #9ef5b4;
+    --lcd-muted: #66b37a;
+    --lcd-border: #050706;
+    --lcd-shadow: inset 0 2px 6px rgb(0 0 0 / 0.8), 0 1px 0 rgb(255 255 255 / 0.07);
+    --keycap-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 2px 0 #111215, 0 3px 5px rgb(0 0 0 / 0.45);
+    --keycap-pressed: inset 0 1px 3px rgb(0 0 0 / 0.55);
+    --run-keycap: inset 0 1px 0 rgb(255 255 255 / 0.35), 0 2px 0 #8c2505, 0 3px 6px rgb(0 0 0 / 0.5);
+    --bezel-shadow: inset 0 1px 3px rgb(0 0 0 / 0.45);
+    --shadow-pop: 0 0 0 1px #000000, 0 12px 32px rgb(0 0 0 / 0.6);
+    --shadow-panel: 0 0 0 1px #000000, 0 -8px 40px rgb(0 0 0 / 0.65);
+    --shadow-modal: 0 0 0 1px #000000, 0 28px 72px rgb(0 0 0 / 0.75);
+  }
+
+  :root[data-host-look='braun'] {
+    & body {
+      --radius-item: 4px;
+      --radius-pop: 6px;
+      --radius-panel: 6px;
+      --radius-dialog: 8px;
+    }
+    /* Preserve SQL identifier casing everywhere by default; only hardware chrome labels opt into uppercase. */
+    & body * { text-transform: none; letter-spacing: normal; }
+
+    /* Anodized aluminum housing */
+    & .topbar {
+      background: var(--chassis);
+      border-bottom: 1px solid var(--line-strong);
+      padding-block: var(--space-2);
+    }
+    & .brand-name {
+      font: 700 var(--text-md) var(--face-ui);
+      letter-spacing: -0.02em;
+    }
+    & .sidebar {
+      background: var(--chassis);
+      border-right: 1px solid var(--line-strong);
+    }
+    & .content { background: var(--surface); }
+    & .crumbs-host {
+      background: var(--ground);
+      border-bottom: 1px solid var(--line);
+    }
+
+    /* Recessed digital LCD display readout for Query Bar, SQL Editor & inline SQL preview */
+    & #query,
+    & .sql-input {
+      background: var(--lcd-bg);
+      color: var(--lcd-ink);
+      border: 1px solid var(--lcd-border);
+      border-radius: var(--radius);
+      box-shadow: var(--lcd-shadow);
+      font-family: var(--figures);
+      font-size: var(--text-sm);
+    }
+    & #query::placeholder,
+    & .sql-input::placeholder { color: var(--lcd-muted); }
+    & .sql-panel {
+      background: var(--chassis);
+      border-top: 2px solid var(--line-strong);
+    }
+
+    /* Tactile 3D physical chicklet push-buttons + International Orange Run key */
+    & #querybar > button {
+      background: var(--accent);
+      color: var(--on-accent);
+      border: 1px solid #8f2607;
+      border-radius: var(--radius);
+      box-shadow: var(--run-keycap);
+      font: 700 var(--text-xs) var(--face-ui);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    & button.ghost,
+    & .export-summary {
+      background: var(--control-fill);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      box-shadow: var(--keycap-shadow);
+      font: 600 var(--text-xs) var(--face-ui);
+      color: var(--ink);
+    }
+    & :is(#querybar > button, button.ghost, .export-summary):active {
+      transform: translateY(1px);
+      box-shadow: var(--keycap-pressed);
+    }
+
+    /* Aluminum channel table list with glowing orange LED indicator */
+    & #table-filter {
+      background: var(--surface);
+      border: 1px solid var(--line-strong);
+      box-shadow: var(--bezel-shadow);
+      border-radius: var(--radius);
+    }
+    & #table-list button {
+      border-radius: var(--radius-item);
+      font: 500 var(--text-sm) var(--face-ui);
+    }
+    & #table-list button[aria-current='true'] {
+      background: var(--surface);
+      color: var(--ink);
+      box-shadow: var(--keycap-shadow);
+      font-weight: 700;
+      position: relative;
+      padding-left: var(--space-4h);
+    }
+    & #table-list button[aria-current='true']::before {
+      content: '';
+      position: absolute;
+      left: var(--space-2);
+      top: 50%;
+      width: 6px;
+      height: 6px;
+      margin-top: -3px; /* off-scale: hardware 6px LED indicator centering */
+      border-radius: 50%;
+      background: var(--accent);
+    }
+    & #table-list .rows { font: var(--text-xs) var(--figures); }
+
+    /* Compact single-line record tools */
+    & .panel > .record-heading {
+      font: 700 var(--text-lg) var(--face-ui);
+      flex-wrap: wrap;
+      gap: var(--space-2);
+    }
+    & .panel > .record-heading > span {
+      flex: 1 1 0;
+      min-inline-size: 6rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    & .record-heading button { white-space: nowrap; }
+    & :is(.record-as-page, .record-layout, .record-delete, .record-heading button.ghost) {
+      block-size: 28px;
+      padding: 0 var(--space-2h);
+      border-radius: var(--radius);
+    }
+
+    /* Machined data bezel + true-casing monospaced SQL headers & readouts */
+    & .grid-inset .table-wrap,
+    & .record-children .table-wrap {
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      box-shadow: var(--bezel-shadow);
+      margin-inline: var(--space-3h);
+      padding-bottom: 0;
+      background: var(--surface);
+    }
+    & thead th {
+      background: var(--head-band);
+      border-bottom: 1.5px solid var(--line-strong);
+      border-right: 1px solid var(--line);
+      font: 600 var(--text-xs) var(--figures);
+      color: var(--ink);
+    }
+    & th.sorted { color: var(--accent-ink); border-bottom-color: var(--accent); }
+    & :is(td.num, td.mono, td.reflink, .num-value, .date-value) { font-family: var(--figures); font-size: var(--text-sm); }
+    & td.null,
+    & .field dd.null {
+      font-family: var(--face-ui);
+      font-style: normal;
+      font-variant-caps: all-small-caps;
+      letter-spacing: 0.04em;
+      color: var(--ink-subtle);
+    }
+    & td { border-right: 1px solid var(--line); }
+
+    /* Machined schematic viewport */
+    & .diagram-viewport {
+      background-color: var(--ground);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      box-shadow: var(--bezel-shadow);
+      background-image: radial-gradient(circle at 1px 1px, var(--line-strong) 1px, transparent 1.2px);
+      background-size: 16px 16px;
+    }
+    & .node > rect { rx: 4px; ry: 4px; stroke: var(--line-strong); stroke-width: 1.5px; }
+    & :is(.node-focus, .node.lit) > rect { stroke: var(--accent); stroke-width: 2px; }
+    & svg.has-focus .edge:not(.dim) { stroke: var(--accent); stroke-width: 2px; }
+
+    @media (hover: hover) {
+      & tbody tr.clickable:hover { background: var(--row-hover); }
+      & .field:hover { background: var(--row-hover); }
+    }
+  }
+}

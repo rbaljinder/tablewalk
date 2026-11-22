@@ -1,0 +1,303 @@
+/* Host look: Obsidian. "Modern floating-island pro tool: frameless matte shell, elevated rounded canvas, micro-bevel keycap controls, capsule foreign-key badges." */
+@import '@mistriwork/kit/client/fonts/faces.css';
+
+@layer theme {
+  :root[data-host-look='obsidian'] {
+    --ground: #ecedf2;
+    --surface: #ffffff;
+    --raised: #e2e4ec;
+    --field-fill: #ffffff;
+    --control-fill: #ffffff;
+    --line: #dfe2ec;
+    --line-strong: #c8cddc;
+    --line-control: #8e96ab;
+    --ink: #12141c;
+    --ink-muted: #52586b;
+    --ink-subtle: #646c82;
+    --accent: #5e6ad2;
+    --accent-ink: #444fb8;
+    --on-accent: #ffffff;
+    --accent-soft: #5e6ad21a;
+    --link: #444fb8;
+    --focus: #6e7bf2;
+    --status-good: #167c52;
+    --status-warning: #a1580c;
+    --status-critical: #c9353f;
+    --status-info: #6d4fc7;
+    --row-hover: #f6f7fb;
+    --head-band: #f7f8fc;
+    --face-ui: Inter, 'Inter Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --sans: var(--face-ui);
+    --data-face: var(--face-ui);
+    --figures: 'IBM Plex Mono', var(--code);
+    --radius: 6px;
+    --island-radius: 12px;
+    --island-shadow: 0 1px 3px rgb(15 18 28 / 0.06), 0 8px 24px rgb(15 18 28 / 0.05);
+    --keycap-shadow: inset 0 1px 0 rgb(255 255 255 / 0.85), 0 1px 2px rgb(15 18 28 / 0.07);
+    --run-shadow: inset 0 1px 0 rgb(255 255 255 / 0.28), 0 1px 3px rgb(68 79 184 / 0.35);
+    --pill-active-shadow: 0 1px 2px rgb(15 18 28 / 0.1), 0 0 0 1px rgb(15 18 28 / 0.05);
+    --shadow-pop: 0 4px 16px rgb(15 18 28 / 0.1), 0 12px 32px rgb(15 18 28 / 0.08);
+    --shadow-panel: 0 -2px 24px rgb(15 18 28 / 0.12);
+    --shadow-modal: 0 24px 64px rgb(15 18 28 / 0.22);
+    --graticule: #5e6ad229;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root[data-host-look='obsidian']:not([data-theme='light']) {
+      --ground: #090a0d;
+      --surface: #111319;
+      --raised: #191c25;
+      --field-fill: #151821;
+      --control-fill: #171a24;
+      --line: #212532;
+      --line-strong: #2f3547;
+      --line-control: #5d6680;
+      --ink: #eef0f7;
+      --ink-muted: #9da5bc;
+      --ink-subtle: #8992ab;
+      --accent: #6e7bf2;
+      --accent-ink: #9aa4ff;
+      --on-accent: #ffffff;
+      --accent-soft: #6e7bf224;
+      --link: #9aa4ff;
+      --focus: #7c88ff;
+      --status-good: #4cc38a;
+      --status-warning: #f0b056;
+      --status-critical: #f2747d;
+      --status-info: #b49cff;
+      --row-hover: #161922;
+      --head-band: #141720;
+      --island-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 12px 32px rgb(0 0 0 / 0.45);
+      --keycap-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 1px 2px rgb(0 0 0 / 0.4);
+      --run-shadow: inset 0 1px 0 rgb(255 255 255 / 0.28), 0 2px 8px rgb(94 106 210 / 0.45);
+      --pill-active-shadow: inset 0 1px 0 rgb(255 255 255 / 0.09), 0 1px 3px rgb(0 0 0 / 0.45);
+      --shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.08), 0 16px 40px rgb(0 0 0 / 0.6);
+      --shadow-panel: 0 0 0 1px rgb(255 255 255 / 0.08), 0 -8px 36px rgb(0 0 0 / 0.65);
+      --shadow-modal: 0 0 0 1px rgb(255 255 255 / 0.1), 0 28px 72px rgb(0 0 0 / 0.75);
+      --graticule: #7c88ff24;
+    }
+  }
+
+  :root[data-host-look='obsidian'][data-theme='dark'] {
+    --ground: #090a0d;
+    --surface: #111319;
+    --raised: #191c25;
+    --field-fill: #151821;
+    --control-fill: #171a24;
+    --line: #212532;
+    --line-strong: #2f3547;
+    --line-control: #5d6680;
+    --ink: #eef0f7;
+    --ink-muted: #9da5bc;
+    --ink-subtle: #8992ab;
+    --accent: #6e7bf2;
+    --accent-ink: #9aa4ff;
+    --on-accent: #ffffff;
+    --accent-soft: #6e7bf224;
+    --link: #9aa4ff;
+    --focus: #7c88ff;
+    --status-good: #4cc38a;
+    --status-warning: #f0b056;
+    --status-critical: #f2747d;
+    --status-info: #b49cff;
+    --row-hover: #161922;
+    --head-band: #141720;
+    --island-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 12px 32px rgb(0 0 0 / 0.45);
+    --keycap-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 1px 2px rgb(0 0 0 / 0.4);
+    --run-shadow: inset 0 1px 0 rgb(255 255 255 / 0.28), 0 2px 8px rgb(94 106 210 / 0.45);
+    --pill-active-shadow: inset 0 1px 0 rgb(255 255 255 / 0.09), 0 1px 3px rgb(0 0 0 / 0.45);
+    --shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.08), 0 16px 40px rgb(0 0 0 / 0.6);
+    --shadow-panel: 0 0 0 1px rgb(255 255 255 / 0.08), 0 -8px 36px rgb(0 0 0 / 0.65);
+    --shadow-modal: 0 0 0 1px rgb(255 255 255 / 0.1), 0 28px 72px rgb(0 0 0 / 0.75);
+    --graticule: #7c88ff24;
+  }
+
+  :root[data-host-look='obsidian'] {
+    & body {
+      --radius-item: 6px;
+      --radius-pop: 10px;
+      --radius-panel: 12px;
+      --radius-dialog: 14px;
+      background: var(--ground);
+      font-feature-settings: 'cv11', 'ss03';
+      -webkit-font-smoothing: antialiased;
+    }
+    & body * { text-transform: none; letter-spacing: normal; }
+
+    /* Frameless outer shell + floating rounded workspace island */
+    & .topbar {
+      background: var(--ground);
+      border-bottom: none;
+      padding-block: var(--space-2);
+      gap: var(--space-3);
+    }
+    & .brand-name { font: 600 var(--text-md) var(--face-ui); letter-spacing: -0.02em; }
+    & .sidebar {
+      background: var(--ground);
+      border-right: none;
+      padding-inline: var(--space-2h);
+    }
+    & .content {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--island-radius);
+      box-shadow: var(--island-shadow);
+      margin: 0 var(--space-2h) var(--space-2h) 0;
+      overflow-x: hidden;
+    }
+    & .crumbs-host {
+      background: var(--head-band);
+      border-bottom: 1px solid var(--line);
+      padding-block: var(--space-1h);
+    }
+
+    /* Tactile specular micro-bevel controls */
+    & #query {
+      background: var(--field-fill);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      box-shadow: var(--keycap-shadow);
+      font-size: var(--text-base);
+    }
+    & #querybar > button {
+      background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, #ffffff), var(--accent));
+      color: var(--on-accent);
+      border: 1px solid color-mix(in srgb, var(--accent) 80%, #000000);
+      border-radius: var(--radius);
+      box-shadow: var(--run-shadow);
+      font: 500 var(--text-sm) var(--face-ui);
+    }
+    & button.ghost,
+    & .export-summary {
+      background: var(--control-fill);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      box-shadow: var(--keycap-shadow);
+      font: 500 var(--text-sm) var(--face-ui);
+    }
+
+    /* Sidebar elevated card selection */
+    & #table-filter {
+      background: var(--field-fill);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+    & #table-list button {
+      border: 1px solid transparent;
+      border-radius: var(--radius-item);
+      padding-block: var(--space-2);
+      font: 450 var(--text-sm) var(--face-ui);
+      color: var(--ink-muted);
+    }
+    & #table-list button[aria-current='true'] {
+      background: var(--surface);
+      border-color: var(--line);
+      box-shadow: var(--pill-active-shadow);
+      color: var(--ink);
+      font-weight: 600;
+    }
+    & #table-list .rows { font: var(--text-xs) var(--figures); color: var(--ink-subtle); }
+
+    /* Elevated pill tabs preserving full-width bar layout */
+    & .tabs {
+      border-bottom: 1px solid var(--line);
+      padding-block: var(--space-1h);
+      gap: var(--space-1);
+    }
+    & .tab {
+      border-bottom: none;
+      border-radius: var(--radius-item);
+      padding: var(--space-1) var(--space-3);
+      font: 500 var(--text-sm) var(--face-ui);
+      color: var(--ink-muted);
+    }
+    & .tab[aria-selected='true'] {
+      background: var(--raised);
+      color: var(--ink);
+      box-shadow: var(--pill-active-shadow);
+    }
+
+    /* Tightened 6px micro-bevel keycap record tools + capsule foreign-key badges */
+    & .panel > .record-heading {
+      font: 600 var(--text-lg) var(--face-ui);
+      letter-spacing: -0.015em;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+    }
+    & .panel > .record-heading > span {
+      flex: 1 1 0;
+      min-inline-size: 6rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    & .record-heading button { white-space: nowrap; }
+    & :is(.record-as-page, .record-layout, .record-delete, .record-heading button.ghost) {
+      block-size: 28px;
+      padding: 0 var(--space-2h);
+      font: 500 var(--text-xs) var(--face-ui);
+      border-radius: var(--radius-item);
+    }
+    & .ref-jump {
+      border-radius: 999px;
+      background: var(--accent-soft);
+      border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+      padding: 1px var(--space-2h);
+    }
+    & .ref-jump-value { font-family: var(--figures); color: var(--accent-ink); font-weight: 600; }
+
+    /* Rounded inset data grid + small-caps NULL + digit-aligned figures */
+    & .grid-inset .table-wrap,
+    & .record-children .table-wrap {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-pop);
+      background: var(--surface);
+      margin-inline: var(--space-3h);
+      padding-bottom: 0;
+    }
+    & thead th {
+      background: var(--head-band);
+      border-bottom: 1px solid var(--line);
+      font: 500 var(--text-xs) var(--face-ui);
+      color: var(--ink-muted);
+    }
+    & th.sorted { color: var(--accent-ink); background: var(--accent-soft); }
+    & :is(td.num, td.mono, td.reflink, .num-value, .date-value) { font-family: var(--figures); font-size: var(--text-sm); }
+    & td.null,
+    & .field dd.null {
+      font-family: var(--face-ui);
+      font-style: normal;
+      font-variant-caps: all-small-caps;
+      letter-spacing: 0.04em;
+      color: var(--ink-subtle);
+    }
+    & td.reflink { color: var(--accent-ink); font-weight: 500; }
+
+    /* Floating SQL workbench drawer */
+    & .sql-panel {
+      border-top-left-radius: var(--island-radius);
+      border-top-right-radius: var(--island-radius);
+      border: 1px solid var(--line-strong);
+      border-bottom: none;
+    }
+
+    /* Constellation dot ER diagram with rounded frosted cards */
+    & .diagram-viewport {
+      border-radius: var(--radius-pop);
+      border: 1px solid var(--line);
+      background-color: var(--head-band);
+      background-image: radial-gradient(circle at 1px 1px, var(--graticule) 1.25px, transparent 1.4px);
+      background-size: 20px 20px;
+    }
+    & .node > rect { rx: 10px; ry: 10px; stroke: var(--line-strong); }
+    & :is(.node-focus, .node.lit) > rect { stroke: var(--accent); stroke-width: 2px; }
+    & svg.has-focus .edge:not(.dim) { stroke: var(--accent); stroke-width: 2px; }
+
+    @media (hover: hover) {
+      & #table-list button:hover:not([aria-current='true']) { background: var(--raised); color: var(--ink); }
+      & .tab:hover:not([aria-selected='true']) { background: color-mix(in srgb, var(--raised) 55%, transparent); color: var(--ink); }
+      & tbody tr.clickable:hover { background: var(--row-hover); }
+      & .field:hover { background: var(--row-hover); }
+    }
+  }
+}

@@ -1,0 +1,268 @@
+/* Host look: Broadsheet. "Financial Times Editorial Serif & Data Journalism: warm salmon-cream newsprint, high-contrast serif masthead & titles, double newspaper rules, dotted index leaders, claret & teal ink." */
+@import '@mistriwork/kit/client/fonts/faces.css';
+
+@layer theme {
+  :root[data-host-look='broadsheet'] {
+    --ground: #f6e6d7;
+    --surface: #fff4ea;
+    --raised: #edd9c7;
+    --field-fill: #fffaf5;
+    --control-fill: #fff8f1;
+    --line: #e0cbb8;
+    --line-strong: #9e8876;
+    --line-control: #7d6858;
+    --ink: #1f1a17;
+    --ink-muted: #594d44;
+    --ink-subtle: #6b5d53;
+    --accent: #990f3d;
+    --accent-ink: #820931;
+    --on-accent: #fff8f2;
+    --accent-soft: #990f3d14;
+    --link: #0a6973;
+    --focus: #990f3d;
+    --status-good: #186b42;
+    --status-warning: #945208;
+    --status-critical: #b0232a;
+    --status-info: #284f9e;
+    --row-hover: #faeadd;
+    --head-band: #faebde;
+    --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, 'Book Antiqua', Georgia, serif;
+    --face-ui: Inter, 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+    --sans: var(--face-ui);
+    --data-face: var(--face-ui);
+    --figures: 'IBM Plex Mono', var(--code);
+    --radius: 2px;
+    --shadow-pop: 0 4px 16px rgb(45 30 20 / 0.12);
+    --shadow-panel: 0 -6px 28px rgb(45 30 20 / 0.15);
+    --shadow-modal: 0 20px 56px rgb(45 30 20 / 0.24);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root[data-host-look='broadsheet']:not([data-theme='light']) {
+      --ground: #161210;
+      --surface: #1e1916;
+      --raised: #29221e;
+      --field-fill: #181412;
+      --control-fill: #241e1a;
+      --line: #362d28;
+      --line-strong: #5c4e45;
+      --line-control: #857368;
+      --ink: #f5ebe1;
+      --ink-muted: #baa99b;
+      --ink-subtle: #a49385;
+      --accent: #e86b8c;
+      --accent-ink: #f58ca8;
+      --on-accent: #1c1014;
+      --accent-soft: #e86b8c21;
+      --link: #6ad2dc;
+      --focus: #e86b8c;
+      --status-good: #68c990;
+      --status-warning: #e8aa58;
+      --status-critical: #f27e79;
+      --status-info: #9eb4ff;
+      --row-hover: #26201c;
+      --head-band: #1a1513;
+      --shadow-pop: 0 0 0 1px rgb(0 0 0 / 0.45), 0 12px 32px rgb(0 0 0 / 0.55);
+      --shadow-panel: 0 0 0 1px rgb(0 0 0 / 0.45), 0 -8px 40px rgb(0 0 0 / 0.6);
+      --shadow-modal: 0 0 0 1px rgb(0 0 0 / 0.5), 0 28px 72px rgb(0 0 0 / 0.7);
+    }
+  }
+
+  :root[data-host-look='broadsheet'][data-theme='dark'] {
+    --ground: #161210;
+    --surface: #1e1916;
+    --raised: #29221e;
+    --field-fill: #181412;
+    --control-fill: #241e1a;
+    --line: #362d28;
+    --line-strong: #5c4e45;
+    --line-control: #857368;
+    --ink: #f5ebe1;
+    --ink-muted: #baa99b;
+    --ink-subtle: #a49385;
+    --accent: #e86b8c;
+    --accent-ink: #f58ca8;
+    --on-accent: #1c1014;
+    --accent-soft: #e86b8c21;
+    --link: #6ad2dc;
+    --focus: #e86b8c;
+    --status-good: #68c990;
+    --status-warning: #e8aa58;
+    --status-critical: #f27e79;
+    --status-info: #9eb4ff;
+    --row-hover: #26201c;
+    --head-band: #1a1513;
+    --shadow-pop: 0 0 0 1px rgb(0 0 0 / 0.45), 0 12px 32px rgb(0 0 0 / 0.55);
+    --shadow-panel: 0 0 0 1px rgb(0 0 0 / 0.45), 0 -8px 40px rgb(0 0 0 / 0.6);
+    --shadow-modal: 0 0 0 1px rgb(0 0 0 / 0.5), 0 28px 72px rgb(0 0 0 / 0.7);
+  }
+
+  :root[data-host-look='broadsheet'] {
+    & body {
+      --radius-item: 2px;
+      --radius-pop: 3px;
+      --radius-panel: 3px;
+      --radius-dialog: 4px;
+    }
+    & body * { text-transform: none; letter-spacing: normal; }
+
+    /* Newspaper double-rule masthead */
+    & .topbar {
+      background: var(--surface);
+      border-bottom: 3px double var(--ink);
+      padding-block: var(--space-2);
+    }
+    & .sql-panel {
+      background: var(--surface);
+      border-top: 3px double var(--ink);
+    }
+    & .brand-name {
+      font: 700 var(--text-lg) var(--serif);
+      letter-spacing: -0.015em;
+    }
+    & .sidebar {
+      background: var(--ground);
+      border-right: 1px solid var(--line-strong);
+    }
+    & .content { background: var(--surface); }
+    & .crumbs-host {
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+      font-family: var(--serif);
+      font-style: italic;
+    }
+
+    /* Editorial serif display headings & mastheads */
+    & .result-head .result-title,
+    & .panel > .record-heading > span,
+    & .diagram-title,
+    & .record-child-title,
+    & .landing-title {
+      font-family: var(--serif);
+      font-weight: 700;
+      font-size: var(--text-xl);
+      letter-spacing: -0.015em;
+    }
+
+    /* Claret editorial buttons + quiet hairline tools */
+    & #query {
+      background: var(--field-fill);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+    }
+    & #querybar > button {
+      background: var(--accent);
+      color: var(--on-accent);
+      border-radius: var(--radius);
+      font: 600 var(--text-sm) var(--serif);
+    }
+    & button.ghost,
+    & .export-summary {
+      background: var(--control-fill);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      font: 500 var(--text-xs) var(--face-ui);
+    }
+
+    /* Sidebar newspaper section index */
+    & #table-list button {
+      font: 500 var(--text-base) var(--serif);
+      border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+      border-radius: 0px;
+    }
+    & #table-list button[aria-current='true'] {
+      background: var(--accent-soft);
+      color: var(--accent-ink);
+      font-weight: 700;
+    }
+
+    /* Record particulars with classic printed dotted index leaders */
+    & .panel > .record-heading {
+      flex-wrap: wrap;
+      gap: var(--space-2);
+      border-bottom: 2px solid var(--ink);
+      padding-bottom: var(--space-2h);
+    }
+    & .panel > .record-heading > span {
+      flex: 1 1 0;
+      min-inline-size: 6rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    & .record-heading button { white-space: nowrap; }
+    & :is(.record-as-page, .record-layout, .record-delete, .record-heading button.ghost) {
+      block-size: 28px;
+      padding: 0 var(--space-2h);
+      border-radius: var(--radius);
+    }
+    & .ref-jump {
+      border-radius: var(--radius);
+      border: 1px solid var(--line-strong);
+      background: var(--field-fill);
+      padding: 0 var(--space-2);
+    }
+    & .ref-jump-value { color: var(--link); font-family: var(--figures); font-weight: 600; }
+    @media (min-width: 700px) {
+      & .field dt {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-2);
+        font-family: var(--serif);
+      }
+      & .field dt::after {
+        content: '';
+        flex: 1;
+        min-width: var(--space-4);
+        border-bottom: 1px dotted var(--line-strong);
+      }
+    }
+
+    /* Financial Times / Economist editorial table rules (2px top masthead, 0 vertical rules, true SQL casing) */
+    & .grid-inset .table-wrap,
+    & .record-children .table-wrap {
+      border-top: 2px solid var(--ink);
+      border-bottom: 1.5px solid var(--ink);
+      border-inline: none;
+      border-radius: 0px;
+      margin-inline: var(--space-4);
+      padding-bottom: 0;
+      background: transparent;
+    }
+    & thead th {
+      background: transparent;
+      border-bottom: 1px solid var(--ink);
+      border-right: none;
+      font: 700 var(--text-xs) var(--serif);
+      color: var(--ink);
+    }
+    & th.sorted { color: var(--accent-ink); border-bottom: 2px solid var(--accent); }
+    & td {
+      border-right: none;
+      border-bottom: 1px solid var(--line);
+      font-variant-numeric: tabular-nums;
+    }
+    & :is(td.num, .num-value) { font-family: var(--figures); font-size: var(--text-sm); }
+    & td.null,
+    & .field dd.null { font-family: var(--serif); font-style: italic; color: var(--ink-subtle); }
+    & td.reflink { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+
+    /* Engraved editorial chart ER diagram */
+    & .diagram-viewport {
+      background: var(--ground);
+      border-top: 2px solid var(--ink);
+      border-bottom: 1px solid var(--ink);
+      border-inline: none;
+      border-radius: 0px;
+    }
+    & .node > rect { rx: 2px; ry: 2px; stroke: var(--ink); stroke-width: 1.25px; }
+    & .node-head text { font-family: var(--serif); font-weight: 700; }
+    & :is(.node-focus, .node.lit) > rect { stroke: var(--accent); stroke-width: 2.25px; }
+    & svg.has-focus .edge:not(.dim) { stroke: var(--accent); stroke-width: 2px; }
+
+    @media (hover: hover) {
+      & tbody tr.clickable:hover { background: var(--row-hover); }
+      & .field:hover { background: var(--row-hover); }
+    }
+  }
+}
