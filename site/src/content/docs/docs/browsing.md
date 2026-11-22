@@ -5,16 +5,16 @@ description: Tables, records and the walk between them. Every foreign key is a l
 
 In tablewalk a foreign key is a place you can go: from an invoice to its customer, and from the customer back to all of its invoices.
 
-![A customer record: its fields, its invoices listed under them, and a Related rail counting every table that points at it](/shots/record.webp?v=2)
+![A customer record: its fields, its invoices listed under them, and a Related rail counting every table that points at it](/shots/record.webp?v=3)
 
 ## A table
 
-Click a table in the sidebar, or type its name in the query bar. The grid shows its rows, newest first where an indexed column allows it.
+Click a table in the sidebar, or type its name in the query bar. The grid shows its rows, newest first where an indexed column allows it, and the sidebar scope bar above the table list filters between **All**, **Tables** and **Views** (plus **Focused** when `--focus` is active).
 
-![The invoice table queried as "invoice total >= 500 sort total desc", with the query's parts as chips and quick filters above the grid](/shots/query.webp?v=2)
+![The invoice table queried as "invoice total >= 500 sort total desc", with the query's parts as chips and inline quick filters above the grid](/shots/query.webp?v=3)
 
-- **Quick filters** above the grid narrow by a column's common values. The parts of the current query show as chips, and **+ Save this filter** keeps it as a view.
-- **A column header** opens a menu: pin the column, sort, or filter by equals, greater than, less than, between, is empty or is not empty.
+- **Quick filters** sit in one compact inline strip above the grid (`Filters` in the tab bar folds or unfolds them to give more vertical room to rows). The parts of the current query show as chips, and **+ Save this filter** keeps it as a view.
+- **A column header** opens a menu: pin the column, sort (tinted in cobalt when active), or filter by equals, greater than, less than, between, is empty or is not empty.
 - **▸** at the start of a row expands it in place. Click the row to open its record.
 - **Export** downloads CSV or JSON for this page or for every matching row, or lets you choose the columns first. **Agent: Copy this position** copies the place you are in for a coding agent.
 - The pager sets how many rows a page holds.
@@ -34,6 +34,19 @@ On a record:
 ## Walking back
 
 Each step is kept on a trail, shown above the record, and **Back** returns along it. `Backspace` (or `⌘[`) steps back one place. Opened from a list, a record steps through that list with `j` and `k`, or with the arrows beside its name, in the list's order and past the end of its page. In the grid, `Space` glances at a row's record without leaving the list. All the keys are on [Keyboard](/docs/keyboard/).
+
+## Checking the shape, live health and join paths
+
+**Check the shape** (`⌘K`, the `···` menu, or **Check shape & perf** / **Join paths** on the home page) opens a four-tab diagnostics dialog over the active connection:
+
+![Checking the shape of the sample database: schema findings with inline CREATE INDEX statements and Open in SQL](/shots/shapecheck.webp?v=3)
+
+- **Schema & perf** runs the static catalog `lint`: keyless tables, unindexed foreign keys, references without an `ON DELETE` rule, and timestamps without a zone — with ready-to-run `CREATE INDEX` statements you can copy or **Open in SQL**.
+- **Index & scan health** inspects live database statistics (`pg_stat_user_tables` and `pg_stat_user_indexes` on PostgreSQL; `PRAGMA index_list`, `EXPLAIN QUERY PLAN` and `sqlite_stat1` on SQLite) to flag sequential-scan hotspots, unused or duplicate indexes, table bloat and stale planner stats.
+- **Data anomalies** runs bounded count-only checks for inverted timestamps (`shipped_at < created_at`), dangling soft-delete lifecycles, and nullable foreign keys that are almost always populated except for outlier rows.
+- **Join paths** finds the shortest `to-one` and `to-many` routes between any two tables, marks whether each hop is indexed, and generates a `SELECT … JOIN …` statement you can copy or **Open in SQL**.
+
+**Find a value** (`⌘K` or the `···` menu) sweeps text columns — and UUID columns when the input is a UUID — across every readable table, grouped by table with links straight to matching records.
 
 ## Addresses
 

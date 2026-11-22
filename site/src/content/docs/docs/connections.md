@@ -17,7 +17,7 @@ A `tablewalk.json` names the databases tablewalk can open, and how far each one 
 
 tablewalk looks for `./tablewalk.json`, then `./.tablewalk.json`, then `$XDG_CONFIG_HOME/tablewalk/connections.json`. `--config <path>` names a file, and `--no-config` ignores them all. A relative path in the file is read from the file's folder.
 
-Connections appear in the picker at the top of the page, and each opens when it is first used, so naming eight databases does not dial eight databases. The browser is sent a name, a dialect and a redacted address, never a password.
+Connections appear in the picker at the top of the page, and each opens when it is first used, so naming eight databases does not dial eight databases. Connections that share a logical `database` (declared with `"database"` and `"env"`, or inferred from names like `app-local`, `app_staging`, `app (prod)`) form a segmented environment switcher in the top bar that preserves your current table, query or record as you switch tiers, plus **Compare envs** in the SQL editor and **All envs** fan-out in the Agent console. The browser is sent a name, a dialect and a redacted address, never a password.
 
 ## A connection's fields
 

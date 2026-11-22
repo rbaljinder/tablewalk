@@ -9,9 +9,9 @@ The query bar takes a table name and then, in plain words, what you want from it
 invoice total > 500 and customer_id.country_code.name = Australia sort total desc
 ```
 
-Every query compiles to one SQL statement, which runs read-only and with a row limit. **SQL** in the top bar shows the statement it compiled to. Press `?` in the app for this grammar with examples built from your own tables, and `Tab` or `Ctrl+Space` in the bar to complete a table, column or keyword.
+Every query compiles to one SQL statement, which runs read-only and with a row limit. **SQL** in the top bar shows the statement it compiled to. Press `?` in the app for this grammar with examples built from your own tables, and `Tab` or `Ctrl+Space` in the bar to complete a table, column, foreign-key dot-path (`customer_id.` completes columns on `customer`), `CHECK` or enum value after `=` / `in (`, or date window.
 
-![The query bar with a filter on invoices, and the SQL panel showing the statement it compiled to](/shots/sql.webp?v=2)
+![The query bar with a filter on invoices, and the SQL panel showing the statement it compiled to](/shots/sql.webp?v=3)
 
 ## Filters
 
@@ -105,4 +105,4 @@ invoice sum total by customer_id.country_code.name as country
 
 ## When it cannot say it
 
-The language covers filtering, walking and counting. For window functions, CTEs or self-joins, open the SQL editor (`⌘⇧↵`). **Edit** in the SQL panel starts it from the statement your query compiled to. A statement runs read-only, the same as a query. See [Writing](/docs/writing/) for the one exception.
+The language covers filtering, walking and counting. For window functions, CTEs or self-joins, open the drag-resizable SQL editor (`⌘⇧↵`). **Edit** in the SQL panel starts it from the statement your query compiled to. When sibling environments (`local`, `staging`, `prod`) are configured for the active database, **Compare envs** runs a read-only `SELECT` across all sibling environments in parallel and renders per-environment result tabs with row counts and latency. A statement runs read-only, the same as a query. See [Writing](/docs/writing/) for the one exception.
