@@ -755,6 +755,29 @@ export function ShapeCheckDialog({ onClose, initialTab = 'lint' }: { onClose: ()
                 <p className="find-note">{say('driftSummary', { count: diffTables.length, other: compareLabel })}</p>
                 {diffTables.map((td) => {
                   const meta = findTable(td.table) as TableMeta | undefined;
+                  const qualified = qualifiedTableName(meta, td.table);
+                  const ddlLines: string[] = [];
+                  if (!td.onlyIn && meta) {
+                    for (const colName of td.columnsOnlyLeft ?? []) {
+                      const col = meta.columns?.find((c) => c.name === colName);
+                      if (col) {
+                        ddlLines.push(
+                          `ALTER TABLE ${qualified} ADD COLUMN ${quoteIdent(col.name)} ${col.type || 'TEXT'}${!col.nullable ? ' NOT NULL' : ''}${col.default ? ` DEFAULT ${col.default}` : ''};`,
+                        );
+                      }
+                    }
+                    for (const ch of td.changed ?? []) {
+                      if (ch.what === 'nullable') {
+                        ddlLines.push(
+                          `ALTER TABLE ${qualified} ALTER COLUMN ${quoteIdent(ch.column)} ${ch.left === 'false' ? 'SET NOT NULL' : 'DROP NOT NULL'};`,
+                        );
+                      } else if (ch.what === 'type') {
+                        ddlLines.push(`ALTER TABLE ${qualified} ALTER COLUMN ${quoteIdent(ch.column)} TYPE ${ch.left};`);
+                      }
+                    }
+                  }
+                  const driftSql = ddlLines.length > 0 ? ddlLines.join('\n') : null;
+                  const driftKey = `drift:${td.table}`;
                   return (
                     <div key={td.table} className="shape-check-group">
                       <button
@@ -797,6 +820,19 @@ export function ShapeCheckDialog({ onClose, initialTab = 'lint' }: { onClose: ()
                             {say('deleteRuleDiff', { key: dr.key, left: dr.left, right: dr.right })}
                           </p>
                         ))}
+                        {driftSql ? (
+                          <div className="shape-check-fix">
+                            <pre>{driftSql}</pre>
+                            <div className="shape-check-btn-group">
+                              <button type="button" className="shape-check-inline-btn" onClick={() => void copySql(driftKey, driftSql)}>
+                                {copiedKey === driftKey ? say('copiedMigrationSql') : say('copyMigrationSql')}
+                              </button>
+                              <button type="button" className="shape-check-inline-btn" onClick={() => openSqlInEditor(driftSql)}>
+                                {say('verifyInSql')}
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   );

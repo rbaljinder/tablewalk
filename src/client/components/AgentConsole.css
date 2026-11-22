@@ -6,6 +6,8 @@
     min-inline-size: 14.5rem;
     max-inline-size: 16.5rem;
     flex: 0 0 15.5rem;
+    max-block-size: min(72dvh, 44rem);
+    overflow-y: auto;
   }
 
   .agent-tool-search {

@@ -14,10 +14,12 @@ Click a table in the sidebar, or type its name in the query bar. The grid shows 
 ![The invoice table queried as "invoice total >= 500 sort total desc", with the query's parts as chips and inline quick filters above the grid](/shots/query.webp?v=3)
 
 - **Quick filters** sit in one compact inline strip above the grid (`Filters` in the tab bar folds or unfolds them to give more vertical room to rows). The parts of the current query show as chips, and **+ Save this filter** keeps it as a view.
-- **A column header** opens a menu: pin the column, sort (tinted in cobalt when active), filter by equals, greater than, less than, between, is empty or is not empty, open **Profile column…** (a floating popover with null share, distinct count, min/max range, and clickable top values that add an equality filter), or — on a single-column foreign key — pick **Show from `<table>`** (`+ <fk>.<col>`) to pull a referenced column straight into the grid. Columns masked by `"redact": true` or `redactColumns` carry a `masked` pill in the header.
+- **A column header** opens a menu: pin the column, sort (tinted in cobalt when active), filter by equals, greater than, less than, between, is empty or is not empty, open **Profile column…** (a floating popover with null share, distinct count, min/max range, and clickable top values that add an equality filter), open **Change impact…** (null count, index status, incoming foreign keys with `ON DELETE` rules, and migration consequences before altering or dropping), or — on a single-column foreign key — pick **Show from `<table>`** (`+ <fk>.<col>`) to pull a referenced column straight into the grid. Columns masked by `"redact": true` or `redactColumns` carry a `masked` pill in the header.
 - **▸** at the start of a row expands it in place. Click the row to open its record.
 - **Export** downloads CSV or JSON for this page or for every matching row, or lets you choose the columns first. **Agent: Copy this position** copies the place you are in for a coding agent.
 - The pager sets how many rows a page holds.
+
+![Profiling the status column on invoice: null percentage, distinct values, and clickable top value chips](/shots/profile.webp?v=4)
 
 A table has tabs. **Rows** is the grid. **Definition** shows the table's stored DDL as the database holds it. **Diagram** draws the table with the tables it points at and the ones that point at it.
 
@@ -29,6 +31,8 @@ On a record:
 
 - **Layout** arranges the record: which sections show, in what order, and how many related rows each list holds. See [Pages and layouts](/docs/pages/).
 - **As a page →** opens the record as a [page](/docs/pages/), with its related lists as tabs.
+- **Extract fixture…** walks foreign keys from this record (and optionally its child rows) in topological insert order, with a **Mask PII** toggle (`redact: true`), switching between ready-to-paste **SQL INSERTs** and **`insert_graph` JSON**.
+- **Compare envs** (shown when sibling environments exist for the active database) reads the same primary key across every tier in parallel and renders a side-by-side field matrix highlighting missing rows and differing cell values.
 - **Copy for agent** copies a short Markdown brief: the row, its table's columns, the path you took to it, and the [MCP](/docs/mcp/) call that reads it again.
 
 ## Walking back
@@ -37,14 +41,15 @@ Each step is kept on a trail, shown above the record, and **Back** returns along
 
 ## Checking the shape, live health and join paths
 
-**Check the shape** (`⌘K`, the `···` menu, or **Check shape & perf** / **Join paths** on the home page) opens a four-tab diagnostics dialog over the active connection:
+**Check the shape** (`⌘K`, the `···` menu, or **Check shape & perf** / **Join paths** on the home page) opens a diagnostics dialog over the active connection:
 
 ![Checking the shape of the sample database: schema findings with inline CREATE INDEX statements and Open in SQL](/shots/shapecheck.webp?v=3)
 
 - **Schema & perf** runs the static catalog `lint`: keyless tables, unindexed foreign keys, references without an `ON DELETE` rule, and timestamps without a zone — with ready-to-run `CREATE INDEX` statements you can copy or **Open in SQL**.
 - **Index & scan health** inspects live database statistics (`pg_stat_user_tables`, `pg_stat_user_indexes`, `pg_stat_activity`, `pg_locks` and `pg_blocking_pids` on PostgreSQL; `PRAGMA index_list`, `EXPLAIN QUERY PLAN` and `sqlite_stat1` on SQLite) to flag sequential-scan hotspots, unused or duplicate indexes, table bloat, stale planner stats, blocked lock waiters and long-running or idle-in-transaction sessions.
-- **Data anomalies** runs bounded count-only checks for inverted timestamps (`shipped_at < created_at`), dangling soft-delete lifecycles, and nullable foreign keys that are almost always populated except for outlier rows.
+- **Data anomalies** runs bounded count-only checks for inverted timestamps (`shipped_at < created_at`), dangling soft-delete lifecycles, negative unsigned business measures (`total`, `quantity < 0`), future-dated audit timestamps (`created_at > tomorrow`), and nullable foreign keys that are almost always populated except for outlier rows.
 - **Join paths** finds the shortest `to-one` and `to-many` routes between any two tables, marks whether each hop is indexed, and generates a `SELECT … JOIN …` statement you can copy or **Open in SQL**.
+- **Environment drift** (when sibling environments exist) compares the active schema against any sibling tier (`staging`, `prod`) and generates directional draft `ALTER TABLE` migration SQL you can copy or **Verify in SQL**.
 
 **Find a value** (`⌘K` or the `···` menu) sweeps text columns — and UUID columns when the input is a UUID — across every readable table, grouped by table with links straight to matching records.
 

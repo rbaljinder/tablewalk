@@ -323,3 +323,104 @@ export async function lintConnection(given: string, failOn: string | undefined, 
     await registry.closeAll();
   }
 }
+
+/** `--verify-ddl <path|->`: dry-run candidate DDL against an isolated SQLite copy or rolled-back PostgreSQL transaction. */
+export async function verifyDdlCli(sourcePath: string, options: { format?: string; failOn?: string }, registry: Registry): Promise<void> {
+  const [{ readFileSync }, { verifyDdl }] = await Promise.all([import('node:fs'), import('../verifyDdl.js')]);
+  try {
+    const fmt = (options.format ?? 'md').toLowerCase();
+    if (fmt !== 'json' && fmt !== 'md' && fmt !== 'markdown' && fmt !== 'text') {
+      console.error(`tablewalk: --verify-ddl supports --format json or md — not "${options.format}".`);
+      process.exitCode = 2;
+      return;
+    }
+    if (options.failOn) {
+      const levels = ['high', 'medium', 'low'];
+      if (!levels.includes(options.failOn.toLowerCase())) {
+        console.error(`--fail-on takes high, medium or low — not "${options.failOn}".`);
+        process.exitCode = 1;
+        return;
+      }
+    }
+    const sqlText = sourcePath === '-' || sourcePath === '/dev/stdin' ? readFileSync(0, 'utf8') : readFileSync(sourcePath, 'utf8');
+    const connId = registry.active!;
+    const { schema } = await registry.open(connId);
+    const result = (await verifyDdl(registry, connId, schema, sqlText, { trusted: true })) as {
+      valid: boolean;
+      dialect?: string;
+      statements?: number;
+      statement?: string;
+      errors?: string[];
+      same?: boolean;
+      diff?: Array<{
+        table: string;
+        onlyIn?: 'left' | 'right';
+        columnsOnlyLeft?: string[];
+        columnsOnlyRight?: string[];
+        changed?: Array<{ column: string; what: string; left: string; right: string }>;
+      }>;
+      introducedLint?: {
+        findings?: Array<{ rule: string; severity: string; table: string; message: string }>;
+      };
+    };
+
+    const findings = result.introducedLint?.findings ?? [];
+    let failedLint = false;
+    if (result.valid && options.failOn && findings.length) {
+      const levels = ['high', 'medium', 'low'];
+      const worst = levels.slice(0, levels.indexOf(options.failOn.toLowerCase()) + 1);
+      if (findings.some((f) => worst.includes(f.severity))) {
+        failedLint = true;
+      }
+    }
+    if (!result.valid || failedLint) {
+      process.exitCode = 1;
+    }
+
+    if (fmt === 'json') {
+      process.stdout.write(`${JSON.stringify({ connection: connId, ...result }, null, 2)}\n`);
+      return;
+    }
+
+    const lines: string[] = [];
+    if (!result.valid) {
+      lines.push(`FAIL  DDL verification failed on ${connId} (${result.dialect ?? schema.dialect}):`);
+      lines.push(`  ${result.errors?.[0] ?? 'Rejected'}`);
+      if (result.statement) lines.push(`  Statement: ${result.statement}`);
+      process.stdout.write(`${lines.join('\n')}\n`);
+      return;
+    }
+
+    const stmtCount = result.statements ?? 0;
+    lines.push(
+      `ok    Verified ${stmtCount} DDL statement${stmtCount === 1 ? '' : 's'} on ${connId} (${result.dialect ?? schema.dialect}, dry run rolled back).`,
+    );
+    if (result.same || !result.diff?.length) {
+      lines.push('  Schema diff: no structural catalog changes.');
+    } else {
+      for (const td of result.diff) {
+        if (td.onlyIn === 'right') lines.push(`  + table ${td.table}`);
+        else if (td.onlyIn === 'left') lines.push(`  - table ${td.table}`);
+        else {
+          if (td.columnsOnlyRight?.length) lines.push(`  + ${td.table}: added column(s) ${td.columnsOnlyRight.join(', ')}`);
+          if (td.columnsOnlyLeft?.length) lines.push(`  - ${td.table}: dropped column(s) ${td.columnsOnlyLeft.join(', ')}`);
+          for (const ch of td.changed ?? []) {
+            lines.push(`  ~ ${td.table}.${ch.column}: ${ch.what} ${ch.left} -> ${ch.right}`);
+          }
+        }
+      }
+    }
+    if (findings.length) {
+      lines.push(`  New lint findings (${findings.length}):`);
+      for (const f of findings) {
+        lines.push(`    [${f.severity}] ${f.table} (${f.rule}): ${f.message}`);
+      }
+    }
+    process.stdout.write(`${lines.join('\n')}\n`);
+  } catch (err) {
+    console.error(`tablewalk: ${startupReport(err)}`);
+    process.exitCode = 1;
+  } finally {
+    await registry.closeAll();
+  }
+}

@@ -11,7 +11,7 @@ see ([jump to setup](#for-coding-agents-mcp)).
 
 ```bash
 npx tablewalk --demo          # build a sample database and open it — an instant try
-npx tablewalk mydata.sqlite   # or your own: SQLite or Postgres
+npx tablewalk mydata.sqlite   # or your own: SQLite, Postgres, .sql dump, or .csv/.ndjson folder
 npx tablewalk                 # or nothing, and the page asks for a connection
 ```
 
@@ -19,7 +19,7 @@ npx tablewalk                 # or nothing, and the page asks for a connection
 > Until the browser-only release is published, `npx tablewalk@next` is the current build.
 
 No config, no build step, no schema to define first — it reads the catalog on
-connect. **Read-only** until you turn editing on, per connection. Runs from
+connect (and hydrates `.sql` dumps or `.csv` / `.tsv` / `.ndjson` files and folders into an ephemeral read-only SQLite database with inferred keys and `<stem>_id` foreign keys). **Read-only** until you turn editing on, per connection. Runs from
 `npx`, a [Docker image](#docker-and-a-desktop-app), or a desktop app. It needs
 Node 24.22.1 or newer (`engines` in `package.json`); an older Node is refused at
 start with one line that says so.
@@ -28,11 +28,12 @@ start with one line that says so.
 that takes a URL or its parts, tests it before keeping it, and reads the
 password from an environment variable or the keychain rather than the string.
 The print-and-exit commands need a target, though — there is nothing for
-`--export`, `--lint`, `--diff` or `--mcp` to read without one:
+`--export`, `--lint`, `--verify-ddl`, `--diff` or `--mcp` to read without one:
 
 ```bash
 npx tablewalk mydata.sqlite --export md >> CLAUDE.md    # the schema, as a committed brief
 npx tablewalk postgres://… --lint --fail-on high         # what the shape costs, for CI
+npx tablewalk mydata.sqlite --verify-ddl migration.sql   # dry-run DDL diff + new lint check
 npx tablewalk --config ./tablewalk.json --diff staging   # is staging the same shape?
 ```
 
@@ -137,7 +138,10 @@ Two things fall out of that for free:
 
 Click a row and you get a record page: the fields, and — in a rail beside
 them — every table that points at this row, counted, ranked by how much there
-is to read. An empty relationship is shown as a zero rather than hidden,
+is to read, plus 1-click **Extract fixture…** (walking foreign keys into
+ready-to-paste `INSERT` statements or `insert_graph` JSON with optional PII
+masking) and **Compare envs** (diffing the row side-by-side across sibling
+environments). An empty relationship is shown as a zero rather than hidden,
 because "nothing points here through this" is an answer, and a rail that
 quietly dropped it could not be trusted to be the whole list.
 
@@ -173,15 +177,17 @@ its name and the home screen offers it — along with the records you were last
 looking at, and every page there is.
 
 **Check the shape** (⌘K, the `···` menu, or **Check shape & perf** / **Join paths**
-on the home page) opens a four-tab diagnostics cockpit over the active
+on the home page) opens a diagnostics cockpit over the active
 connection: static **Schema & perf** (`lint` — keyless tables, unindexed
 foreign keys, missing `ON DELETE` rules, naive timestamps), live **Index & scan
 health** (`perf` — sequential-scan hotspots, unused or duplicate indexes, table
-bloat and stale planner stats), bounded **Data anomalies** (`anomalies` —
-temporal inversions, dangling soft-delete lifecycles, almost-always-populated
-nullable FKs), and **Join paths** (`path` — shortest `to-one` and `to-many`
-routes between any two tables), each with ready-to-run `CREATE INDEX` or
-`SELECT … JOIN …` statements you can copy or **Open in SQL**.
+bloat, stale planner stats, and lock/session contention), bounded **Data anomalies** (`anomalies` —
+temporal inversions, dangling soft-delete lifecycles, negative unsigned measures,
+future-dated audit timestamps, and almost-always-populated
+nullable FKs), **Join paths** (`path` — shortest `to-one` and `to-many`
+routes between any two tables), and **Environment drift** (`diff` across sibling
+tiers with directional draft `ALTER TABLE` migration SQL), each with ready-to-run
+statements you can copy or open/verify in SQL.
 
 **Find a value** (⌘K, or the `···` menu) answers the question you have when a
 string arrives from somewhere else and you cannot yet name the table it
@@ -237,7 +243,7 @@ in the UI, and says what it cost in rows and milliseconds.
 | `profile` | what a column actually holds: null share, distinct count, range, the values that repeat |
 | `lint` | what the shape will cost: keyless tables, unindexed references, naive timestamps |
 | `perf` | live index, scan, bloat and planner-statistics diagnostics (`pg_stat_user_tables` / `pg_stat_user_indexes` on PostgreSQL; `PRAGMA index_list`, `EXPLAIN QUERY PLAN` and `sqlite_stat1` on SQLite) with ready-to-run remediation SQL |
-| `anomalies` | data-level counterpart to `lint`: temporal inversions, dangling soft-delete lifecycles, and nullable FKs that are >=95% populated with null outliers (counts only, works on `"rows": false` too) |
+| `anomalies` | data-level counterpart to `lint`: temporal inversions, dangling soft-delete lifecycles, negative unsigned measures (`< 0`), future-dated audit timestamps (`> tomorrow`), and nullable FKs that are >=95% populated with null outliers (counts only, works on `"rows": false` too) |
 | `change_impact` | what breaks if you change a table or column — asked *before* the migration is written |
 | `verify_ddl` | runs candidate DDL in a disposable copy (SQLite) or `BEGIN … ROLLBACK` (writable Postgres) and returns the schema `diff` and newly introduced `lint` findings without altering the database |
 | `diff` | whether two connections or environments (`{"from": "@local", "to": "@prod"}`) are still the same shape |
@@ -703,15 +709,20 @@ mistri --app <dir>            an App, served: the App framework's, npx @mistriwo
                               calls over one session, print NDJSON, and exit
       --all-envs              with --query, --call or --batch: run a read-only
                               call across every environment in parallel
-      --format <fmt>          with --query, --call, --batch or --check: json,
-                              ndjson, tsv or md
+      --format <fmt>          with --query, --call, --batch, --check or
+                              --verify-ddl: json, ndjson, tsv or md
       --check                 dial configured connections, verify credentials
                               and guardrails, print readiness, and exit
+      --verify-ddl <path|->   dry-run candidate DDL (.sql file or - for stdin)
+                              in an isolated SQLite copy or rolled-back
+                              PostgreSQL transaction, print schema diff and new
+                              lint findings, and exit
       --export <fmt>          print the schema as md, mermaid, json or agent,
                               then exit (an App's brief, types, openapi and
                               asyncapi are mistri's)
       --lint [fmt]            report what the shape will cost, then exit
-      --fail-on <sev>         with --lint, exit non-zero at this severity; for CI
+      --fail-on <sev>         with --lint or --verify-ddl, exit non-zero at
+                              this severity; for CI
       --diff <conn>           compare shapes with this connection, then exit
   -h, --help                  print the short help and stop; --help all, this
   -v, --version               print the version and stop

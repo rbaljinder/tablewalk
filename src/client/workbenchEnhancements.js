@@ -26,6 +26,8 @@ import {
 } from '@mistriwork/kit/client/core.js';
 import { canUseDatabaseTools } from '@mistriwork/kit/client/connectionScope.js';
 import { formatNumber } from '@mistriwork/kit/client/locale.js';
+import { menuMode } from '@mistriwork/kit/client/menu.js';
+import { addPaletteSource } from '@mistriwork/kit/client/palette.js';
 import { shell } from '@mistriwork/kit/client/shellMode.js';
 import {
   addHostListener,
@@ -45,6 +47,25 @@ const FOLLOW_AGENT_KEY = 'mistri.followAgent.v1';
 const SAVED_FILTERS_KEY = 'mistri.views.v1';
 const COMPOSER_VIEWS_KEY = 'mistri.composer.v1';
 const PINS_KEY = 'mistri.pins.v1';
+const RECENT_QUERIES_KEY = 'mistri.recentQueries.v1';
+const MAX_RECENT_QUERIES = 15;
+
+/**
+ * Record a multi-token query or breakdown in a bounded per-database ring (up to 15),
+ * ignoring empty strings and bare single-token table names.
+ * @param {Record<string, string[]>} storeObj
+ * @param {string} key
+ * @param {string} rawQuery
+ */
+export function recordRecentQueryInStore(storeObj, key, rawQuery) {
+  const q = String(rawQuery ?? '')
+    .trim()
+    .replace(/\s+/g, ' ');
+  if (!q || !/\s/.test(q)) return false;
+  const prev = Array.isArray(storeObj[key]) ? storeObj[key].filter((x) => typeof x === 'string') : [];
+  storeObj[key] = [q, ...prev.filter((x) => x.toLowerCase() !== q.toLowerCase())].slice(0, MAX_RECENT_QUERIES);
+  return true;
+}
 
 /** @param {string} connection */
 function siblingGroupFor(connection) {
@@ -219,11 +240,55 @@ function appendEqualityFilter(queryText, tableId, condition) {
  *   openAgentConsole?: () => void;
  *   openSql?: (sql?: string) => void;
  *   runQueryText?: (raw: string) => void;
+ *   registerQueryObserver?: (fn: (raw: string) => void) => void;
  * }} actions
  */
-export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, runQueryText }) {
+export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, runQueryText, registerQueryObserver }) {
   let filtersCollapsed = Boolean(loadJson(FILTER_COLLAPSED_KEY, false));
   shellBody().classList.toggle('wb-filters-collapsed', filtersCollapsed);
+
+  /* Recent multi-token queries & breakdowns in ⌘K, shared across sibling environments. */
+  registerQueryObserver?.((raw) => {
+    if (!canUseDatabaseTools()) return;
+    const connId = state.activeConnection ?? 'default';
+    const { groupKey } = siblingGroupFor(connId);
+    const store = /** @type {Record<string, string[]>} */ (loadJson(RECENT_QUERIES_KEY, {}));
+    if (recordRecentQueryInStore(store, groupKey ?? connId, raw)) {
+      saveJson(RECENT_QUERIES_KEY, store);
+    }
+  });
+
+  addPaletteSource('places', () => {
+    if (menuMode() !== 'workbench' || shell().inApp() || !canUseDatabaseTools() || !runQueryText) return [];
+    const connId = state.activeConnection ?? 'default';
+    const { groupKey, siblingIds } = siblingGroupFor(connId);
+    const store = /** @type {Record<string, string[]>} */ (loadJson(RECENT_QUERIES_KEY, {}));
+    const seen = new Set();
+    const queries = [];
+    for (const k of [groupKey, connId, ...siblingIds]) {
+      if (!k || !Array.isArray(store[k])) continue;
+      for (const q of store[k]) {
+        if (typeof q !== 'string') continue;
+        const low = q.toLowerCase();
+        if (seen.has(low)) continue;
+        seen.add(low);
+        queries.push(q);
+        if (queries.length >= MAX_RECENT_QUERIES) break;
+      }
+      if (queries.length >= MAX_RECENT_QUERIES) break;
+    }
+    return queries.map((q) => ({
+      kind: 'filter',
+      label: q,
+      search: q,
+      detail: say('recentQueryDetail'),
+      run: () => {
+        const qInput = /** @type {HTMLInputElement | null} */ (shellById('query'));
+        if (qInput) qInput.value = q;
+        runQueryText(q);
+      },
+    }));
+  });
 
   /** @type {'all' | 'tables' | 'views'} */
   let sidebarKind = 'all';
@@ -337,10 +402,12 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
     });
   }
 
-  /* ---------- Inline Column Profile Popover ---------- */
+  /* ---------- Inline Column Profile & Change Impact Popovers + Record Modals ---------- */
 
   const closeProfilePopover = () => {
     shellById('wb-col-profile-popover')?.remove();
+    shellById('wb-col-impact-popover')?.remove();
+    shellById('wb-record-modal')?.remove();
   };
 
   /**
@@ -382,14 +449,13 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
       arguments: {
         ...(state.activeConnection ? { connection: state.activeConnection } : {}),
         table: tableId,
-        columns: [colName],
       },
     })
       .then((reply) => {
         if (!pop.isConnected) return;
         const sc = reply?.structuredContent ?? {};
         const cols = Array.isArray(sc.columns) ? sc.columns : [];
-        const info = cols.find((c) => c?.name === colName) ?? cols[0];
+        const info = cols.find((c) => (c?.column ?? c?.name) === colName);
         if (reply?.isError || !info) {
           body.textContent = reply?.content?.[0]?.text ?? say('profileFailed');
           return;
@@ -397,14 +463,16 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
         body.replaceChildren();
         const metrics = document.createElement('div');
         metrics.className = 'wb-col-profile-metrics';
-        const rowCount = Number(sc.rowCount ?? info.total ?? 0);
+        const rowCount = Number(sc.rows ?? sc.rowCount ?? info.total ?? 0);
         const nullCount = Number(info.nullCount ?? 0);
         const nullPct =
-          typeof info.nullFraction === 'number'
-            ? Math.round(info.nullFraction * 100)
-            : rowCount > 0
-              ? Math.round((nullCount / rowCount) * 100)
-              : 0;
+          typeof info.nullFrac === 'number'
+            ? Math.round(info.nullFrac * 100)
+            : typeof info.nullFraction === 'number'
+              ? Math.round(info.nullFraction * 100)
+              : rowCount > 0
+                ? Math.round((nullCount / rowCount) * 100)
+                : 0;
 
         const addMetric = (/** @type {string} */ text) => {
           const span = document.createElement('span');
@@ -416,12 +484,18 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
         if (info.distinct !== undefined && info.distinct !== null) {
           addMetric(say('profileDistinct', { count: formatNumber(Number(info.distinct)) }));
         }
-        if (info.min !== undefined && info.min !== null && info.max !== undefined && info.max !== null) {
+        if (
+          info.min !== undefined &&
+          info.min !== null &&
+          info.max !== undefined &&
+          info.max !== null &&
+          String(info.min) !== String(info.max)
+        ) {
           addMetric(say('profileRange', { min: String(info.min), max: String(info.max) }));
         }
         body.append(metrics);
 
-        const top = Array.isArray(info.topValues ?? info.top) ? (info.topValues ?? info.top) : [];
+        const top = Array.isArray(info.common ?? info.topValues ?? info.top) ? (info.common ?? info.topValues ?? info.top) : [];
         if (top.length > 0 && runQueryText) {
           const topLabel = document.createElement('div');
           topLabel.className = 'wb-col-profile-top-label';
@@ -438,10 +512,16 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
             const vSpan = document.createElement('span');
             vSpan.textContent = valText.length > 28 ? `${valText.slice(0, 28)}…` : valText;
             chip.append(vSpan);
-            if (item?.count !== undefined) {
+            const estCount =
+              item?.count !== undefined
+                ? Number(item.count)
+                : typeof item?.frac === 'number' && rowCount > 0
+                  ? Math.max(1, Math.round(item.frac * rowCount))
+                  : undefined;
+            if (estCount !== undefined) {
               const cSpan = document.createElement('span');
               cSpan.className = 'wb-col-profile-chip-count';
-              cSpan.textContent = formatNumber(Number(item.count));
+              cSpan.textContent = formatNumber(estCount);
               chip.append(cSpan);
             }
             chip.addEventListener('click', () => {
@@ -461,19 +541,458 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
       });
   };
 
+  /**
+   * @param {HTMLElement} anchorEl
+   * @param {string} tableId
+   * @param {string} colName
+   */
+  const openChangeImpact = (anchorEl, tableId, colName) => {
+    closeProfilePopover();
+    const box = viewportBox(anchorEl);
+    const pop = document.createElement('div');
+    pop.id = 'wb-col-impact-popover';
+    pop.className = 'wb-col-profile-popover';
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-label', colName);
+    pop.style.top = `${Math.max(8, Math.round(box.bottom + 6))}px`;
+    pop.style.left = `${Math.max(8, Math.min(Math.round(box.left), Math.max(8, viewportSize().width - 370)))}px`;
+
+    const head = document.createElement('div');
+    head.className = 'wb-col-profile-head';
+    const title = document.createElement('span');
+    title.className = 'wb-col-profile-title';
+    title.textContent = `${tableId}.${colName}`;
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'wb-col-profile-close';
+    closeBtn.textContent = say('profileClose');
+    closeBtn.addEventListener('click', closeProfilePopover);
+    head.append(title, closeBtn);
+
+    const body = document.createElement('div');
+    body.textContent = say('impactLoading', { column: colName });
+    pop.append(head, body);
+    (portalRoot() ?? shellBody()).append(pop);
+
+    void api('/api/agent/call', {
+      name: 'change_impact',
+      arguments: {
+        ...(state.activeConnection ? { connection: state.activeConnection } : {}),
+        table: tableId,
+        column: colName,
+      },
+    })
+      .then((reply) => {
+        if (!pop.isConnected) return;
+        const sc = reply?.structuredContent;
+        if (reply?.isError || !sc) {
+          body.textContent = reply?.content?.[0]?.text ?? say('impactFailed');
+          return;
+        }
+        body.replaceChildren();
+        const metrics = document.createElement('div');
+        metrics.className = 'wb-col-profile-metrics';
+        const addMetric = (/** @type {string} */ text) => {
+          const span = document.createElement('span');
+          span.className = 'wb-col-profile-metric';
+          span.textContent = text;
+          metrics.append(span);
+        };
+        if (sc.rows !== undefined && sc.rows !== null) {
+          addMetric(say('impactRowsMetric', { count: formatNumber(Number(sc.rows)) }));
+        }
+        const facts = sc.columnFacts ?? {};
+        if (facts.nulls !== undefined && facts.nulls !== null) {
+          addMetric(say('impactNullsMetric', { count: formatNumber(Number(facts.nulls)) }));
+        }
+        if (facts.indexed !== undefined && facts.indexed !== null) {
+          addMetric(facts.indexed ? say('impactIndexedMetric') : say('impactUnindexedMetric'));
+        }
+        if (metrics.childElementCount > 0) body.append(metrics);
+
+        const refs = Array.isArray(sc.referencedBy) ? sc.referencedBy : [];
+        if (refs.length > 0) {
+          const rHead = document.createElement('div');
+          rHead.className = 'wb-col-profile-top-label';
+          rHead.textContent = say('impactRefsHeading');
+          const rList = document.createElement('div');
+          rList.className = 'wb-col-impact-list';
+          for (const dep of refs.slice(0, 5)) {
+            const item = document.createElement('div');
+            item.className = 'wb-col-impact-item';
+            const cols = Array.isArray(dep.columns) ? dep.columns.join(', ') : '';
+            const countPart = dep.rows !== undefined ? ` · ${formatNumber(Number(dep.rows))}` : '';
+            const rulePart = dep.onDelete ? ` · ${dep.onDelete}` : '';
+            item.textContent = `${dep.table}.${cols}${countPart}${rulePart}`;
+            rList.append(item);
+          }
+          body.append(rHead, rList);
+        }
+
+        const notes = Array.isArray(sc.notes) ? sc.notes : [];
+        if (notes.length > 0) {
+          const nHead = document.createElement('div');
+          nHead.className = 'wb-col-profile-top-label';
+          nHead.textContent = say('impactConsequencesHeading');
+          const nList = document.createElement('div');
+          nList.className = 'wb-col-impact-list';
+          for (const note of notes.slice(0, 4)) {
+            const item = document.createElement('div');
+            item.className = 'wb-col-impact-item';
+            item.textContent = String(note);
+            nList.append(item);
+          }
+          body.append(nHead, nList);
+        }
+      })
+      .catch(() => {
+        if (pop.isConnected) body.textContent = say('impactFailed');
+      });
+  };
+
+  /**
+   * @param {string} tableId
+   * @param {Record<string, unknown>} recordKey
+   */
+  const openRecordFixtureModal = (tableId, recordKey) => {
+    closeProfilePopover();
+    const activeConn = /** @type {Array<{ id: string; redactsRows?: boolean }>} */ (state.connections ?? []).find(
+      (c) => c.id === state.activeConnection,
+    );
+    let includeChildren = true;
+    let maskPii = Boolean(activeConn?.redactsRows);
+    /** @type {'sql' | 'json'} */
+    let format = 'sql';
+    /** @type {{ sql: string; tables: Array<{ table: string; rows: unknown[] }> } | null} */
+    let latestData = null;
+
+    const backdrop = document.createElement('div');
+    backdrop.id = 'wb-record-modal';
+    backdrop.className = 'wb-modal-backdrop';
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) closeProfilePopover();
+    });
+
+    const card = document.createElement('div');
+    card.className = 'wb-modal-card';
+    card.setAttribute('role', 'dialog');
+    const titleText = say('fixtureModalTitle', { table: tableId });
+    card.setAttribute('aria-label', titleText);
+
+    const head = document.createElement('div');
+    head.className = 'wb-modal-head';
+    const h2 = document.createElement('h2');
+    h2.className = 'wb-modal-title';
+    h2.textContent = titleText;
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'wb-col-profile-close';
+    closeBtn.textContent = say('profileClose');
+    closeBtn.addEventListener('click', closeProfilePopover);
+    head.append(h2, closeBtn);
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'wb-fixture-toolbar';
+
+    const checks = document.createElement('div');
+    checks.className = 'wb-fixture-checks';
+
+    const childLabel = document.createElement('label');
+    childLabel.className = 'wb-fixture-check';
+    const childInput = document.createElement('input');
+    childInput.type = 'checkbox';
+    childInput.checked = includeChildren;
+    const childSpan = document.createElement('span');
+    childSpan.textContent = say('fixtureIncludeChildren');
+    childLabel.append(childInput, childSpan);
+
+    const maskLabel = document.createElement('label');
+    maskLabel.className = 'wb-fixture-check';
+    const maskInput = document.createElement('input');
+    maskInput.type = 'checkbox';
+    maskInput.checked = maskPii;
+    const maskSpan = document.createElement('span');
+    maskSpan.textContent = say('fixtureMaskPii');
+    maskLabel.append(maskInput, maskSpan);
+
+    const statsSpan = document.createElement('span');
+    statsSpan.style.color = 'var(--ink-subtle)';
+    checks.append(childLabel, maskLabel, statsSpan);
+
+    const actions = document.createElement('div');
+    actions.className = 'wb-fixture-actions';
+    const seg = document.createElement('div');
+    seg.className = 'wb-sidebar-seg';
+    const sqlFmtBtn = document.createElement('button');
+    sqlFmtBtn.type = 'button';
+    sqlFmtBtn.className = 'wb-sidebar-seg-btn active';
+    sqlFmtBtn.textContent = say('fixtureFormatSql');
+    const jsonFmtBtn = document.createElement('button');
+    jsonFmtBtn.type = 'button';
+    jsonFmtBtn.className = 'wb-sidebar-seg-btn';
+    jsonFmtBtn.textContent = say('fixtureFormatJson');
+    seg.append(sqlFmtBtn, jsonFmtBtn);
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'wb-col-profile-close';
+    copyBtn.textContent = say('fixtureCopyBtn');
+    actions.append(seg, copyBtn);
+    toolbar.append(checks, actions);
+
+    const pre = document.createElement('pre');
+    pre.className = 'wb-fixture-pre';
+    pre.textContent = say('fixtureLoading');
+
+    const renderOutput = () => {
+      sqlFmtBtn.classList.toggle('active', format === 'sql');
+      jsonFmtBtn.classList.toggle('active', format === 'json');
+      if (!latestData) return;
+      pre.textContent = format === 'sql' ? latestData.sql : JSON.stringify({ tables: latestData.tables }, null, 2);
+    };
+
+    sqlFmtBtn.addEventListener('click', () => {
+      format = 'sql';
+      renderOutput();
+    });
+    jsonFmtBtn.addEventListener('click', () => {
+      format = 'json';
+      renderOutput();
+    });
+    copyBtn.addEventListener('click', () => {
+      if (!latestData) return;
+      const text = format === 'sql' ? latestData.sql : JSON.stringify({ tables: latestData.tables }, null, 2);
+      void navigator.clipboard?.writeText(text).then(() => {
+        copyBtn.textContent = say('fixtureCopiedBtn');
+        window.setTimeout(() => {
+          if (copyBtn.isConnected) copyBtn.textContent = say('fixtureCopyBtn');
+        }, 1500);
+      });
+    });
+
+    let reqSeq = 0;
+    const loadFixture = () => {
+      const seq = ++reqSeq;
+      latestData = null;
+      statsSpan.textContent = '';
+      pre.textContent = say('fixtureLoading');
+      void api('/api/agent/call', {
+        name: 'fixture',
+        arguments: {
+          ...(state.activeConnection ? { connection: state.activeConnection } : {}),
+          table: tableId,
+          key: recordKey,
+          children: includeChildren,
+          redact: maskPii,
+        },
+      })
+        .then((reply) => {
+          if (!backdrop.isConnected || seq !== reqSeq) return;
+          const sc = reply?.structuredContent;
+          if (reply?.isError || !sc || typeof sc.sql !== 'string') {
+            pre.textContent = reply?.content?.[0]?.text ?? say('fixtureFailed');
+            return;
+          }
+          const tablesArr = Array.isArray(sc.tables) ? sc.tables : [];
+          const rowTotal = tablesArr.reduce((sum, t) => sum + (Array.isArray(t.rows) ? t.rows.length : 0), 0);
+          statsSpan.textContent = say('fixtureStats', { count: rowTotal, tables: tablesArr.length });
+          latestData = { sql: sc.sql, tables: tablesArr };
+          renderOutput();
+        })
+        .catch(() => {
+          if (backdrop.isConnected && seq === reqSeq) pre.textContent = say('fixtureFailed');
+        });
+    };
+
+    childInput.addEventListener('change', () => {
+      includeChildren = childInput.checked;
+      loadFixture();
+    });
+    maskInput.addEventListener('change', () => {
+      maskPii = maskInput.checked;
+      loadFixture();
+    });
+
+    card.append(head, toolbar, pre);
+    backdrop.append(card);
+    (portalRoot() ?? shellBody()).append(backdrop);
+    loadFixture();
+  };
+
+  /**
+   * @param {string} tableId
+   * @param {Record<string, unknown>} recordKey
+   */
+  const openRecordCompareModal = (tableId, recordKey) => {
+    closeProfilePopover();
+    const backdrop = document.createElement('div');
+    backdrop.id = 'wb-record-modal';
+    backdrop.className = 'wb-modal-backdrop';
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) closeProfilePopover();
+    });
+
+    const card = document.createElement('div');
+    card.className = 'wb-modal-card';
+    card.setAttribute('role', 'dialog');
+    const titleText = say('compareRecordModalTitle', { table: tableId });
+    card.setAttribute('aria-label', titleText);
+
+    const head = document.createElement('div');
+    head.className = 'wb-modal-head';
+    const h2 = document.createElement('h2');
+    h2.className = 'wb-modal-title';
+    h2.textContent = titleText;
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'wb-col-profile-close';
+    closeBtn.textContent = say('profileClose');
+    closeBtn.addEventListener('click', closeProfilePopover);
+    head.append(h2, closeBtn);
+
+    const body = document.createElement('div');
+    body.textContent = say('compareRecordLoading');
+    card.append(head, body);
+    backdrop.append(card);
+    (portalRoot() ?? shellBody()).append(backdrop);
+
+    void api('/api/agent/call', {
+      name: 'record',
+      arguments: {
+        ...(state.activeConnection ? { connection: state.activeConnection } : {}),
+        table: tableId,
+        key: recordKey,
+        envs: 'all',
+      },
+    })
+      .then((reply) => {
+        if (!backdrop.isConnected) return;
+        const envs = reply?.structuredContent?.environments;
+        if (reply?.isError || !Array.isArray(envs) || !envs.length) {
+          body.textContent = reply?.content?.[0]?.text ?? say('compareRecordFailed');
+          return;
+        }
+        body.replaceChildren();
+        const wrap = document.createElement('div');
+        wrap.className = 'wb-compare-wrap';
+        const tbl = document.createElement('table');
+        tbl.className = 'wb-compare-table';
+
+        const thead = document.createElement('thead');
+        const headRow = document.createElement('tr');
+        const fieldTh = document.createElement('th');
+        fieldTh.textContent = say('compareFieldCol');
+        headRow.append(fieldTh);
+        for (const envEntry of envs) {
+          const th = document.createElement('th');
+          th.textContent = envEntry.env ? `${envEntry.name} (${envEntry.env})` : String(envEntry.name ?? envEntry.connection);
+          headRow.append(th);
+        }
+        thead.append(headRow);
+
+        const schemaCols =
+          /** @type {Array<{ id: string; name: string; columns?: Array<{ name: string }> }>} */ (state.schema?.tables ?? [])
+            .find((t) => t.id === tableId || t.name === tableId)
+            ?.columns?.map((c) => c.name) ?? [];
+        const colSet = new Set(schemaCols);
+        for (const envEntry of envs) {
+          const rowObj = envEntry?.result?.row;
+          if (rowObj && typeof rowObj === 'object') {
+            for (const k of Object.keys(rowObj)) colSet.add(k);
+          }
+        }
+
+        const tbody = document.createElement('tbody');
+        for (const col of colSet) {
+          const tr = document.createElement('tr');
+          tr.className = 'wb-compare-row';
+          const serialized = envs.map((envEntry) => {
+            if (!envEntry.ok || !envEntry.result?.found) return '__MISSING_ROW__';
+            const val = envEntry.result.row?.[col];
+            return val === undefined ? 'null' : JSON.stringify(val);
+          });
+          const isDiff = new Set(serialized).size > 1;
+          if (isDiff) tr.classList.add('is-diff');
+
+          const nameTd = document.createElement('td');
+          nameTd.textContent = col;
+          if (isDiff) {
+            const diffBadge = document.createElement('span');
+            diffBadge.className = 'wb-masked-col-pill';
+            diffBadge.textContent = say('compareDiffBadge');
+            nameTd.append(diffBadge);
+          }
+          tr.append(nameTd);
+
+          for (const envEntry of envs) {
+            const td = document.createElement('td');
+            if (!envEntry.ok || !envEntry.result?.found) {
+              const span = document.createElement('span');
+              span.className = 'wb-compare-missing';
+              span.textContent = !envEntry.ok && envEntry.error ? String(envEntry.error) : say('compareMissingRow');
+              td.append(span);
+            } else {
+              const val = envEntry.result.row?.[col];
+              if (val === null || val === undefined) {
+                const span = document.createElement('span');
+                span.className = 'wb-compare-missing';
+                span.textContent = 'null';
+                td.append(span);
+              } else {
+                td.textContent = typeof val === 'object' ? JSON.stringify(val) : String(val);
+              }
+            }
+            tr.append(td);
+          }
+          tbody.append(tr);
+        }
+        tbl.append(thead, tbody);
+        wrap.append(tbl);
+        body.append(wrap);
+      })
+      .catch(() => {
+        if (backdrop.isConnected) body.textContent = say('compareRecordFailed');
+      });
+  };
+
   addHostListener(document, 'keydown', (e) => {
     if (e.key === 'Escape') closeProfilePopover();
   });
 
-  /* ---------- Enhance `.th-menu` with Profile column + 1-click FK dot-path pull ---------- */
+  /* ---------- Enhance `.th-menu` with Profile column, Change impact & 1-click FK dot-path pull ---------- */
+
+  /** @type {HTMLElement | null} */
+  let lastThFilterAnchor = null;
+  /** @type {string | null} */
+  let lastThColName = null;
+
+  addHostListener(
+    document,
+    'click',
+    (e) => {
+      const btn = e.target instanceof Element ? e.target.closest('.th-filter') : null;
+      if (btn instanceof HTMLElement) {
+        lastThFilterAnchor = btn;
+        lastThColName = btn.getAttribute('data-column') || btn.closest('th')?.querySelector('.th-label')?.textContent?.trim() || null;
+      }
+    },
+    true,
+  );
+
+  const dismissMenu = (/** @type {HTMLElement} */ menu) => {
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  };
 
   const enhanceColumnMenus = () => {
     if (shell().inApp() || !state.schema) return;
     const menus = shellQueryAll('.th-menu');
     for (const menu of menus) {
       if (!(menu instanceof HTMLElement) || menu.dataset.wbEnhanced === '1') continue;
-      const anchor = /** @type {HTMLElement | null} */ (shellQuery('.th-filter[aria-expanded="true"]'));
-      const colName = anchor?.getAttribute('data-column');
+      const expandedAnchor = /** @type {HTMLElement | null} */ (shellQuery('.th-filter[aria-expanded="true"]'));
+      const anchor = expandedAnchor ?? (lastThFilterAnchor?.isConnected ? lastThFilterAnchor : null);
+      const sortCondText = menu.querySelector('.th-menu-cond')?.textContent?.trim() ?? '';
+      const sortMatch = /^sort\s+(\S+)/i.exec(sortCondText);
+      const colName = expandedAnchor?.getAttribute('data-column') || lastThColName || (sortMatch ? sortMatch[1] : null);
       const entry = currentEntry();
       if (!anchor || !colName || !entry || entry.kind !== 'table') continue;
       const tableMeta = /** @type {Array<{ id: string; name: string; columns: Array<{ name: string; primaryKey?: boolean }> }>} */ (
@@ -500,10 +1019,28 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
       profileBtn.addEventListener('click', (ev) => {
         ev.stopPropagation();
         const queryNow = entry.query ?? tableMeta.id;
-        anchor.click();
-        window.setTimeout(() => openColumnProfile(anchor, tableMeta.id, colName, queryNow), 20);
+        dismissMenu(menu);
+        window.setTimeout(() => openColumnProfile(anchor, tableMeta.id, colName, queryNow), 30);
       });
-      menu.append(sep, profileBtn);
+
+      const impactBtn = document.createElement('button');
+      impactBtn.type = 'button';
+      impactBtn.className = 'th-menu-item';
+      impactBtn.setAttribute('role', 'menuitem');
+      const iLabel = document.createElement('span');
+      iLabel.className = 'th-menu-label';
+      iLabel.textContent = say('changeImpact');
+      const iSub = document.createElement('span');
+      iSub.className = 'th-menu-cond';
+      iSub.textContent = say('changeImpactSub');
+      impactBtn.append(iLabel, iSub);
+      impactBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        dismissMenu(menu);
+        window.setTimeout(() => openChangeImpact(anchor, tableMeta.id, colName), 30);
+      });
+
+      menu.append(sep, profileBtn, impactBtn);
 
       /* Foreign-key 1-click column pull (`+ Show customer_id.name`) */
       const fks = /** @type {Array<{ from: { table: string; columns: string[] }; to: { table: string; columns: string[] } }>} */ (
@@ -549,7 +1086,7 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
               pullBtn.addEventListener('click', (ev) => {
                 ev.stopPropagation();
                 const nextQ = appendShowProjection(entry.query ?? tableMeta.id, tableMeta.id, baseColNames, dotPath);
-                anchor.click();
+                dismissMenu(menu);
                 const qInput = /** @type {HTMLInputElement | null} */ (shellById('query'));
                 if (qInput) qInput.value = nextQ;
                 runQueryText(nextQ);
@@ -562,7 +1099,7 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
     }
   };
 
-  /* ---------- Per-column `masked` badges & Compiled-SQL `Plan` button ---------- */
+  /* ---------- Per-column `masked` badges, Compiled-SQL `Plan` button & Record actions ---------- */
 
   let lastCompiledSql = '';
 
@@ -604,9 +1141,9 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
     const explainPane = shellById('explain-pane');
     const explainPre = shellById('explain');
     const explainEdit = shellById('explain-edit');
-    const activeConn = /** @type {Array<{ id: string; redactsRows?: boolean; hidesColumns?: boolean }>} */ (state.connections ?? []).find(
-      (c) => c.id === state.activeConnection,
-    );
+    const activeConn = /** @type {Array<{ id: string; redactsRows?: boolean; hidesColumns?: boolean; siblings?: unknown[] }>} */ (
+      state.connections ?? []
+    ).find((c) => c.id === state.activeConnection);
     const canExplain = !activeConn?.redactsRows && !activeConn?.hidesColumns;
 
     if (explainPane && explainPre && explainEdit && !explainPane.hidden && canExplain) {
@@ -649,7 +1186,9 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
               for (const line of lines) {
                 const text = String(line);
                 const isIdx =
-                  /\b(?:Index(?: Only)? Scan|Bitmap Index Scan)\b/i.test(text) || /\bUSING\s+(?:COVERING\s+)?INDEX\b/i.test(text);
+                  /\b(?:Index(?: Only)? Scan|Bitmap Index Scan)\b/i.test(text) ||
+                  /\bUSING\s+(?:COVERING\s+)?INDEX\b/i.test(text) ||
+                  /\bUSING\s+INTEGER\s+PRIMARY\s+KEY\b/i.test(text);
                 const isSeq = !isIdx && (/\bSeq Scan\b/i.test(text) || /^SCAN\s+/i.test(text) || /\bSCAN TABLE\b/i.test(text));
                 const row = document.createElement('div');
                 row.className = `wb-inline-plan-row${isSeq ? ' tone-warn' : isIdx ? ' tone-ok' : ''}`;
@@ -675,6 +1214,51 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
       shellById('wb-inline-plan')?.remove();
     }
 
+    /* 2b. Record view actions: 1-click `Extract fixture…` & cross-environment `Compare envs` */
+    const curEntry = currentEntry();
+    const recordHeading = shellQuery('.record-heading');
+    const recordAsPage = recordHeading?.querySelector('.record-as-page');
+    if (curEntry?.kind === 'row' && curEntry.table && curEntry.key && recordHeading && recordAsPage && canUseDatabaseTools()) {
+      if (!shellById('wb-extract-fixture-btn')) {
+        const fixBtn = document.createElement('button');
+        fixBtn.id = 'wb-extract-fixture-btn';
+        fixBtn.type = 'button';
+        fixBtn.tabIndex = -1;
+        fixBtn.className = 'ghost';
+        fixBtn.title = say('extractFixtureTitle');
+        fixBtn.textContent = say('extractFixtureBtn');
+        fixBtn.addEventListener('click', () => {
+          const latest = currentEntry();
+          if (latest?.kind === 'row' && latest.table && latest.key) {
+            openRecordFixtureModal(latest.table, /** @type {Record<string, unknown>} */ (latest.key));
+          }
+        });
+        recordAsPage.insertAdjacentElement('afterend', fixBtn);
+      }
+      const hasSiblings = Array.isArray(activeConn?.siblings) && activeConn.siblings.length > 0;
+      if (hasSiblings && !shellById('wb-compare-record-btn')) {
+        const cmpBtn = document.createElement('button');
+        cmpBtn.id = 'wb-compare-record-btn';
+        cmpBtn.type = 'button';
+        cmpBtn.tabIndex = -1;
+        cmpBtn.className = 'ghost';
+        cmpBtn.title = say('compareRecordEnvsTitle');
+        cmpBtn.textContent = say('compareRecordEnvsBtn');
+        cmpBtn.addEventListener('click', () => {
+          const latest = currentEntry();
+          if (latest?.kind === 'row' && latest.table && latest.key) {
+            openRecordCompareModal(latest.table, /** @type {Record<string, unknown>} */ (latest.key));
+          }
+        });
+        (shellById('wb-extract-fixture-btn') ?? recordAsPage).insertAdjacentElement('afterend', cmpBtn);
+      } else if (!hasSiblings) {
+        shellById('wb-compare-record-btn')?.remove();
+      }
+    } else {
+      shellById('wb-extract-fixture-btn')?.remove();
+      shellById('wb-compare-record-btn')?.remove();
+    }
+
     /* 3. Per-column `masked` badges on redacted connections */
     if (activeConn?.redactsRows && state.activeConnection) {
       ensureRedactedMap(state.activeConnection);
@@ -683,15 +1267,19 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
       const activeTableId = entry && typeof entry.table === 'string' ? entry.table : null;
       const maskedSet = new Set(activeTableId && map ? (map[activeTableId] ?? []) : []);
       if (maskedSet.size > 0) {
-        for (const filterBtn of shellQueryAll('.grid-host th .th-filter[data-column]')) {
-          const col = filterBtn.getAttribute('data-column') ?? '';
-          const th = filterBtn.closest('th');
-          if (!th || !maskedSet.has(col) || th.querySelector('.wb-masked-col-pill')) continue;
+        for (const th of shellQueryAll('th')) {
+          const col =
+            th.querySelector('.th-label')?.textContent?.trim() ??
+            th.querySelector('.th-filter[data-column]')?.getAttribute('data-column') ??
+            '';
+          if (!col || !maskedSet.has(col) || th.querySelector('.wb-masked-col-pill')) continue;
           const badge = document.createElement('span');
           badge.className = 'wb-masked-col-pill';
           badge.title = say('maskedColTitle');
           badge.textContent = say('maskedColBadge');
-          filterBtn.insertAdjacentElement('beforebegin', badge);
+          const sortBtn = th.querySelector('.th-sort');
+          if (sortBtn) sortBtn.append(badge);
+          else th.append(badge);
         }
         for (const labelEl of shellQueryAll('.field-name, .record-field-name, dt')) {
           if (labelEl.querySelector('.wb-masked-col-pill')) continue;

@@ -1900,12 +1900,12 @@ describe('completions and subscriptions', () => {
 });
 
 describe('prompts: the packaged walks', () => {
-  test('the three workflows are listed with their arguments', async () => {
+  test('the four workflows are listed with their arguments', async () => {
     const listed = await call('prompts/list');
     const prompts = (listed.result as { prompts: Array<{ name: string; arguments: Array<{ name: string; required?: boolean }> }> }).prompts;
     assert.deepEqual(
       prompts.map((p) => p.name),
-      ['orient', 'pre-migration-check', 'investigate-row'],
+      ['orient', 'pre-migration-check', 'investigate-row', 'compare-environments'],
     );
     const check = prompts.find((p) => p.name === 'pre-migration-check')!;
     assert.ok(check.arguments.find((a) => a.name === 'tables')?.required);

@@ -48,7 +48,7 @@ npx tablewalk --config <(vault get db/billing) --call breakdown --args '{"q":"in
 
 Piped JSON configs can include `"secrets"` (or `.env` text under `"dotenv"`), `"credentialCommand"` to mint short-lived tokens on open and after idle eviction, `"environments"` tier defaults (`"local"`, `"staging"`, `"prod"`), `"active": "billing@staging"`, `"only": true` to expose only the selected target, `"lazy": true` (default for piped `--mcp` configs so `initialize` and `tools/list` answer before dialing the database), `"lease": { "idleSeconds": 30, "maxSeconds": 300 }`, `"timeoutMs"`, `"focus"` / `"focusHops"`, `"redact": true` / `"redactColumns"`, `"maxRows"`, and `"blocklist": { "tables": ["audit_*"], "fields": { "*": ["*_token"], "customer": ["tax_id"] } }`.
 
-![The Agent console running the record tool on customer 1, with searchable categorized tools, the answer and its cost](/shots/agent.webp?v=3)
+![The Agent console running the record tool on customer 1, with searchable categorized tools, Follow agent toggle, the answer and its cost](/shots/agent.webp?v=4)
 
 ## The tools
 
@@ -77,7 +77,7 @@ Twenty-eight tools: twenty-two read-only, and six writes that are listed only wh
 | `fixture` | One real row and everything it needs to exist (with optional `redact: true` masking), ready for `insert_graph`. | `{"table": "invoice", "key": {"id": 1001}, "children": true, "redact": true}` |
 | `lint` | What the shape will cost: keyless tables, unindexed foreign keys, naive timestamps. | `{"severity": "high"}` |
 | `perf` | Live index, scan, bloat, planner-statistics and lock/session contention diagnostics (`pg_stat_user_tables`, `pg_stat_user_indexes`, `pg_stat_activity`, `pg_locks` and `pg_blocking_pids` on PostgreSQL; `PRAGMA index_list`, `EXPLAIN QUERY PLAN` and `sqlite_stat1` on SQLite) with ready-to-run remediation SQL. | `{"severity": "medium"}` |
-| `anomalies` | Data-level counterpart to `lint`: temporal inversions, dangling soft-delete lifecycles, and >=95%-populated nullable FKs with null outliers. | `{"severity": "high"}` |
+| `anomalies` | Data-level counterpart to `lint`: temporal inversions, dangling soft-delete lifecycles, negative unsigned business measures (`total`, `quantity < 0`), future-dated audit timestamps (`> tomorrow`), and >=95%-populated nullable FKs with null outliers. | `{"severity": "high"}` |
 | `change_impact` | What breaks if a table or column changes, asked before writing the migration. | `{"table": "customer", "column": "email"}` |
 | `verify_ddl` | Runs candidate DDL in an isolated SQLite copy or rolled-back PostgreSQL transaction and returns `diff` plus newly introduced `lint` findings. | `{"sql": "ALTER TABLE invoice ADD COLUMN po_number text"}` |
 
@@ -124,7 +124,7 @@ Listed only when a connection is `"writable": true`, and refused on any other co
 
 ## Prompts and resources
 
-Three prompts: `orient`, `pre-migration-check` (takes `tables`) and `investigate-row` (takes `table`). Resources an agent can read without running anything:
+Four prompts: `orient` (schema brief + `perf` and `anomalies` pointers), `pre-migration-check` (takes `tables`, runs `change_impact` and guides `verify_ddl`), `investigate-row` (takes `table` and `key`, guides `record` with `expand` and `fixture` with `redact: true`), and `compare-environments` (takes `from` and `to`, pre-computing `diff` across tiers). Resources an agent can read without running anything:
 
 - `tablewalk://{connection}/schema`, the schema brief
 - `tablewalk://{connection}/table/{table}`, one table

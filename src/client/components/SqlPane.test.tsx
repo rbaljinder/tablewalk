@@ -249,3 +249,39 @@ test('renders sibling environment pills in SQL header and highlights production 
     (state as Record<string, unknown>).connections = [{ id: 'demo', writable: true }];
   }
 });
+
+test('Verify DDL dry-runs candidate migration SQL and renders structural diff and introduced lint warnings', async () => {
+  const user = userEvent.setup();
+  draw('ALTER TABLE customer ADD COLUMN account_manager_id INTEGER REFERENCES customer(id)');
+  reply = {
+    structuredContent: {
+      valid: true,
+      dialect: 'sqlite',
+      statements: 1,
+      same: false,
+      diff: [{ table: 'customer', columnsOnlyRight: ['account_manager_id'] }],
+      introducedLint: {
+        findings: [
+          {
+            table: 'customer',
+            rule: 'unindexed-fk',
+            severity: 'high',
+            message: 'account_manager_id references customer without a leading index.',
+          },
+        ],
+      },
+      stats: { ms: 5 },
+    },
+  };
+  await user.click(screen.getByRole('button', { name: 'Verify DDL' }));
+  expect(calls).toContainEqual({
+    name: 'verify_ddl',
+    arguments: {
+      sql: 'ALTER TABLE customer ADD COLUMN account_manager_id INTEGER REFERENCES customer(id)',
+      connection: 'demo',
+    },
+  });
+  await screen.findByText('Valid dry run · rolled back');
+  expect(screen.getByText('+ customer: added account_manager_id')).toBeInTheDocument();
+  expect(screen.getByText(/\[high\] customer \(unindexed-fk\)/)).toBeInTheDocument();
+});

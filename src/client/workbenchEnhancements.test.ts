@@ -61,12 +61,38 @@ vi.mock('@mistriwork/kit/client/sessionIdentity.js', () => ({
   subscribeSessionIdentity: () => () => {},
 }));
 
-const { appendShowProjection, syncSiblingBrowserStores } = await import('./workbenchEnhancements.js');
+vi.mock('@mistriwork/kit/client/menu.js', () => ({
+  menuMode: () => 'workbench',
+}));
+
+vi.mock('@mistriwork/kit/client/palette.js', () => ({
+  addPaletteSource: () => {},
+}));
+
+const { appendShowProjection, recordRecentQueryInStore, syncSiblingBrowserStores } = await import('./workbenchEnhancements.js');
 const { saveStatement, savedStatements } = await import('./sqlsaved.js');
 
 beforeEach(() => {
   store.clear();
   mockState.activeConnection = 'billing-local';
+});
+
+test('recordRecentQueryInStore skips bare table names, deduplicates case-insensitively, and caps at 15', () => {
+  const ring: Record<string, string[]> = {};
+  expect(recordRecentQueryInStore(ring, '@db:billing', '')).toBe(false);
+  expect(recordRecentQueryInStore(ring, '@db:billing', 'invoice')).toBe(false);
+  expect(ring['@db:billing']).toBeUndefined();
+
+  expect(recordRecentQueryInStore(ring, '@db:billing', 'invoice   status = issued')).toBe(true);
+  expect(recordRecentQueryInStore(ring, '@db:billing', 'invoice count by status')).toBe(true);
+  expect(recordRecentQueryInStore(ring, '@db:billing', 'INVOICE status = issued')).toBe(true);
+  expect(ring['@db:billing']).toEqual(['INVOICE status = issued', 'invoice count by status']);
+
+  for (let i = 1; i <= 20; i++) {
+    recordRecentQueryInStore(ring, '@db:billing', `invoice total > ${i}`);
+  }
+  expect(ring['@db:billing']).toHaveLength(15);
+  expect(ring['@db:billing']?.[0]).toBe('invoice total > 20');
 });
 
 test('appendShowProjection appends FK dot-path projections without duplicating columns', () => {

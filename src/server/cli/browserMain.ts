@@ -61,6 +61,7 @@ interface BrowserExtraArgs {
   env?: string;
   allEnvs?: boolean;
   check?: boolean;
+  verifyDdl?: string;
   lease?: string;
   maxRows?: string;
   timeoutMs?: string;
@@ -101,6 +102,9 @@ function extractBrowserExtraArgs(argv: readonly string[]): BrowserExtraArgs {
       out.allEnvs = true;
     } else if (arg === '--check') {
       out.check = true;
+    } else if (arg === '--verify-ddl') {
+      const got = takeValue(arg, argv[i + 1], i);
+      if (got) [out.verifyDdl, i] = got;
     } else if (arg === '--connection') {
       const got = takeValue(arg, argv[i + 1], i);
       if (got) [out.connection, i] = got;
@@ -150,9 +154,9 @@ function extractBrowserExtraArgs(argv: readonly string[]): BrowserExtraArgs {
     }
   }
   const toolModes = [out.query !== undefined, out.call !== undefined, out.batch !== undefined].filter(Boolean).length;
-  const modes = toolModes + (out.check ? 1 : 0);
+  const modes = toolModes + (out.check ? 1 : 0) + (out.verifyDdl !== undefined ? 1 : 0);
   if (modes > 1) {
-    out.error ??= 'Pass only one of --query, --call, --batch, or --check.';
+    out.error ??= 'Pass only one of --query, --call, --batch, --check, or --verify-ddl.';
   }
   if (out.args !== undefined && out.call === undefined && out.query === undefined) {
     out.error ??= '--args goes with --call (or --query).';
@@ -164,7 +168,7 @@ function extractBrowserExtraArgs(argv: readonly string[]): BrowserExtraArgs {
     out.error ??= '--all-envs goes with --query, --call, or --batch.';
   }
   if (out.format !== undefined && modes === 0) {
-    out.error ??= '--format goes with --query, --call, --batch, or --check.';
+    out.error ??= '--format goes with --query, --call, --batch, --check, or --verify-ddl.';
   }
   return out;
 }
@@ -256,7 +260,8 @@ export const main: Main = async () => {
   /* In MCP mode stdout is the protocol channel; in an export or one-shot query, the document — `--export md >> CLAUDE.md`
      must append a brief, not a brief with a startup banner stapled to its forehead. Every startup line goes to stderr,
      redirected here once rather than guarded at each call site. */
-  const printing = opts.mcp || Boolean(exportFormat) || opts.lint || opts.diff || oneShotTool || Boolean(extra.check);
+  const printing =
+    opts.mcp || Boolean(exportFormat) || opts.lint || opts.diff || oneShotTool || Boolean(extra.check) || Boolean(extra.verifyDdl);
   if (printing) console.log = (...args: unknown[]) => console.error(...args);
   if (opts.mcp && process.env.TABLEWALK_MCP_URL?.trim()) {
     const { bridgeMcpToHttp } = await import('./mcpMode.js');
@@ -444,10 +449,33 @@ export const main: Main = async () => {
     console.error('tablewalk: --api-url and --api-token-env go with --openapi.');
     process.exit(1);
   }
+  let importedLabel: string | undefined;
+  if (
+    opts.target &&
+    !opts.demo &&
+    !/^(?:postgres(?:ql)?:|mysql:|mariadb:|sqlite:|file:|https?:)/i.test(opts.target) &&
+    !/\.(?:db|sqlite|sqlite3)$/i.test(opts.target) &&
+    (/\.(?:sql|csv|tsv|ndjson|jsonl)$/i.test(opts.target) ||
+      Boolean((await import('node:fs')).statSync(opts.target, { throwIfNoEntry: false })?.isDirectory()))
+  ) {
+    try {
+      const { hydrateEphemeralSqlite } = await import('./ephemeralImport.js');
+      const hydrated = hydrateEphemeralSqlite(opts.target);
+      console.log(
+        `tablewalk: hydrated ${hydrated.label} (${hydrated.tableCount} table${hydrated.tableCount === 1 ? '' : 's'}${hydrated.fkCount ? `, ${hydrated.fkCount} inferred FK${hydrated.fkCount === 1 ? '' : 's'}` : ''}) into an ephemeral read-only SQLite database.`,
+      );
+      opts.target = hydrated.dbPath;
+      importedLabel = hydrated.label;
+    } catch (err) {
+      console.error(`tablewalk: ${(err as Error).message}`);
+      await registry.closeAll().catch(() => {});
+      process.exit(1);
+    }
+  }
   if (opts.target) {
     // Read-only, as everywhere: writes are a config's "writable": true.
     const added = registry.add({
-      name: opts.demo ? 'demo' : redact(opts.target),
+      name: importedLabel ?? (opts.demo ? 'demo' : redact(opts.target)),
       url: opts.target,
       schemas: opts.schemas,
       source: 'argument',
@@ -549,6 +577,10 @@ export const main: Main = async () => {
   if (opts.lint) {
     const { lintConnection } = await import('./databaseOneShot.js');
     return lintConnection(opts.lint, opts.failOn, registry);
+  }
+  if (extra.verifyDdl !== undefined) {
+    const { verifyDdlCli } = await import('./databaseOneShot.js');
+    return verifyDdlCli(extra.verifyDdl, { format: extra.format, failOn: opts.failOn }, registry);
   }
   if (opts.mcp) {
     const { serveMcpMode } = await import('./mcpMode.js');

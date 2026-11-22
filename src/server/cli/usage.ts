@@ -170,16 +170,20 @@ Options:
       --all-envs      With --query, --call or --batch: run a read-only call
                       across every environment of the target database in
                       parallel.
-      --format <fmt>  With --query, --call, --batch or --check: output format —
-                      json, ndjson, tsv or md.
+      --format <fmt>  With --query, --call, --batch, --check or --verify-ddl:
+                      output format — json, ndjson, tsv or md.
       --check         Dial configured connections, verify credentials and
                       guardrails, print a readiness matrix, and exit.
+      --verify-ddl <path|->
+                      Dry-run candidate DDL (.sql file or - for stdin) in an
+                      isolated SQLite copy or rolled-back PostgreSQL transaction,
+                      print schema diff and new lint findings, and exit.
       --export <fmt>  Print the schema as md, mermaid, json or agent, then exit.
       --lint [fmt]    Report what the shape will cost — missing keys,
                       unindexed references, naive timestamps — as text or
                       json, then exit.
-      --fail-on <sev> With --lint, exit non-zero when a finding is at least
-                      this severe: high, medium or low. For CI.
+      --fail-on <sev> With --lint or --verify-ddl, exit non-zero when a finding
+                      is at least this severe: high, medium or low. For CI.
       --diff <conn>   Compare the active connection's shape with this one,
                       print the differences, then exit. Exit code 1 when they
                       differ, the way diff(1) does.
