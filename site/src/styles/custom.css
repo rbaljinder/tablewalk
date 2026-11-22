@@ -290,6 +290,13 @@ site-search button[data-open-modal] { border-radius: 8px; border-color: var(--sl
 /* Screenshots: full column width, a quiet frame. */
 .sl-markdown-content img { max-width: 100%; height: auto; border: 1px solid var(--sl-color-hairline); border-radius: 6px; }
 
+/* A 2x2 gallery of looks: each still wrapped by lightbox.ts for full-screen zoom. */
+.tw-look-grid { display: grid; gap: 1rem; margin-block: 1.25rem; }
+.tw-look-grid figure { margin: 0; display: grid; gap: 0.4rem; }
+.tw-look-grid figcaption { margin: 0; font-size: var(--sl-text-xs); color: var(--sl-color-gray-3); line-height: 1.45; }
+.tw-look-grid figcaption strong { color: var(--sl-color-white); font-weight: 600; }
+@media (min-width: 44rem) { .tw-look-grid { grid-template-columns: 1fr 1fr; } }
+
 /* Search sits with the GitHub and theme controls at the right. */
 @media (min-width: 50rem) {
   .header > div:nth-child(2) { justify-content: flex-end; }
