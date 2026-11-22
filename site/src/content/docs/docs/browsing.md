@@ -14,7 +14,7 @@ Click a table in the sidebar, or type its name in the query bar. The grid shows 
 ![The invoice table queried as "invoice total >= 500 sort total desc", with the query's parts as chips and inline quick filters above the grid](/shots/query.webp?v=3)
 
 - **Quick filters** sit in one compact inline strip above the grid (`Filters` in the tab bar folds or unfolds them to give more vertical room to rows). The parts of the current query show as chips, and **+ Save this filter** keeps it as a view.
-- **A column header** opens a menu: pin the column, sort (tinted in cobalt when active), or filter by equals, greater than, less than, between, is empty or is not empty.
+- **A column header** opens a menu: pin the column, sort (tinted in cobalt when active), filter by equals, greater than, less than, between, is empty or is not empty, open **Profile column…** (a floating popover with null share, distinct count, min/max range, and clickable top values that add an equality filter), or — on a single-column foreign key — pick **Show from `<table>`** (`+ <fk>.<col>`) to pull a referenced column straight into the grid. Columns masked by `"redact": true` or `redactColumns` carry a `masked` pill in the header.
 - **▸** at the start of a row expands it in place. Click the row to open its record.
 - **Export** downloads CSV or JSON for this page or for every matching row, or lets you choose the columns first. **Agent: Copy this position** copies the place you are in for a coding agent.
 - The pager sets how many rows a page holds.
@@ -23,7 +23,7 @@ A table has tabs. **Rows** is the grid. **Definition** shows the table's stored 
 
 ## A record
 
-A record shows the row's fields. A foreign key value is a link to the row it names, with that row's table beside it. Under the fields, the rows that point at this one are listed by table, and the **Related** rail counts each table and the column it points through ("via invoice_id"), with the empty ones folded away. Click any of them to keep walking.
+A record shows the row's fields (with a `masked` badge beside any field redacted on the connection). A foreign key value is a link to the row it names, with that row's table beside it. Under the fields, the rows that point at this one are listed by table, and the **Related** rail counts each table and the column it points through ("via invoice_id"), with the empty ones folded away. Click any of them to keep walking.
 
 On a record:
 
@@ -42,7 +42,7 @@ Each step is kept on a trail, shown above the record, and **Back** returns along
 ![Checking the shape of the sample database: schema findings with inline CREATE INDEX statements and Open in SQL](/shots/shapecheck.webp?v=3)
 
 - **Schema & perf** runs the static catalog `lint`: keyless tables, unindexed foreign keys, references without an `ON DELETE` rule, and timestamps without a zone — with ready-to-run `CREATE INDEX` statements you can copy or **Open in SQL**.
-- **Index & scan health** inspects live database statistics (`pg_stat_user_tables` and `pg_stat_user_indexes` on PostgreSQL; `PRAGMA index_list`, `EXPLAIN QUERY PLAN` and `sqlite_stat1` on SQLite) to flag sequential-scan hotspots, unused or duplicate indexes, table bloat and stale planner stats.
+- **Index & scan health** inspects live database statistics (`pg_stat_user_tables`, `pg_stat_user_indexes`, `pg_stat_activity`, `pg_locks` and `pg_blocking_pids` on PostgreSQL; `PRAGMA index_list`, `EXPLAIN QUERY PLAN` and `sqlite_stat1` on SQLite) to flag sequential-scan hotspots, unused or duplicate indexes, table bloat, stale planner stats, blocked lock waiters and long-running or idle-in-transaction sessions.
 - **Data anomalies** runs bounded count-only checks for inverted timestamps (`shipped_at < created_at`), dangling soft-delete lifecycles, and nullable foreign keys that are almost always populated except for outlier rows.
 - **Join paths** finds the shortest `to-one` and `to-many` routes between any two tables, marks whether each hop is indexed, and generates a `SELECT … JOIN …` statement you can copy or **Open in SQL**.
 
