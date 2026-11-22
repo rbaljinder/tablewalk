@@ -5,7 +5,7 @@ description: Tables, records and the walk between them. Every foreign key is a l
 
 In tablewalk a foreign key is a place you can go: from an invoice to its customer, and from the customer back to all of its invoices.
 
-![A customer record: its fields, its invoices listed under them, and a Related rail counting every table that points at it](/shots/record.webp?v=3)
+![A customer record: its fields, its invoices listed under them, and a Related rail counting every table that points at it](/shots/record.webp?v=5)
 
 ## A table
 
@@ -77,6 +77,25 @@ A composite key names each part: `/demo/invoice_line/~invoice_id=1001,line_no=2`
 - **Broadsheet** (`?look=broadsheet`) — warm newsprint (or mahogany inkwell in dark mode), editorial serif masthead and headings, double masthead rules, dotted record leaders, and borderless horizontal tables.
 - **Obsidian** (`?look=obsidian`) — frameless matte shell with a floating rounded workspace island, elevated pill tabs, micro-bevel keycaps, and capsule foreign-key badges.
 - **Folio** (`?look=folio`), **Blueprint** (`?look=blueprint`) and **Console** (`?look=console`) — typeset book tables, architectural whiteprint/cyanotype drawings, and green-bar printout / phosphor CRT output, alongside eight shared Mistri themes with twelve selectable palettes each.
+
+<div class="tw-look-grid">
+  <figure>
+    <img src="/shots/look-braun.webp?v=5" alt="Braun look: anodized aluminum topbar and sidebar, recessed dark digital LCD query and SQL readouts, and an International Orange RUN key" width="1280" height="800" loading="lazy" />
+    <figcaption><strong>Braun</strong> — anodized aluminum housing, recessed LCD query and SQL wells, tactile 3D push-buttons.</figcaption>
+  </figure>
+  <figure>
+    <img src="/shots/look-broadsheet.webp?v=5" alt="Broadsheet look: warm newsprint, editorial serif masthead and headings, double masthead rules, and dotted record leaders" width="1280" height="800" loading="lazy" />
+    <figcaption><strong>Broadsheet</strong> — warm newsprint, editorial serif masthead and headings, dotted record leaders.</figcaption>
+  </figure>
+  <figure>
+    <img src="/shots/look-obsidian.webp?v=5" alt="Obsidian look in dark mode: frameless matte shell with a floating rounded workspace island, elevated pill tabs, and micro-bevel keycaps" width="1280" height="800" loading="lazy" />
+    <figcaption><strong>Obsidian</strong> — floating rounded workspace island, elevated pill tabs, micro-bevel keycaps.</figcaption>
+  </figure>
+  <figure>
+    <img src="/shots/look-blueprint.webp?v=5" alt="Blueprint look: ruled drafting paper and a Prussian-blue architectural entity diagram" width="1280" height="800" loading="lazy" />
+    <figcaption><strong>Blueprint</strong> — drafting whiteprint and a Prussian-blue architectural schema sheet.</figcaption>
+  </figure>
+</div>
 
 ## Good to know
 
