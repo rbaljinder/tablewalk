@@ -126,6 +126,7 @@ whenConnectionControls({
 export async function selectConnection(id, { reload = false, preserveContext = false } = {}) {
   if (!canManageConnections()) return;
   if (!reload && id === state.activeConnection && !connectionTransitionPending()) return;
+  const priorId = state.activeConnection;
   const priorTop = preserveContext && Array.isArray(state.stack) ? state.stack.at(-1) : undefined;
   const priorQuery = preserveContext ? ($('query')?.value ?? '') : '';
   const transition = beginConnectionTransition();

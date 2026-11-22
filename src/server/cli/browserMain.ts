@@ -60,6 +60,7 @@ interface BrowserExtraArgs {
   connection?: string;
   env?: string;
   allEnvs?: boolean;
+  check?: boolean;
   lease?: string;
   maxRows?: string;
   timeoutMs?: string;
@@ -98,6 +99,8 @@ function extractBrowserExtraArgs(argv: readonly string[]): BrowserExtraArgs {
       out.redact = true;
     } else if (arg === '--all-envs') {
       out.allEnvs = true;
+    } else if (arg === '--check') {
+      out.check = true;
     } else if (arg === '--connection') {
       const got = takeValue(arg, argv[i + 1], i);
       if (got) [out.connection, i] = got;
@@ -146,9 +149,10 @@ function extractBrowserExtraArgs(argv: readonly string[]): BrowserExtraArgs {
       rest.push(arg);
     }
   }
-  const modes = [out.query !== undefined, out.call !== undefined, out.batch !== undefined].filter(Boolean).length;
+  const toolModes = [out.query !== undefined, out.call !== undefined, out.batch !== undefined].filter(Boolean).length;
+  const modes = toolModes + (out.check ? 1 : 0);
   if (modes > 1) {
-    out.error ??= 'Pass only one of --query, --call, or --batch.';
+    out.error ??= 'Pass only one of --query, --call, --batch, or --check.';
   }
   if (out.args !== undefined && out.call === undefined && out.query === undefined) {
     out.error ??= '--args goes with --call (or --query).';
@@ -156,11 +160,11 @@ function extractBrowserExtraArgs(argv: readonly string[]): BrowserExtraArgs {
   if (out.allEnvs && out.env !== undefined) {
     out.error ??= 'Pass either --env <env> or --all-envs, not both.';
   }
-  if (out.allEnvs && modes === 0) {
+  if (out.allEnvs && toolModes === 0) {
     out.error ??= '--all-envs goes with --query, --call, or --batch.';
   }
   if (out.format !== undefined && modes === 0) {
-    out.error ??= '--format goes with --query, --call, or --batch.';
+    out.error ??= '--format goes with --query, --call, --batch, or --check.';
   }
   return out;
 }
@@ -205,13 +209,16 @@ export const main: Main = async () => {
     process.exitCode = 2;
     return;
   }
-  /* A format neither binary prints is a typo, said as one here, not sent to the App framework. */
+  /* A format neither binary prints is a typo, said as one here, not sent to the App framework. `agent` is tablewalk's
+     own compact brief format, cleared from `opts.export` before `startFor` checks App-only export formats. */
   const format = opts.export?.toLowerCase();
-  if (format !== undefined && !SCHEMA_EXPORTS.has(format) && !['brief', 'types', 'openapi', 'asyncapi'].includes(format)) {
-    console.error(`tablewalk: --export takes md, mermaid or json — not "${opts.export}".`);
+  if (format !== undefined && !SCHEMA_EXPORTS.has(format) && !['agent', 'brief', 'types', 'openapi', 'asyncapi'].includes(format)) {
+    console.error(`tablewalk: --export takes md, mermaid, json or agent — not "${opts.export}".`);
     process.exitCode = 1;
     return;
   }
+  const exportFormat = format === 'agent' ? 'agent' : opts.export;
+  if (format === 'agent') opts.export = undefined;
   if (startFor(opts) === 'mistri') return refuseApp(appFlagIn(opts), rawArgv);
   /* A word one slip from an App command (`tablewalk chek`) and no file of that name: the near miss is mistri's. */
   if (opts.target && /^[a-z][a-z-]*$/.test(opts.target)) {
@@ -249,7 +256,7 @@ export const main: Main = async () => {
   /* In MCP mode stdout is the protocol channel; in an export or one-shot query, the document — `--export md >> CLAUDE.md`
      must append a brief, not a brief with a startup banner stapled to its forehead. Every startup line goes to stderr,
      redirected here once rather than guarded at each call site. */
-  const printing = opts.mcp || opts.export || opts.lint || opts.diff || oneShotTool;
+  const printing = opts.mcp || Boolean(exportFormat) || opts.lint || opts.diff || oneShotTool || Boolean(extra.check);
   if (printing) console.log = (...args: unknown[]) => console.error(...args);
   if (opts.mcp && process.env.TABLEWALK_MCP_URL?.trim()) {
     const { bridgeMcpToHttp } = await import('./mcpMode.js');
@@ -508,6 +515,12 @@ export const main: Main = async () => {
     );
   }
 
+  if (extra.check) {
+    const { checkConnections } = await import('./databaseOneShot.js');
+    const singleId = extra.connection || extra.env ? (registry.active ?? undefined) : undefined;
+    return checkConnections(registry, { singleId, format: extra.format });
+  }
+
   /* The active connection is opened eagerly unless `--lazy` (or a piped/leased MCP config with `lazy: true`)
      defers dialing until the agent's first tool call so MCP handshake answers immediately. */
   const skipEagerOpen = opts.mcp && (extra.lazy === true || startupMeta.lazy === true);
@@ -525,9 +538,9 @@ export const main: Main = async () => {
     }
   }
 
-  if (opts.export) {
+  if (exportFormat) {
     const { exportSchemaText } = await import('./databaseOneShot.js');
-    return exportSchemaText(opts.export, registry);
+    return exportSchemaText(exportFormat, registry);
   }
   if (opts.diff) {
     const { diffConnections } = await import('./databaseOneShot.js');

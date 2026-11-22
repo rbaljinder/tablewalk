@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.0.0-rc.22
+
+Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.77`.
+
+- **Workbench Power & Multi-Environment Continuity:**
+  - **Logical-Database Shared Browser Stores:** Saved SQL statements (`mistri.sql.v1`), table saved filters
+    (`mistri.views.v1`), composed multi-table views (`mistri.composer.v1`), and pinned columns (`mistri.pins.v1`) now
+    carry across sibling environments of the same logical `database` (`billing@local`, `billing@staging`,
+    `billing@prod`).
+  - **Inline Column Profile & 1-Click FK Column Pull:** Grid column header menus (`.th-menu`) add **Profile column…**
+    (floating popover with null %, distinct count, min/max range, and clickable top values to filter by) and **Show from
+    `<table>`** on single-column foreign keys (`+ customer_id.name`) to project joined columns without hand-typing `show`
+    clauses.
+  - **Per-Column `masked` Indicators:** `GET /api/connections/redacted` and `redactedColumnsByTable` badge grid headers
+    and record field labels on `"redact": true` / `redactColumns` connections so deterministically masked PII is clear
+    at a glance.
+  - **Visual Execution Plans in `SqlPane` & Compiled SQL Bar:** Added **Explain** in the SQL editor (`SqlPane`) and
+    **Plan** in the compiled SQL bar (`#explain-pane`), highlighting sequential scans vs. index seeks with latency and
+    node counts.
+- **Live Agent Co-Browsing & CLI Preflight:**
+  - **Live MCP Topbar Pill & `Follow agent` Mode:** Loopback browser sessions show a live `MCP · N` activity pill in the
+    topbar when external MCP clients call tools, and `AgentConsole` adds a **Follow agent** toggle that automatically
+    walks the browser along incoming `record`, `query`, and `table` deep links.
+  - **`tablewalk --check` Connection & Guardrail Preflight:** Dials configured connections (or `--connection` / `--env`),
+    verifies credentials, reports latency, table/view/FK counts, and active guardrails (`--format json` or `md`), closes
+    all sockets, and exits non-zero on failure.
+  - **`--export agent` Compact Operational Brief:** Generates a token-lean Markdown brief for `CLAUDE.md` / `AGENTS.md`
+    covering configured `db@env` postures, hub/event/join tables, deepest walk chain, key tables, and schema-specific
+    `tablewalk` query examples.
+- **Live PostgreSQL Lock & Query Contention Diagnostics (`perf`):** Extended `perf` with `lock-contention` (`high`) and
+  `long-running-query` (`medium`) rules backed by `pg_stat_activity` + `pg_locks` + `pg_blocking_pids`, intersecting
+  locked relations strictly with the policy-filtered schema and reading zero SQL text or row literals.
+- **CI & Release Workflows:** Upgraded `actions/checkout` and `actions/setup-node` pins across GitHub Actions workflows
+  to Node 24-native `v5.0.0`.
+
 ## 1.0.0-rc.21
 
 Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.77`.

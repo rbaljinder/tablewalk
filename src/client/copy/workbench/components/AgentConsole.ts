@@ -43,4 +43,6 @@ export const say = defineMessages({
   catDiagnostics: 'Diagnostics & perf',
   catMigrations: 'Migrations & order',
   catSafeWrites: 'Safe writes',
+  followAgent: 'Follow agent',
+  followAgentTitle: 'Automatically open the table, query or record an external MCP agent inspects',
 });

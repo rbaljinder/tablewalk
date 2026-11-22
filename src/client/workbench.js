@@ -213,7 +213,9 @@ function start(boot) {
       $('table-filter').select();
     }
   });
-  void import('./workbenchEnhancements.js').then((m) => m.initWorkbenchEnhancements({ openShapeCheck }));
+  void import('./workbenchEnhancements.js').then((m) =>
+    m.initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, openSql, runQueryText }),
+  );
 }
 
 /* The palette's Workbench places are offered where the Workbench's menu is. */

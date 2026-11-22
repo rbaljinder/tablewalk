@@ -227,6 +227,21 @@ test('renders sibling environment pills in SQL header and highlights production 
     expect(calls).toContainEqual({ name: 'sql', arguments: { statement: 'select count(*) from customer', envs: 'all' } });
     await screen.findByText('1 row · 2 ms');
 
+    reply = {
+      structuredContent: {
+        plan: ['SCAN customer', 'SEARCH invoice USING INDEX idx_invoice_customer (customer_id=?)'],
+        stats: { ms: 3 },
+      },
+    };
+    await user.click(screen.getByRole('button', { name: 'Explain' }));
+    expect(calls).toContainEqual({
+      name: 'explain',
+      arguments: { statement: 'select count(*) from customer', connection: 'billing-prod' },
+    });
+    await screen.findByText('2 plan nodes');
+    expect(screen.getByText('1 sequential scan')).toBeInTheDocument();
+    expect(screen.getByText('1 index seek')).toBeInTheDocument();
+
     await user.click(screen.getByRole('button', { name: 'Run as write…' }));
     expect(screen.getByRole('alert')).toHaveTextContent('Production environment (billing-prod)');
   } finally {

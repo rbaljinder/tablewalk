@@ -12,10 +12,17 @@ vi.mock('@mistriwork/kit/client/shellMode.js', () => ({
   shell: () => ({ undo: { refresh: refreshUndo } }),
 }));
 
+const jsonStore = new Map<string, unknown>();
+
 vi.mock('@mistriwork/kit/client/core.js', () => ({
   state: { activeConnection: 'demo' },
   toast: () => {},
   trapFocus: () => () => {},
+  loadJson: (k: string, fallback: unknown) => (jsonStore.has(k) ? jsonStore.get(k) : fallback),
+  saveJson: (k: string, v: unknown) => {
+    jsonStore.set(k, v);
+    return true;
+  },
   api: async (path: string, body: Record<string, unknown>) => {
     if (path === '/api/agent/tools') {
       return {
@@ -84,6 +91,7 @@ function draw() {
 afterEach(() => {
   cleanup();
   calls.length = 0;
+  jsonStore.clear();
   mockActivity = { seq: 0, calls: [], egress: {}, mcpEndpoint: null };
   refreshUndo.mockClear();
 });
@@ -174,6 +182,13 @@ test('shows the live MCP trail, endpoint URL, dry-run badge and refreshes Undo o
   draw();
   await screen.findAllByRole('option');
   expect(await screen.findByRole('button', { name: 'MCP http://localhost:4111/mcp' })).toBeInTheDocument();
+  const followBtn = screen.getByRole('button', { name: 'Follow agent' });
+  expect(followBtn).toHaveAttribute('aria-pressed', 'false');
+  await user.click(followBtn);
+  expect(followBtn).toHaveAttribute('aria-pressed', 'true');
+  expect(jsonStore.get('mistri.followAgent.v1')).toBe(true);
+  await user.click(followBtn);
+  expect(jsonStore.get('mistri.followAgent.v1')).toBe(false);
   expect(document.querySelector('.agent-live-trail h4')).toHaveTextContent('Live MCP trail — 1 call · 3 rows read');
   expect(refreshUndo).toHaveBeenCalledTimes(1);
   await user.click(within(document.querySelector('.agent-live-trail') as HTMLElement).getByRole('button'));

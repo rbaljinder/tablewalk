@@ -40,7 +40,9 @@ export type PerfRule =
   | 'dead-tuple-bloat'
   | 'stale-statistics'
   | 'view-full-scan'
-  | 'missing-analyze-stats';
+  | 'missing-analyze-stats'
+  | 'lock-contention'
+  | 'long-running-query';
 
 export interface PerfFinding {
   rule: PerfRule;
@@ -85,6 +87,14 @@ export const PERF_RULES: Record<PerfRule, { severity: Severity; why: string }> =
     severity: 'low',
     why: 'Multiple indexes compete on a populated SQLite table without `sqlite_stat1` selectivity statistics, leaving the query planner to guess cardinalities.',
   },
+  'lock-contention': {
+    severity: 'high',
+    why: 'One or more database backends are actively blocked waiting on row or relation locks held by another session, stalling reads or writes.',
+  },
+  'long-running-query': {
+    severity: 'medium',
+    why: 'An open transaction or active query has been running long enough to hold locks, pin MVCC snapshots, and block autovacuum cleanup.',
+  },
 };
 
 export interface PgTableStatRow {
@@ -112,6 +122,17 @@ export interface PgIndexStatRow {
   idx_scan: number | string;
   index_bytes: number | string;
   key_columns: string[];
+}
+
+export interface PgActivityContentionRow {
+  pid: number | string;
+  state: string;
+  wait_event_type?: string | null;
+  wait_event?: string | null;
+  blocking_pids?: Array<number | string> | null;
+  age_seconds: number | string;
+  schema_name?: string | null;
+  table_name?: string | null;
 }
 
 function fmtInt(n: number): string {
@@ -383,6 +404,80 @@ function extractSqlitePath(rawUrl: string): string | undefined {
   return trimmed;
 }
 
+const CONTENTION_DIAGNOSTIC_SQL =
+  "SELECT pid, state, wait_event_type, wait_event, pg_blocking_pids(pid) AS blocking_pids, now() - COALESCE(xact_start, query_start) AS age FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND state <> 'idle' ORDER BY age DESC;";
+
+export function analyzePostgresActivityContention(
+  schema: DatabaseSchema,
+  connectionId: string,
+  rows: readonly PgActivityContentionRow[],
+  options: {
+    table?: string;
+    linkTo?: (conn: string, segment: string) => string;
+  } = {},
+): PerfFinding[] {
+  const linkFn = options.linkTo ?? ((c: string, s: string) => `/${encodeURIComponent(c)}/${s}`);
+  const targetMeta = options.table ? findTable(schema, options.table) : undefined;
+  const findings: PerfFinding[] = [];
+  const seenBlockedPid = new Set<string>();
+  const seenLongPid = new Set<string>();
+
+  for (const row of rows) {
+    const pid = String(row.pid ?? '').trim();
+    if (!pid) continue;
+    const age = Number(row.age_seconds ?? 0);
+    if (!Number.isFinite(age) || age <= 0) continue;
+
+    /* Resolve relation strictly through the policy-filtered schema so blocked/out-of-focus tables never surface. */
+    let resolvedTable: TableMeta | undefined;
+    if (row.table_name) {
+      resolvedTable = resolveSchemaTable(schema, row.schema_name ?? undefined, row.table_name);
+      if (!resolvedTable) continue;
+    }
+    if (targetMeta && (!resolvedTable || resolvedTable.id !== targetMeta.id)) continue;
+    if (!resolvedTable && schema.tables.length === 0) continue;
+
+    const tableLabel = resolvedTable?.id ?? targetMeta?.id ?? schema.tables[0]?.id ?? 'database';
+    const link = resolvedTable ? linkFn(connectionId, encodeURIComponent(resolvedTable.id)) : `/${encodeURIComponent(connectionId)}`;
+    const blockers = (row.blocking_pids ?? []).map((p) => String(p).trim()).filter(Boolean);
+    const waitDesc = [row.wait_event_type, row.wait_event].filter(Boolean).join(':');
+
+    if (blockers.length > 0 && age >= 1 && !seenBlockedPid.has(pid)) {
+      seenBlockedPid.add(pid);
+      findings.push({
+        rule: 'lock-contention',
+        severity: 'high',
+        table: tableLabel,
+        ...(resolvedTable?.approxRows !== undefined ? { approxRows: resolvedTable.approxRows } : {}),
+        message: `Backend PID ${pid} has been blocked for ${Math.round(age)}s${resolvedTable ? ` on ${resolvedTable.id}` : ''} waiting on PID ${blockers.join(', ')}${waitDesc ? ` (${waitDesc})` : ''}.`,
+        suggestedSql: CONTENTION_DIAGNOSTIC_SQL,
+        link,
+      });
+      continue;
+    }
+
+    const state = (row.state ?? '').toLowerCase();
+    if (
+      (state === 'active' || state === 'idle in transaction' || state === 'idle in transaction (aborted)') &&
+      age >= 30 &&
+      !seenLongPid.has(pid)
+    ) {
+      seenLongPid.add(pid);
+      findings.push({
+        rule: 'long-running-query',
+        severity: 'medium',
+        table: tableLabel,
+        ...(resolvedTable?.approxRows !== undefined ? { approxRows: resolvedTable.approxRows } : {}),
+        message: `Backend PID ${pid} is "${row.state}" for ${Math.round(age)}s${resolvedTable ? ` holding locks on ${resolvedTable.id}` : ''}${waitDesc ? ` (${waitDesc})` : ''}.`,
+        suggestedSql: CONTENTION_DIAGNOSTIC_SQL,
+        link,
+      });
+    }
+  }
+
+  return sortPerfFindings(findings);
+}
+
 export async function checkPerf(
   registry: Registry,
   id: string,
@@ -420,7 +515,7 @@ export async function checkPerf(
       capMs: 5_000,
     });
     try {
-      const { tableRows, indexRows } = await manager.withReadClient(async (client) => {
+      const { tableRows, indexRows, activityRows } = await manager.withReadClient(async (client) => {
         const hasSchemas = Boolean(config.schemas?.length);
         const schemaFilter = hasSchemas ? ' WHERE schemaname = ANY($1::text[])' : '';
         const indexSchemaFilter = hasSchemas ? ' AND sui.schemaname = ANY($1::text[])' : '';
@@ -470,9 +565,44 @@ export async function checkPerf(
           params,
         );
 
+        let actRows: PgActivityContentionRow[] = [];
+        try {
+          const actRes = await client.query(
+            `SELECT
+               a.pid,
+               a.state,
+               a.wait_event_type,
+               a.wait_event,
+               pg_blocking_pids(a.pid) AS blocking_pids,
+               EXTRACT(EPOCH FROM (now() - COALESCE(a.xact_start, a.query_start)))::numeric AS age_seconds,
+               rel.schema_name,
+               rel.table_name
+             FROM pg_stat_activity a
+             LEFT JOIN LATERAL (
+               SELECT ns.nspname AS schema_name, cl.relname AS table_name
+               FROM pg_locks l
+               JOIN pg_class cl ON cl.oid = l.relation
+               JOIN pg_namespace ns ON ns.oid = cl.relnamespace
+               WHERE l.pid = a.pid
+                 AND cl.relkind IN ('r', 'p', 'v', 'm')
+                 AND ns.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+               ORDER BY l.granted ASC, cl.oid ASC
+               LIMIT 1
+             ) rel ON true
+             WHERE a.datname = current_database()
+               AND a.pid <> pg_backend_pid()
+               AND a.state IS NOT NULL
+               AND a.state <> 'idle'`,
+          );
+          actRows = actRes.rows as unknown as PgActivityContentionRow[];
+        } catch {
+          /* Restricted roles without pg_stat_activity visibility still return table/index stats. */
+        }
+
         return {
           tableRows: tablesRes.rows as unknown as PgTableStatRow[],
           indexRows: indexesRes.rows as unknown as PgIndexStatRow[],
+          activityRows: actRows,
         };
       }, true);
 
@@ -480,11 +610,15 @@ export async function checkPerf(
         table: options.table,
         linkTo: linkFn,
       });
+      const contention = analyzePostgresActivityContention(schema, id, activityRows, {
+        table: options.table,
+        linkTo: linkFn,
+      });
       return {
         dialect: 'postgres',
         source: 'pg_stat',
         scannedTables: analyzed.scannedTables,
-        findings: analyzed.findings,
+        findings: sortPerfFindings([...analyzed.findings, ...contention]),
       };
     } catch (err) {
       throw new ToolError('internal', scrubSecrets((err as Error).message, resolved.url), { cause: err });

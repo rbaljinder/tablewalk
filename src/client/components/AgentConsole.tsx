@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api, state, toast, trapFocus } from '@mistriwork/kit/client/core.js';
+import { api, loadJson, saveJson, state, toast, trapFocus } from '@mistriwork/kit/client/core.js';
 import { formatNumber } from '@mistriwork/kit/client/locale.js';
 import { say } from '../copy/workbench/components/AgentConsole.js';
 import { shown } from '@mistriwork/kit/client/addressMount.js';
@@ -148,6 +148,8 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [toolFilter, setToolFilter] = useState('');
   const [pinnedTarget, setPinnedTarget] = useState<string | null>(null);
+  const [followAgent, setFollowAgent] = useState<boolean>(() => Boolean(loadJson('mistri.followAgent.v1', false)));
+  const seenFollowSeq = useRef<number | null>(null);
   const [transcript, setTranscript] = useState<Call[]>([]);
   const [answer, setAnswer] = useState<
     { kind: 'idle' } | { kind: 'running'; tool: string } | { kind: 'error'; message: string } | { kind: 'answer'; answer: Answer }
@@ -177,7 +179,9 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
     }
   }, [tools.isError]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const externalCalls = Array.isArray(activity.data?.calls) ? activity.data!.calls.filter((c) => c.via === 'mcp') : [];
+  const externalCalls = Array.isArray(activity.data?.calls)
+    ? activity.data!.calls.filter((c) => c.via === 'mcp' || (c as { via?: string }).via === 'mcp-http')
+    : [];
   useEffect(() => {
     const newestUndo = externalCalls.find((c) => c.undoId !== undefined || (c.rowsWritten ?? 0) > 0 || (c.rowsDeleted ?? 0) > 0);
     if (newestUndo && newestUndo.seq > seenWriteSeq.current) {
@@ -185,6 +189,35 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
       void shell().undo?.refresh?.();
     }
   }, [externalCalls]);
+
+  useEffect(() => {
+    const maxSeq = externalCalls.reduce((m, c) => Math.max(m, c.seq), 0);
+    if (seenFollowSeq.current === null) {
+      seenFollowSeq.current = maxSeq;
+      return;
+    }
+    if (!followAgent) {
+      seenFollowSeq.current = Math.max(seenFollowSeq.current, maxSeq);
+      return;
+    }
+    const fresh = externalCalls.find((c) => c.seq > (seenFollowSeq.current ?? 0) && !c.isError);
+    if (!fresh) return;
+    seenFollowSeq.current = Math.max(seenFollowSeq.current, maxSeq);
+    const rawLinks = (fresh as { links?: string[] }).links;
+    const link =
+      (Array.isArray(rawLinks) && typeof rawLinks[0] === 'string' ? rawLinks[0] : undefined) ??
+      (typeof fresh.answer?.structuredContent?.link === 'string' ? fresh.answer.structuredContent.link : undefined);
+    if (link) {
+      onClose();
+      navFollow(link);
+    }
+  }, [externalCalls, followAgent, onClose]);
+
+  const toggleFollowAgent = () => {
+    const next = !followAgent;
+    setFollowAgent(next);
+    saveJson('mistri.followAgent.v1', next);
+  };
 
   if (!tools.data)
     return (
@@ -283,9 +316,20 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
         </div>
         <div className="conn-head-actions">
           {mcpUrl ? (
-            <button type="button" className="ghost" onClick={() => void copyMcpUrl()}>
-              {say('copyMcpEndpoint', { url: mcpUrl })}
-            </button>
+            <>
+              <button
+                type="button"
+                className={`ghost${followAgent ? ' active' : ''}`}
+                aria-pressed={followAgent}
+                title={say('followAgentTitle')}
+                onClick={toggleFollowAgent}
+              >
+                {say('followAgent')}
+              </button>
+              <button type="button" className="ghost" onClick={() => void copyMcpUrl()}>
+                {say('copyMcpEndpoint', { url: mcpUrl })}
+              </button>
+            </>
           ) : null}
           <button type="button" onClick={onClose}>
             {say('common.done')}

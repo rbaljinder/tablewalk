@@ -703,11 +703,13 @@ mistri --app <dir>            an App, served: the App framework's, npx @mistriwo
                               calls over one session, print NDJSON, and exit
       --all-envs              with --query, --call or --batch: run a read-only
                               call across every environment in parallel
-      --format <fmt>          with --query, --call or --batch: json, ndjson, tsv
-                              or md
-      --export <fmt>          print the schema as md, mermaid or json, then exit
-                              (an App's brief, types, openapi and asyncapi are
-                              mistri's)
+      --format <fmt>          with --query, --call, --batch or --check: json,
+                              ndjson, tsv or md
+      --check                 dial configured connections, verify credentials
+                              and guardrails, print readiness, and exit
+      --export <fmt>          print the schema as md, mermaid, json or agent,
+                              then exit (an App's brief, types, openapi and
+                              asyncapi are mistri's)
       --lint [fmt]            report what the shape will cost, then exit
       --fail-on <sev>         with --lint, exit non-zero at this severity; for CI
       --diff <conn>           compare shapes with this connection, then exit

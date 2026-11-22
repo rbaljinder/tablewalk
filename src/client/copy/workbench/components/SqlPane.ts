@@ -36,4 +36,12 @@ export const say = defineMessages({
   compareEnvsTitle: 'Run this read-only SELECT across all sibling environments in parallel',
   compareEnvsFailed: 'Cross-environment compare failed.',
   fanoutErrorBadge: 'error',
+  explain: 'Explain',
+  explainTitle: 'Show the planner execution tree without running the statement',
+  explainFailed: 'Could not explain statement.',
+  planNodes: { one: '{count} plan node', other: '{count} plan nodes' },
+  seqScanBadge: 'seq scan',
+  indexSeekBadge: 'index',
+  seqScanSummary: { one: '{count} sequential scan', other: '{count} sequential scans' },
+  indexSeekSummary: { one: '{count} index seek', other: '{count} index seeks' },
 });

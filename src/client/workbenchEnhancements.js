@@ -3,33 +3,251 @@
  *   1. Segmented sidebar scope (`All · Tables · Views`) + `Focused` connection indicator
  *   2. Collapsible single-line quick-filter toggle (`Filters`) in the table room tab strip
  *   3. Schema landing polish: de-duplicated ER heading, accurate runner-up starter chip
- *      captions, and 1-click `Check shape & perf` / `Join paths` launchers.
+ *      captions, and 1-click `Check shape & perf` / `Join paths` launchers
+ *   4. Per-column `masked` badges in Grid headers and Record fields on redacted connections
+ *   5. Inline Column Profile popover + 1-click `+ Show <fk>.<col>` in `.th-menu`
+ *   6. Compiled-SQL `Plan` button (`EXPLAIN` / `EXPLAIN QUERY PLAN`) in `#explain-pane`
+ *   7. Live external MCP agent topbar pill + background `Follow agent` co-browsing.
  *
  * Loaded dynamically from `workbench.js` so zero bytes land in the cold first-paint JS/CSS budget,
  * and every injected quick button carries `tabIndex = -1` so keyboard roving and Tab-stop order stay untouched.
  */
-import { state, whenConnectionChanges } from '@mistriwork/kit/client/core.js';
+import { splitQuery } from '@mistriwork/engine/shared/clauses.js';
+import {
+  api,
+  currentEntry,
+  loadJson,
+  quote,
+  saveJson,
+  state,
+  viewportBox,
+  viewportSize,
+  whenConnectionChanges,
+} from '@mistriwork/kit/client/core.js';
+import { canUseDatabaseTools } from '@mistriwork/kit/client/connectionScope.js';
+import { formatNumber } from '@mistriwork/kit/client/locale.js';
 import { shell } from '@mistriwork/kit/client/shellMode.js';
-import { addHostListener, onNavigate, shellBody, shellById, shellQuery, shellQueryAll } from '@mistriwork/kit/client/shellHost.js';
+import {
+  addHostListener,
+  navFollow,
+  onNavigate,
+  portalRoot,
+  shellBody,
+  shellById,
+  shellQuery,
+  shellQueryAll,
+} from '@mistriwork/kit/client/shellHost.js';
 import { say } from './copy/workbench/workbenchEnhancements.js';
 import './workbenchEnhancements.css';
 
 const FILTER_COLLAPSED_KEY = 'tablewalk.filters.collapsed';
+const FOLLOW_AGENT_KEY = 'mistri.followAgent.v1';
+const SAVED_FILTERS_KEY = 'mistri.views.v1';
+const COMPOSER_VIEWS_KEY = 'mistri.composer.v1';
+const PINS_KEY = 'mistri.pins.v1';
+
+/** @param {string} connection */
+function siblingGroupFor(connection) {
+  const active = /** @type {any[]} */ (state.connections ?? []).find((c) => c.id === connection);
+  if (!active?.database || (!active.siblings?.length && !active.explicit)) {
+    return { groupKey: null, siblingIds: [connection] };
+  }
+  const otherIds = Array.isArray(active.siblings) ? active.siblings.map((s) => s.id) : [];
+  return {
+    groupKey: `@db:${String(active.database).toLowerCase()}`,
+    siblingIds: [connection, ...otherIds],
+  };
+}
 
 /**
- * @param {{ openShapeCheck: (tab?: import('./components/ShapeCheck.js').ShapeTab) => void }} actions
+ * Carry browser-saved table filters (`mistri.views.v1`), composed views (`mistri.composer.v1`),
+ * and pinned columns (`mistri.pins.v1`) across sibling environments of the same logical database.
+ * @param {string | null | undefined} fromId
+ * @param {string} toId
  */
-export function initWorkbenchEnhancements({ openShapeCheck }) {
-  let filtersCollapsed = false;
-  try {
-    filtersCollapsed = window.localStorage.getItem(FILTER_COLLAPSED_KEY) === '1';
-  } catch {
-    /* Storage unavailable. */
+export function syncSiblingBrowserStores(fromId, toId) {
+  const { groupKey, siblingIds } = siblingGroupFor(toId);
+  if (!groupKey || siblingIds.length < 2) return;
+  const sameGroup = Boolean(fromId && fromId !== toId && siblingIds.includes(fromId));
+
+  // 1. Table saved filters: { [connId]: { [tableId]: Array<{ name, query }> } }
+  const filtersAll = /** @type {Record<string, Record<string, Array<{ name: string; query: string }>>>} */ (
+    loadJson(SAVED_FILTERS_KEY, {})
+  );
+  if (sameGroup && fromId && filtersAll[fromId] && filtersAll[groupKey]) {
+    filtersAll[groupKey] = filtersAll[fromId];
+    filtersAll[toId] = filtersAll[fromId];
+    saveJson(SAVED_FILTERS_KEY, filtersAll);
+  } else {
+    const mergedTables = /** @type {Record<string, Array<{ name: string; query: string }>>} */ ({});
+    let hasAny = false;
+    const sources = sameGroup && fromId ? [fromId, groupKey, toId, ...siblingIds] : [toId, groupKey, ...siblingIds];
+    for (const key of sources) {
+      const byTable = filtersAll[key];
+      if (!byTable || typeof byTable !== 'object') continue;
+      for (const [tableId, list] of Object.entries(byTable)) {
+        if (!Array.isArray(list) || !list.length) continue;
+        hasAny = true;
+        const bucket = (mergedTables[tableId] ??= []);
+        for (const item of list) {
+          if (item && typeof item.name === 'string' && !bucket.some((x) => x.name === item.name)) {
+            bucket.push(item);
+          }
+        }
+      }
+    }
+    if (hasAny) {
+      filtersAll[groupKey] = mergedTables;
+      filtersAll[toId] = mergedTables;
+      saveJson(SAVED_FILTERS_KEY, filtersAll);
+    }
   }
+
+  // 2. Composed multi-table views: { [connId]: { views: Array<{ id, name, ... }>, pinned: string[] } }
+  const composerAll = /** @type {Record<string, any>} */ (loadJson(COMPOSER_VIEWS_KEY, {}));
+  /** @param {any} raw */
+  const normalizeBucket = (raw) =>
+    Array.isArray(raw) ? { views: raw, pinned: [] } : { views: raw?.views ?? [], pinned: raw?.pinned ?? [] };
+  if (sameGroup && fromId && composerAll[fromId] && composerAll[groupKey]) {
+    const latest = normalizeBucket(composerAll[fromId]);
+    composerAll[groupKey] = latest;
+    composerAll[toId] = latest;
+    saveJson(COMPOSER_VIEWS_KEY, composerAll);
+  } else {
+    const seenIds = new Set();
+    const views = [];
+    const pinnedSet = new Set();
+    const sources = sameGroup && fromId ? [fromId, groupKey, toId, ...siblingIds] : [toId, groupKey, ...siblingIds];
+    for (const key of sources) {
+      if (!composerAll[key]) continue;
+      const b = normalizeBucket(composerAll[key]);
+      for (const v of b.views) {
+        const vid = v?.id ?? v?.name;
+        if (vid && !seenIds.has(vid)) {
+          seenIds.add(vid);
+          views.push(v);
+        }
+      }
+      for (const p of b.pinned) if (typeof p === 'string') pinnedSet.add(p);
+    }
+    if (views.length > 0) {
+      const combined = { views, pinned: [...pinnedSet] };
+      composerAll[groupKey] = combined;
+      composerAll[toId] = combined;
+      saveJson(COMPOSER_VIEWS_KEY, composerAll);
+    }
+  }
+
+  // 3. Pinned columns: { [connId]: { [tableId]: string[] } }
+  const pinsAll = /** @type {Record<string, Record<string, string[]>>} */ (loadJson(PINS_KEY, {}));
+  if (sameGroup && fromId && pinsAll[fromId] && pinsAll[groupKey]) {
+    pinsAll[groupKey] = pinsAll[fromId];
+    pinsAll[toId] = pinsAll[fromId];
+    saveJson(PINS_KEY, pinsAll);
+  } else {
+    const mergedPins = /** @type {Record<string, string[]>} */ ({});
+    let hasPins = false;
+    const sources = sameGroup && fromId ? [fromId, groupKey, toId, ...siblingIds] : [toId, groupKey, ...siblingIds];
+    for (const key of sources) {
+      const byTable = pinsAll[key];
+      if (!byTable || typeof byTable !== 'object') continue;
+      for (const [tableId, cols] of Object.entries(byTable)) {
+        if (!Array.isArray(cols) || !cols.length) continue;
+        hasPins = true;
+        const set = new Set(mergedPins[tableId] ?? []);
+        for (const c of cols) if (typeof c === 'string') set.add(c);
+        mergedPins[tableId] = [...set];
+      }
+    }
+    if (hasPins) {
+      pinsAll[groupKey] = mergedPins;
+      pinsAll[toId] = mergedPins;
+      saveJson(PINS_KEY, pinsAll);
+    }
+  }
+}
+
+/**
+ * Append a joined foreign-key dot-path (`customer_id.name`) to a query's `show` clause.
+ * @param {string} queryText
+ * @param {string} tableId
+ * @param {string[]} baseColumns
+ * @param {string} dotPath
+ */
+export function appendShowProjection(queryText, tableId, baseColumns, dotPath) {
+  const base = (queryText ?? '').trim() || tableId;
+  const parts = splitQuery(base);
+  if (parts.show) {
+    const rawCols = parts.show
+      .replace(/^(?:show|select)\s+/i, '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!rawCols.some((c) => c.toLowerCase() === dotPath.toLowerCase() || c.toLowerCase().startsWith(`${dotPath.toLowerCase()} as `))) {
+      rawCols.push(dotPath);
+    }
+    parts.show = `show ${rawCols.join(', ')}`;
+  } else {
+    const initial = baseColumns.slice(0, 6);
+    parts.show = `show ${[...initial, dotPath].join(', ')}`;
+  }
+  return [parts.table || tableId, parts.filter, parts.show, parts.sort, parts.limit]
+    .filter((p) => p && String(p).trim())
+    .join(' ')
+    .trim();
+}
+
+/**
+ * Append an equality filter condition to a query's filter clause.
+ * @param {string} queryText
+ * @param {string} tableId
+ * @param {string} condition
+ */
+function appendEqualityFilter(queryText, tableId, condition) {
+  const base = (queryText ?? '').trim() || tableId;
+  const parts = splitQuery(base);
+  parts.filter = parts.filter ? `${parts.filter} and ${condition}` : condition;
+  return [parts.table || tableId, parts.filter, parts.show, parts.sort, parts.limit]
+    .filter((p) => p && String(p).trim())
+    .join(' ')
+    .trim();
+}
+
+/**
+ * @param {{
+ *   openShapeCheck: (tab?: import('./components/ShapeCheck.js').ShapeTab) => void;
+ *   openAgentConsole?: () => void;
+ *   openSql?: (sql?: string) => void;
+ *   runQueryText?: (raw: string) => void;
+ * }} actions
+ */
+export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, runQueryText }) {
+  let filtersCollapsed = Boolean(loadJson(FILTER_COLLAPSED_KEY, false));
   shellBody().classList.toggle('wb-filters-collapsed', filtersCollapsed);
 
   /** @type {'all' | 'tables' | 'views'} */
   let sidebarKind = 'all';
+
+  /** @type {Map<string, Record<string, string[]>>} */
+  const redactedByConn = new Map();
+  /** @type {Set<string>} */
+  const redactedInflight = new Set();
+
+  const ensureRedactedMap = (/** @type {string} */ connId) => {
+    if (redactedByConn.has(connId) || redactedInflight.has(connId)) return;
+    redactedInflight.add(connId);
+    void api(`/api/connections/redacted?id=${encodeURIComponent(connId)}`)
+      .then((res) => {
+        redactedByConn.set(connId, res?.tables && typeof res.tables === 'object' ? res.tables : {});
+        scheduleSync();
+      })
+      .catch(() => {
+        redactedByConn.set(connId, {});
+      })
+      .finally(() => {
+        redactedInflight.delete(connId);
+      });
+  };
 
   const applySidebarKind = (/** @type {'all' | 'tables' | 'views'} */ next) => {
     sidebarKind = next;
@@ -119,6 +337,235 @@ export function initWorkbenchEnhancements({ openShapeCheck }) {
     });
   }
 
+  /* ---------- Inline Column Profile Popover ---------- */
+
+  const closeProfilePopover = () => {
+    shellById('wb-col-profile-popover')?.remove();
+  };
+
+  /**
+   * @param {HTMLElement} anchorEl
+   * @param {string} tableId
+   * @param {string} colName
+   * @param {string} currentQuery
+   */
+  const openColumnProfile = (anchorEl, tableId, colName, currentQuery) => {
+    closeProfilePopover();
+    const box = viewportBox(anchorEl);
+    const pop = document.createElement('div');
+    pop.id = 'wb-col-profile-popover';
+    pop.className = 'wb-col-profile-popover';
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-label', colName);
+    pop.style.top = `${Math.max(8, Math.round(box.bottom + 6))}px`;
+    pop.style.left = `${Math.max(8, Math.min(Math.round(box.left), Math.max(8, viewportSize().width - 350)))}px`;
+
+    const head = document.createElement('div');
+    head.className = 'wb-col-profile-head';
+    const title = document.createElement('span');
+    title.className = 'wb-col-profile-title';
+    title.textContent = `${tableId}.${colName}`;
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'wb-col-profile-close';
+    closeBtn.textContent = say('profileClose');
+    closeBtn.addEventListener('click', closeProfilePopover);
+    head.append(title, closeBtn);
+
+    const body = document.createElement('div');
+    body.textContent = say('profileLoading', { column: colName });
+    pop.append(head, body);
+    (portalRoot() ?? shellBody()).append(pop);
+
+    void api('/api/agent/call', {
+      name: 'profile',
+      arguments: {
+        ...(state.activeConnection ? { connection: state.activeConnection } : {}),
+        table: tableId,
+        columns: [colName],
+      },
+    })
+      .then((reply) => {
+        if (!pop.isConnected) return;
+        const sc = reply?.structuredContent ?? {};
+        const cols = Array.isArray(sc.columns) ? sc.columns : [];
+        const info = cols.find((c) => c?.name === colName) ?? cols[0];
+        if (reply?.isError || !info) {
+          body.textContent = reply?.content?.[0]?.text ?? say('profileFailed');
+          return;
+        }
+        body.replaceChildren();
+        const metrics = document.createElement('div');
+        metrics.className = 'wb-col-profile-metrics';
+        const rowCount = Number(sc.rowCount ?? info.total ?? 0);
+        const nullCount = Number(info.nullCount ?? 0);
+        const nullPct =
+          typeof info.nullFraction === 'number'
+            ? Math.round(info.nullFraction * 100)
+            : rowCount > 0
+              ? Math.round((nullCount / rowCount) * 100)
+              : 0;
+
+        const addMetric = (/** @type {string} */ text) => {
+          const span = document.createElement('span');
+          span.className = 'wb-col-profile-metric';
+          span.textContent = text;
+          metrics.append(span);
+        };
+        addMetric(say('profileNullPct', { pct: nullPct }));
+        if (info.distinct !== undefined && info.distinct !== null) {
+          addMetric(say('profileDistinct', { count: formatNumber(Number(info.distinct)) }));
+        }
+        if (info.min !== undefined && info.min !== null && info.max !== undefined && info.max !== null) {
+          addMetric(say('profileRange', { min: String(info.min), max: String(info.max) }));
+        }
+        body.append(metrics);
+
+        const top = Array.isArray(info.topValues ?? info.top) ? (info.topValues ?? info.top) : [];
+        if (top.length > 0 && runQueryText) {
+          const topLabel = document.createElement('div');
+          topLabel.className = 'wb-col-profile-top-label';
+          topLabel.textContent = say('profileTopValues');
+          const chips = document.createElement('div');
+          chips.className = 'wb-col-profile-chips';
+          for (const item of top.slice(0, 6)) {
+            const rawVal = item?.value;
+            if (rawVal === null || rawVal === undefined) continue;
+            const valText = String(rawVal);
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'wb-col-profile-chip';
+            const vSpan = document.createElement('span');
+            vSpan.textContent = valText.length > 28 ? `${valText.slice(0, 28)}…` : valText;
+            chip.append(vSpan);
+            if (item?.count !== undefined) {
+              const cSpan = document.createElement('span');
+              cSpan.className = 'wb-col-profile-chip-count';
+              cSpan.textContent = formatNumber(Number(item.count));
+              chip.append(cSpan);
+            }
+            chip.addEventListener('click', () => {
+              closeProfilePopover();
+              const nextQ = appendEqualityFilter(currentQuery, tableId, `${colName} = ${quote(valText.trim())}`);
+              const qInput = /** @type {HTMLInputElement | null} */ (shellById('query'));
+              if (qInput) qInput.value = nextQ;
+              runQueryText(nextQ);
+            });
+            chips.append(chip);
+          }
+          if (chips.childElementCount > 0) body.append(topLabel, chips);
+        }
+      })
+      .catch(() => {
+        if (pop.isConnected) body.textContent = say('profileFailed');
+      });
+  };
+
+  addHostListener(document, 'keydown', (e) => {
+    if (e.key === 'Escape') closeProfilePopover();
+  });
+
+  /* ---------- Enhance `.th-menu` with Profile column + 1-click FK dot-path pull ---------- */
+
+  const enhanceColumnMenus = () => {
+    if (shell().inApp() || !state.schema) return;
+    const menus = shellQueryAll('.th-menu');
+    for (const menu of menus) {
+      if (!(menu instanceof HTMLElement) || menu.dataset.wbEnhanced === '1') continue;
+      const anchor = /** @type {HTMLElement | null} */ (shellQuery('.th-filter[aria-expanded="true"]'));
+      const colName = anchor?.getAttribute('data-column');
+      const entry = currentEntry();
+      if (!anchor || !colName || !entry || entry.kind !== 'table') continue;
+      const tableMeta = /** @type {Array<{ id: string; name: string; columns: Array<{ name: string; primaryKey?: boolean }> }>} */ (
+        state.schema.tables ?? []
+      ).find((t) => t.id === entry.table || t.name === entry.table);
+      if (!tableMeta) continue;
+      menu.dataset.wbEnhanced = '1';
+
+      const sep = document.createElement('div');
+      sep.className = 'th-menu-sep';
+      sep.setAttribute('role', 'separator');
+
+      const profileBtn = document.createElement('button');
+      profileBtn.type = 'button';
+      profileBtn.className = 'th-menu-item';
+      profileBtn.setAttribute('role', 'menuitem');
+      const pLabel = document.createElement('span');
+      pLabel.className = 'th-menu-label';
+      pLabel.textContent = say('profileColumn');
+      const pSub = document.createElement('span');
+      pSub.className = 'th-menu-cond';
+      pSub.textContent = say('profileColumnSub');
+      profileBtn.append(pLabel, pSub);
+      profileBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const queryNow = entry.query ?? tableMeta.id;
+        anchor.click();
+        window.setTimeout(() => openColumnProfile(anchor, tableMeta.id, colName, queryNow), 20);
+      });
+      menu.append(sep, profileBtn);
+
+      /* Foreign-key 1-click column pull (`+ Show customer_id.name`) */
+      const fks = /** @type {Array<{ from: { table: string; columns: string[] }; to: { table: string; columns: string[] } }>} */ (
+        state.schema.foreignKeys ?? []
+      );
+      const fk = fks.find(
+        (f) =>
+          (f.from.table === tableMeta.id || f.from.table === tableMeta.name) &&
+          f.from.columns.length === 1 &&
+          f.from.columns[0] === colName,
+      );
+      if (fk && runQueryText) {
+        const targetMeta = /** @type {Array<{ id: string; name: string; columns: Array<{ name: string; primaryKey?: boolean }> }>} */ (
+          state.schema.tables ?? []
+        ).find((t) => t.id === fk.to.table || t.name === fk.to.table);
+        if (targetMeta) {
+          const candidates = targetMeta.columns
+            .filter((c) => !c.primaryKey)
+            .sort((a, b) => {
+              const score = (/** @type {string} */ n) => (/^(name|title|label|display_name|code|email|status)$/i.test(n) ? 0 : 1);
+              return score(a.name) - score(b.name);
+            })
+            .slice(0, 4);
+          if (candidates.length > 0) {
+            const head = document.createElement('div');
+            head.className = 'wb-th-section-head';
+            head.textContent = say('showFromTarget', { table: targetMeta.name });
+            menu.append(head);
+            const baseColNames = tableMeta.columns.map((c) => c.name);
+            for (const targetCol of candidates) {
+              const dotPath = `${colName}.${targetCol.name}`;
+              const pullBtn = document.createElement('button');
+              pullBtn.type = 'button';
+              pullBtn.className = 'th-menu-item';
+              pullBtn.setAttribute('role', 'menuitem');
+              const lSpan = document.createElement('span');
+              lSpan.className = 'th-menu-label';
+              lSpan.textContent = `+ ${dotPath}`;
+              const cSpan = document.createElement('span');
+              cSpan.className = 'th-menu-cond';
+              cSpan.textContent = say('pullFkSub');
+              pullBtn.append(lSpan, cSpan);
+              pullBtn.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                const nextQ = appendShowProjection(entry.query ?? tableMeta.id, tableMeta.id, baseColNames, dotPath);
+                anchor.click();
+                const qInput = /** @type {HTMLInputElement | null} */ (shellById('query'));
+                if (qInput) qInput.value = nextQ;
+                runQueryText(nextQ);
+              });
+              menu.append(pullBtn);
+            }
+          }
+        }
+      }
+    }
+  };
+
+  /* ---------- Per-column `masked` badges & Compiled-SQL `Plan` button ---------- */
+
+  let lastCompiledSql = '';
+
   const syncContentPolish = () => {
     if (shell().inApp()) return;
 
@@ -139,14 +586,9 @@ export function initWorkbenchEnhancements({ openShapeCheck }) {
         btn.addEventListener('click', () => {
           filtersCollapsed = !shellBody().classList.contains('wb-filters-collapsed');
           shellBody().classList.toggle('wb-filters-collapsed', filtersCollapsed);
-          try {
-            window.localStorage.setItem(FILTER_COLLAPSED_KEY, filtersCollapsed ? '1' : '0');
-          } catch {
-            /* Ignore storage errors. */
-          }
+          saveJson(FILTER_COLLAPSED_KEY, filtersCollapsed);
           syncContentPolish();
         });
-        /* Insert right before the right-aligned action (e.g. Copy app entry) or at end of .tabs. */
         const lastBtn = tabs.querySelector(':scope > button:not(.tab):last-of-type');
         if (lastBtn) tabs.insertBefore(btn, lastBtn);
         else tabs.append(btn);
@@ -158,7 +600,115 @@ export function initWorkbenchEnhancements({ openShapeCheck }) {
       existingToggle.remove();
     }
 
-    /* 2. Schema landing polish: de-duplicate ER title, fix runner-up chip captions, add diagnostic chips */
+    /* 2. Compiled-SQL `#explain-pane` inline `Plan` button */
+    const explainPane = shellById('explain-pane');
+    const explainPre = shellById('explain');
+    const explainEdit = shellById('explain-edit');
+    const activeConn = /** @type {Array<{ id: string; redactsRows?: boolean; hidesColumns?: boolean }>} */ (state.connections ?? []).find(
+      (c) => c.id === state.activeConnection,
+    );
+    const canExplain = !activeConn?.redactsRows && !activeConn?.hidesColumns;
+
+    if (explainPane && explainPre && explainEdit && !explainPane.hidden && canExplain) {
+      const currentSql = explainPre.textContent?.trim() ?? '';
+      if (currentSql !== lastCompiledSql) {
+        lastCompiledSql = currentSql;
+        shellById('wb-inline-plan')?.remove();
+      }
+      if (!shellById('wb-explain-plan-btn')) {
+        const planBtn = document.createElement('button');
+        planBtn.id = 'wb-explain-plan-btn';
+        planBtn.type = 'button';
+        planBtn.tabIndex = -1;
+        planBtn.className = 'wb-explain-plan-btn';
+        planBtn.title = say('explainPlanTitle');
+        planBtn.textContent = say('explainPlanBtn');
+        planBtn.addEventListener('click', () => {
+          const existing = shellById('wb-inline-plan');
+          if (existing) {
+            existing.remove();
+            return;
+          }
+          const sqlText = explainPre.textContent?.trim() ?? '';
+          if (!sqlText) return;
+          void api('/api/agent/call', {
+            name: 'explain',
+            arguments: {
+              ...(state.activeConnection ? { connection: state.activeConnection } : {}),
+              statement: sqlText,
+            },
+          })
+            .then((reply) => {
+              const lines = reply?.structuredContent?.plan;
+              if (!Array.isArray(lines) || !lines.length) return;
+              shellById('wb-inline-plan')?.remove();
+              const host = document.createElement('div');
+              host.id = 'wb-inline-plan';
+              host.className = 'wb-inline-plan';
+              explainPane.style.flexWrap = 'wrap';
+              for (const line of lines) {
+                const text = String(line);
+                const isIdx =
+                  /\b(?:Index(?: Only)? Scan|Bitmap Index Scan)\b/i.test(text) || /\bUSING\s+(?:COVERING\s+)?INDEX\b/i.test(text);
+                const isSeq = !isIdx && (/\bSeq Scan\b/i.test(text) || /^SCAN\s+/i.test(text) || /\bSCAN TABLE\b/i.test(text));
+                const row = document.createElement('div');
+                row.className = `wb-inline-plan-row${isSeq ? ' tone-warn' : isIdx ? ' tone-ok' : ''}`;
+                const s = document.createElement('span');
+                s.textContent = text;
+                row.append(s);
+                if (isSeq || isIdx) {
+                  const tag = document.createElement('span');
+                  tag.className = 'wb-inline-plan-tag';
+                  tag.textContent = isSeq ? say('seqScanBadge') : say('indexSeekBadge');
+                  row.append(tag);
+                }
+                host.append(row);
+              }
+              explainPane.append(host);
+            })
+            .catch(() => {});
+        });
+        explainEdit.insertAdjacentElement('beforebegin', planBtn);
+      }
+    } else {
+      shellById('wb-explain-plan-btn')?.remove();
+      shellById('wb-inline-plan')?.remove();
+    }
+
+    /* 3. Per-column `masked` badges on redacted connections */
+    if (activeConn?.redactsRows && state.activeConnection) {
+      ensureRedactedMap(state.activeConnection);
+      const map = redactedByConn.get(state.activeConnection);
+      const entry = currentEntry();
+      const activeTableId = entry && typeof entry.table === 'string' ? entry.table : null;
+      const maskedSet = new Set(activeTableId && map ? (map[activeTableId] ?? []) : []);
+      if (maskedSet.size > 0) {
+        for (const filterBtn of shellQueryAll('.grid-host th .th-filter[data-column]')) {
+          const col = filterBtn.getAttribute('data-column') ?? '';
+          const th = filterBtn.closest('th');
+          if (!th || !maskedSet.has(col) || th.querySelector('.wb-masked-col-pill')) continue;
+          const badge = document.createElement('span');
+          badge.className = 'wb-masked-col-pill';
+          badge.title = say('maskedColTitle');
+          badge.textContent = say('maskedColBadge');
+          filterBtn.insertAdjacentElement('beforebegin', badge);
+        }
+        for (const labelEl of shellQueryAll('.field-name, .record-field-name, dt')) {
+          if (labelEl.querySelector('.wb-masked-col-pill')) continue;
+          const firstToken = (labelEl.childNodes[0]?.textContent ?? labelEl.textContent ?? '').trim().split(/\s+/)[0];
+          if (!firstToken || !maskedSet.has(firstToken)) continue;
+          const badge = document.createElement('span');
+          badge.className = 'wb-masked-col-pill';
+          badge.title = say('maskedColTitle');
+          badge.textContent = say('maskedColBadge');
+          labelEl.append(badge);
+        }
+      }
+    } else {
+      for (const stale of shellQueryAll('.wb-masked-col-pill')) stale.remove();
+    }
+
+    /* 4. Schema landing polish: de-duplicate ER title, fix runner-up chip captions, add diagnostic chips */
     const landingStartsHead = shellQuery('.landing-starts-head');
     if (landingStartsHead && !landingStartsHead.querySelector('[data-wb-landing-tools]')) {
       const wrap = document.createElement('span');
@@ -187,14 +737,12 @@ export function initWorkbenchEnhancements({ openShapeCheck }) {
       landingStartsHead.append(wrap);
     }
 
-    /* De-duplicate repeated database label above the overview ER diagram */
     const landingDiagramTitle = shellQuery('.landing-top ~ .diagram .diagram-head .diagram-title');
     if (landingDiagramTitle && landingDiagramTitle.dataset.wbPolished !== '1') {
       landingDiagramTitle.dataset.wbPolished = '1';
       landingDiagramTitle.textContent = say('schemaDiagramHeading');
     }
 
-    /* Fix runner-up starter chips where Summary.js repeated "the largest table here" */
     const startChips = shellQueryAll('.landing-chips .start-chip');
     if (startChips.length > 1 && state.schema) {
       const schemaTables = /** @type {Array<{ id: string; name: string; columns?: unknown[] }>} */ (state.schema.tables ?? []);
@@ -226,6 +774,83 @@ export function initWorkbenchEnhancements({ openShapeCheck }) {
     }
   };
 
+  /* ---------- Live external MCP agent topbar pill + background Follow-agent co-browsing ---------- */
+
+  let seenMcpSeq = -1;
+  let totalExternalMcpCalls = 0;
+  let lastExternalTool = '';
+  let mcpSupported = true;
+
+  const syncAgentPill = () => {
+    const actionsBar = shellQuery('.topbar-actions');
+    const sqlToggle = shellById('sql-toggle');
+    if (!actionsBar || !sqlToggle || shell().inApp() || totalExternalMcpCalls === 0) {
+      shellById('wb-agent-pill')?.remove();
+      return;
+    }
+    let pill = /** @type {HTMLButtonElement | null} */ (shellById('wb-agent-pill'));
+    if (!pill) {
+      pill = document.createElement('button');
+      pill.id = 'wb-agent-pill';
+      pill.type = 'button';
+      pill.tabIndex = -1;
+      pill.className = 'wb-agent-pill';
+      pill.title = say('agentLiveTitle');
+      pill.addEventListener('click', () => openAgentConsole?.());
+      sqlToggle.insertAdjacentElement('beforebegin', pill);
+    }
+    const following = Boolean(loadJson(FOLLOW_AGENT_KEY, false));
+    pill.replaceChildren();
+    const dot = document.createElement('span');
+    dot.className = 'wb-agent-pill-dot';
+    dot.setAttribute('aria-hidden', 'true');
+    const label = document.createElement('span');
+    label.textContent =
+      following && lastExternalTool
+        ? say('agentFollowingPill', { tool: lastExternalTool })
+        : say('agentLivePill', { count: totalExternalMcpCalls });
+    pill.append(dot, label);
+  };
+
+  const pollExternalMcp = () => {
+    if (!mcpSupported || document.hidden || shell().inApp() || !canUseDatabaseTools()) return;
+    const since = seenMcpSeq > 0 ? seenMcpSeq : 0;
+    void api(`/api/agent/activity?since=${since}`)
+      .then((data) => {
+        if (data?.mcpEndpoint === null) {
+          mcpSupported = false;
+          return;
+        }
+        const calls = Array.isArray(data?.calls) ? data.calls.filter((c) => c && (c.via === 'mcp' || c.via === 'mcp-http')) : [];
+        const nextSeq = Number(data?.seq ?? 0);
+        if (seenMcpSeq < 0) {
+          seenMcpSeq = nextSeq;
+          totalExternalMcpCalls = calls.length;
+          if (calls[0]?.tool) lastExternalTool = String(calls[0].tool);
+          syncAgentPill();
+          return;
+        }
+        if (calls.length > 0) {
+          totalExternalMcpCalls += calls.length;
+          const newest = calls[0];
+          if (newest?.tool) lastExternalTool = String(newest.tool);
+          const following = Boolean(loadJson(FOLLOW_AGENT_KEY, false));
+          const consoleOpen = Boolean(shellQuery('[role="dialog"][aria-label="Agent console"]'));
+          if (following && !consoleOpen && newest && !newest.isError) {
+            const link =
+              (Array.isArray(newest.links) && typeof newest.links[0] === 'string' ? newest.links[0] : undefined) ??
+              (typeof newest.answer?.structuredContent?.link === 'string' ? newest.answer.structuredContent.link : undefined);
+            if (link) navFollow(link);
+          }
+        }
+        if (nextSeq > seenMcpSeq) seenMcpSeq = nextSeq;
+        syncAgentPill();
+      })
+      .catch(() => {});
+  };
+
+  window.setInterval(pollExternalMcp, 3000);
+
   let rafPending = false;
   const scheduleSync = () => {
     if (rafPending) return;
@@ -234,6 +859,7 @@ export function initWorkbenchEnhancements({ openShapeCheck }) {
       rafPending = false;
       syncSidebarMeta();
       syncContentPolish();
+      enhanceColumnMenus();
     });
   };
 
@@ -241,17 +867,36 @@ export function initWorkbenchEnhancements({ openShapeCheck }) {
   if (content) {
     new MutationObserver(scheduleSync).observe(content, { childList: true, subtree: true });
   }
+  const explainPaneEl = shellById('explain-pane');
+  if (explainPaneEl) {
+    new MutationObserver(scheduleSync).observe(explainPaneEl, { attributes: true, childList: true, subtree: true });
+  }
+  const portal = portalRoot() ?? shellBody();
+  if (portal) {
+    new MutationObserver(() => enhanceColumnMenus()).observe(portal, { childList: true, subtree: true });
+  }
   const tableList = shellById('table-list');
   if (tableList) {
     new MutationObserver(scheduleSync).observe(tableList, { childList: true });
   }
+  let prevConnId = state.activeConnection ?? null;
   whenConnectionChanges(() => {
     sidebarKind = 'all';
     const sidebar = shellQuery('.sidebar');
     if (sidebar) delete sidebar.dataset.sidebarKind;
+    closeProfilePopover();
+    if (state.activeConnection) {
+      syncSiblingBrowserStores(prevConnId, state.activeConnection);
+      prevConnId = state.activeConnection;
+    }
     scheduleSync();
   });
-  onNavigate(scheduleSync);
+  onNavigate(() => {
+    closeProfilePopover();
+    scheduleSync();
+  });
   addHostListener(window, 'resize', scheduleSync);
+  if (state.activeConnection) syncSiblingBrowserStores(null, state.activeConnection);
   scheduleSync();
+  window.setTimeout(pollExternalMcp, 800);
 }

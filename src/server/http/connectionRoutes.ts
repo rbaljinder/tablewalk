@@ -16,6 +16,7 @@ import {
   answerMcpHttp,
   getConnectionConfigExtras,
   getConnectionEnvMeta,
+  getConnectionRuntimePolicy,
   getTopLevelConfigExtras,
   listEnrichedConnections,
   removeConnectionEnvMeta,
@@ -127,6 +128,31 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
       return true;
     }
     send(res, 200, { appConfigured: false });
+    return true;
+  }
+
+  if (path === '/api/connections/redacted' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const requested = url.searchParams.get('id')?.trim() || registry.active;
+    if (!requested || !registry.configOf(requested)) {
+      send(res, 200, { connection: requested ?? null, redacted: false, tables: {} });
+      return true;
+    }
+    const policy = getConnectionRuntimePolicy(registry, requested);
+    if (!policy?.redactsRows) {
+      send(res, 200, { connection: requested, redacted: false, tables: {} });
+      return true;
+    }
+    try {
+      const { schema } = await registry.open(requested);
+      const { redactedColumnsByTable } = await import('../mask.js');
+      send(res, 200, {
+        connection: requested,
+        redacted: true,
+        tables: redactedColumnsByTable(schema, { columns: policy.redactColumns }),
+      });
+    } catch {
+      send(res, 200, { connection: requested, redacted: true, tables: {} });
+    }
     return true;
   }
 
