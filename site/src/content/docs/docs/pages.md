@@ -43,7 +43,7 @@ Layouts and pages are kept by the server, so every browser that reaches it sees 
 | Record layouts | `$XDG_CONFIG_HOME/tablewalk/layouts.json` |
 | Saved pages | `$XDG_CONFIG_HOME/tablewalk/pages.json` |
 
-`$XDG_CONFIG_HOME` is `~/.config` when it is not set. The files are plain JSON, keyed by connection and then table, so you can read them and copy them to another machine. Saved filters, views and SQL statements stay in the browser that saved them; to share one, put it in the config file.
+`$XDG_CONFIG_HOME` is `~/.config` when it is not set. The files are plain JSON, keyed by connection and then table, so you can read them and copy them to another machine. Saved filters, composed views, pinned columns and saved SQL statements stay in the browser that saved them — carrying automatically across sibling environments of the same logical `database` (`billing@local`, `billing@staging`, `billing@prod`) while remaining separate from unrelated databases. To share them with teammates, put them in the config file.
 
 ## Sharing them with a team
 
