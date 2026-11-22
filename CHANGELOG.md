@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.0-rc.24
+
+Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.77`.
+
+- **Workbench Structural Host Looks (`Obsidian`, `Braun`, `Broadsheet`):**
+  - **`Obsidian` (`?look=obsidian`):** Frameless matte outer shell with a floating rounded workspace island, elevated
+    pill tabs, `6px` specular micro-bevel keycap controls, capsule foreign-key badges, small-caps `NULL`, and rounded
+    constellation ER cards.
+  - **`Braun` (`?look=braun`):** Bead-blasted anodized aluminum topbar and sidebar, recessed dark phosphor-jade LCD
+    readout wells for both the query bar (`#query`) and SQL workbench (`.sql-input`), tactile 3D chicklet push-buttons
+    with `:active` depression, an orange LED active-table indicator, and an International Orange `RUN` key while
+    preserving exact SQL identifier casing.
+  - **`Broadsheet` (`?look=broadsheet`):** Warm newsprint surfaces (mahogany inkwell in dark mode), editorial serif
+    masthead and headings, `3px double` newspaper masthead rules on topbar and SQL drawer, dotted index leaders on
+    record fields, borderless horizontal data tables, and claret burgundy + teal ink.
+- **Desktop Record-Header Layout Hygiene:** `.record-heading` action buttons stay single-line (`white-space: nowrap`) and
+  wrap cleanly across all built-in and kit looks on split-screen laptop viewports without colliding with the `Related`
+  rail.
+
 ## 1.0.0-rc.23
 
 Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.77`.

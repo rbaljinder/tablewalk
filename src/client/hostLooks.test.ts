@@ -24,6 +24,13 @@ test('selects built-in kit looks, Instrument palettes, and falls back to default
   expect(visualThemeChoice()).toBe('lumen');
   expect(visualPaletteChoice()).toBe('teal');
 
+  for (const look of ['obsidian', 'braun', 'broadsheet']) {
+    window.history.replaceState(null, '', `/demo/customer?look=${look}`);
+    declareHostLooks();
+    expect(visualThemeChoice()).toBe(look);
+    expect(window.location.search).toBe('');
+  }
+
   window.history.replaceState(null, '', '/demo/customer?look=unknown-theme');
   declareHostLooks();
   expect(visualThemeChoice()).toBe('default');

@@ -10,9 +10,9 @@
  * these are the kit's host looks (visualTheme.ts `registerHostLooks`): they appear in Preferences beside the kit's,
  * persist under the Workbench's look key, and set `data-host-look` on the root, which each stylesheet is keyed on. A
  * look's sheet is fetched only when it is worn, and waited for before the shell boots, so the first paint carries none.
- * `?look=instrument` (or `&palette=graphite`) is the default; `?look=folio` (or `blueprint`, `console`, or `default`)
- * picks one from the address, as a link to a look; `?look=instrument&palette=fog` (or `stone`, `slate`, `ink`) picks one
- * of Instrument's other palettes.
+ * `?look=instrument` (or `&palette=graphite`) is the default; `?look=folio` (or `obsidian`, `braun`, `broadsheet`,
+ * `blueprint`, `console`, or `default`) picks one from the address, as a link to a look; `?look=instrument&palette=fog`
+ * (or `stone`, `slate`, `ink`) picks one of Instrument's other palettes.
  *
  * Instrument's palettes are host looks of their own (`instrument-<palette>`) over one sheet of colour alone (the
  * structure is native.css's, keyed to include them): the kit offers a Palette choice only for its own looks
@@ -51,6 +51,24 @@ const LOOKS = [
     label: 'Folio',
     sheet: () => import('./looks/folio.css'),
     swatches: ['#fcfbf9', '#1c1a17', '#1e6a55'],
+  },
+  {
+    id: 'obsidian',
+    label: 'Obsidian',
+    sheet: () => import('./looks/obsidian.css'),
+    swatches: ['#ecedf2', '#111319', '#5e6ad2'],
+  },
+  {
+    id: 'braun',
+    label: 'Braun',
+    sheet: () => import('./looks/braun.css'),
+    swatches: ['#dedcd4', '#171c18', '#e04619'],
+  },
+  {
+    id: 'broadsheet',
+    label: 'Broadsheet',
+    sheet: () => import('./looks/broadsheet.css'),
+    swatches: ['#fff4ea', '#1f1a17', '#990f3d'],
   },
 ];
 
