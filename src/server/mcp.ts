@@ -29,6 +29,7 @@ export {
   agentActivity,
   getConnectionConfigExtras,
   getConnectionEnvMeta,
+  getConnectionRuntimePolicy,
   getTopLevelConfigExtras,
   listEnrichedConnections,
   loadConfigEnvMeta,

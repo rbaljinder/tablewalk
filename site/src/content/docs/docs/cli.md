@@ -96,20 +96,22 @@ See [Deploying](/docs/deploying/#behind-a-proxy) for when you need these.
 | `--args <json>` | With `--call` or `--query`: JSON object of tool arguments. |
 | `--batch [path\|-]` | Run newline-delimited queries, breakdowns or JSON `{"tool","args"}` calls over one session, print NDJSON, close all connections, and exit. |
 | `--all-envs` | With `--query`, `--call` or `--batch`: run a read-only call across every environment of the target database in parallel. |
-| `--format <fmt>` | With `--query`, `--call` or `--batch`: output format (`json`, `ndjson`, `tsv` or `md`). |
+| `--format <fmt>` | With `--query`, `--call`, `--batch` or `--check`: output format (`json`, `ndjson`, `tsv` or `md`). |
 
-## Checking a schema
+## Checking connections and schemas
 
-These print and exit, so they fit in CI.
+These print and exit, so they fit in CI and vault preflight scripts.
 
 | Option | |
 | --- | --- |
-| `--export <fmt>` | The schema as `md`, `mermaid` or `json`. |
+| `--check` | Dial configured connections (or the target `--connection` / `--env`), verify credentials and guardrails, print a readiness matrix (`--format json` or `md`), and exit. |
+| `--export <fmt>` | The schema as `md`, `mermaid`, `json`, or `agent` (a compact operational brief for `CLAUDE.md` / `AGENTS.md`). |
 | `--lint [fmt]` | What the shape will cost (missing keys, unindexed references, naive timestamps), as text or `json`. |
 | `--fail-on <sev>` | With `--lint`: exit non-zero when a finding is at least `high`, `medium` or `low`. |
 | `--diff <conn>` | Compare the active connection's shape with this one. Exits 1 when they differ, like `diff`. |
 
 ```sh
+npx tablewalk --config ./tablewalk.json --check --format md
 npx tablewalk "$DATABASE_URL" --lint --fail-on high
 ```
 

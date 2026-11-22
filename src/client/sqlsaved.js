@@ -62,8 +62,35 @@ export async function loadSavedSql() {
   }
 }
 
+/**
+ * Resolve logical-database group key and sibling connection ids from server-enriched `state.connections`.
+ * @param {string} connection
+ */
+export function siblingContext(connection) {
+  const active = /** @type {any[]} */ (state.connections ?? []).find((c) => c.id === connection);
+  if (!active?.database || (!active.siblings?.length && !active.explicit)) {
+    return { groupKey: null, siblingIds: [connection] };
+  }
+  const otherIds = Array.isArray(active.siblings) ? active.siblings.map((s) => s.id) : [];
+  return {
+    groupKey: `@db:${String(active.database).toLowerCase()}`,
+    siblingIds: [connection, ...otherIds],
+  };
+}
+
 function localFor(connection) {
-  return loadJson(KEY, {})[connection] ?? [];
+  const all = loadJson(KEY, {});
+  const { groupKey, siblingIds } = siblingContext(connection);
+  if (!groupKey) return all[connection] ?? [];
+  const merged = new Map();
+  for (const key of [groupKey, connection, ...siblingIds]) {
+    for (const entry of all[key] ?? []) {
+      if (entry && typeof entry.name === 'string' && !merged.has(entry.name)) {
+        merged.set(entry.name, entry);
+      }
+    }
+  }
+  return [...merged.values()];
 }
 
 /**
@@ -101,9 +128,17 @@ export function saveStatement(name, sql) {
   }
 
   const all = loadJson(KEY, {});
-  const kept = (all[connection] ?? []).filter((q) => q.name !== trimmed);
+  const { groupKey, siblingIds } = siblingContext(connection);
+  const targetKey = groupKey ?? connection;
+  const base = groupKey ? localFor(connection) : (all[connection] ?? []);
+  const kept = base.filter((q) => q.name !== trimmed);
   kept.push({ name: trimmed, sql: sql.trim() });
-  all[connection] = kept;
+  all[targetKey] = kept;
+  if (groupKey) {
+    for (const sibId of siblingIds) {
+      if (Array.isArray(all[sibId])) all[sibId] = kept;
+    }
+  }
 
   if (!saveJson(KEY, all)) {
     toast(say('common.couldNotSaveThisBrowser'), 'error');
@@ -116,6 +151,14 @@ export function removeStatement(name) {
   if (!canUseDatabaseTools()) return;
   const connection = connectionKey();
   const all = loadJson(KEY, {});
-  all[connection] = (all[connection] ?? []).filter((q) => q.name !== name);
+  const { groupKey, siblingIds } = siblingContext(connection);
+  if (groupKey) {
+    all[groupKey] = localFor(connection).filter((q) => q.name !== name);
+    for (const sibId of siblingIds) {
+      if (Array.isArray(all[sibId])) all[sibId] = all[sibId].filter((q) => q.name !== name);
+    }
+  } else {
+    all[connection] = (all[connection] ?? []).filter((q) => q.name !== name);
+  }
   saveJson(KEY, all);
 }

@@ -249,6 +249,32 @@ function matchesExplicit(wanted: ReadonlySet<string>, table: TableMeta | undefin
 }
 
 /**
+ * Compute the catalog columns deterministically masked on each table when `"redact": true` is active.
+ * Excludes primary keys, foreign-key join endpoints, and constrained enum/CHECK vocabularies.
+ */
+export function redactedColumnsByTable(schema: DatabaseSchema, options: MaskOptions = {}): Record<string, string[]> {
+  const wanted = new Set((options.columns ?? []).map((c) => c.trim().toLowerCase()).filter(Boolean));
+  const out: Record<string, string[]> = {};
+  for (const table of schema.tables) {
+    const locked = structuralColumns(schema, table);
+    const peerPii = tableHasPiiPeer(table);
+    const cols: string[] = [];
+    for (const col of table.columns) {
+      if (locked.has(col.name)) continue;
+      const explicit = matchesExplicit(wanted, table, col.name);
+      if (classifyColumn(table, col, col.name, explicit, peerPii)) {
+        cols.push(col.name);
+      }
+    }
+    if (cols.length) {
+      out[table.id] = cols;
+      if (table.name !== table.id && !out[table.name]) out[table.name] = cols;
+    }
+  }
+  return out;
+}
+
+/**
  * Mask a batch of rows for `tableId` (or an untyped SQL/view result when `tableId` is absent or unknown).
  * Returns the masked rows and the column names that were masked.
  */

@@ -68,7 +68,8 @@ type Outcome =
   | { kind: 'error'; message: string }
   | { kind: 'written'; affected: number }
   | { kind: 'rows'; data: SqlResult }
-  | { kind: 'fanout'; entries: FanoutEnvEntry[] };
+  | { kind: 'fanout'; entries: FanoutEnvEntry[] }
+  | { kind: 'plan'; lines: string[]; ms: number };
 
 interface SqlPaneProps {
   draft: string;
@@ -100,6 +101,8 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
       detail?: string;
       writable?: boolean;
       rows?: boolean;
+      hidesColumns?: boolean;
+      redactsRows?: boolean;
       database?: string;
       env?: string;
       tier?: EnvironmentTier;
@@ -113,6 +116,7 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
     ? groupConnectionsByDatabase(enriched).find((g) => g.database.toLowerCase() === activeConn.database.toLowerCase())
     : undefined;
   const writable = activeConn?.writable;
+  const canExplain = !activeConn?.hidesColumns && !activeConn?.redactsRows;
 
   useEffect(() => {
     const node = input.current!;
@@ -182,6 +186,36 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
     setOutcome({ kind: 'rows', data });
   };
   const run = () => void execute(input.current?.value ?? '');
+
+  const explainStatement = async () => {
+    const statement = (input.current?.value ?? '').trim();
+    if (!statement) return;
+    setOutcome({ kind: 'running' });
+    try {
+      const reply = (await api('/api/agent/call', {
+        name: 'explain',
+        arguments: {
+          statement,
+          ...(connections.activeConnection ? { connection: connections.activeConnection } : {}),
+        },
+      })) as {
+        isError?: boolean;
+        content?: Array<{ text?: string }>;
+        structuredContent?: { plan?: string[]; stats?: { ms?: number } };
+      };
+      if (reply.isError || !Array.isArray(reply.structuredContent?.plan)) {
+        setOutcome({ kind: 'error', message: reply.content?.[0]?.text ?? say('explainFailed') });
+        return;
+      }
+      setOutcome({
+        kind: 'plan',
+        lines: reply.structuredContent.plan,
+        ms: Number(reply.structuredContent.stats?.ms ?? 0),
+      });
+    } catch (err) {
+      setOutcome({ kind: 'error', message: (err as Error).message });
+    }
+  };
 
   const save = async () => {
     const statement = (input.current?.value ?? '').trim();
@@ -325,6 +359,11 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
               {say('compareEnvs')}
             </Button>
           ) : null}
+          {canExplain ? (
+            <Button title={say('explainTitle')} onClick={() => void explainStatement()}>
+              {say('explain')}
+            </Button>
+          ) : null}
           <Button title={say('keepThisStatementUnder')} onClick={() => void save()}>
             {say('save')}
           </Button>
@@ -404,6 +443,45 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
   );
 }
 
+function classifyPlanLine(line: string): 'warn' | 'ok' | null {
+  const trimmed = line.trim();
+  if (/\b(?:Index(?: Only)? Scan|Bitmap Index Scan)\b/i.test(trimmed) || /\bUSING\s+(?:COVERING\s+)?INDEX\b/i.test(trimmed)) {
+    return 'ok';
+  }
+  if (/\bSeq Scan\b/i.test(trimmed) || /^SCAN\s+/i.test(trimmed) || /\bSCAN TABLE\b/i.test(trimmed)) {
+    return 'warn';
+  }
+  return null;
+}
+
+function PlanResult({ lines, ms }: { lines: string[]; ms: number }) {
+  const classified = lines.map((line) => ({ line, tone: classifyPlanLine(line) }));
+  const seqScans = classified.filter((c) => c.tone === 'warn').length;
+  const indexSeeks = classified.filter((c) => c.tone === 'ok').length;
+  return (
+    <>
+      <div className="sql-stats">
+        <span>{say('planNodes', { count: lines.length })}</span>
+        <span>{say('msMs', { ms })}</span>
+        {seqScans > 0 ? <span className="sql-truncated">{say('seqScanSummary', { count: seqScans })}</span> : null}
+        {indexSeeks > 0 ? <span>{say('indexSeekSummary', { count: indexSeeks })}</span> : null}
+      </div>
+      <div className="sql-plan-list" role="region" aria-label={say('explain')}>
+        {classified.map(({ line, tone }, i) => (
+          <div key={i} className={`sql-plan-line${tone ? ` tone-${tone}` : ''}`}>
+            <span>{line}</span>
+            {tone === 'warn' ? (
+              <span className="sql-plan-tag tone-warn">{say('seqScanBadge')}</span>
+            ) : tone === 'ok' ? (
+              <span className="sql-plan-tag tone-ok">{say('indexSeekBadge')}</span>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 function normalizeFanoutSqlResult(entry: FanoutEnvEntry): SqlResult | null {
   if (!entry.ok || !entry.result) return null;
   if (entry.result.errors?.length) {
@@ -447,6 +525,8 @@ function Results({
       return <p className="note">{`${say('rows', { count: outcome.affected })} changed.`}</p>;
     case 'rows':
       return <RowsResult data={outcome.data} onClose={onClose} />;
+    case 'plan':
+      return <PlanResult lines={outcome.lines} ms={outcome.ms} />;
     case 'fanout': {
       const picked = outcome.entries[fanoutIdx] ?? outcome.entries[0];
       const normalized = picked ? normalizeFanoutSqlResult(picked) : null;

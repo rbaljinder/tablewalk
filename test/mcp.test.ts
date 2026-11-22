@@ -1342,7 +1342,7 @@ describe('the CLI export', () => {
       timeout: 60_000,
     });
     assert.equal(wrong.status, 1);
-    assert.match(wrong.stderr, /--export takes md, mermaid or json/);
+    assert.match(wrong.stderr, /--export takes md, mermaid, json or agent/);
   });
 });
 

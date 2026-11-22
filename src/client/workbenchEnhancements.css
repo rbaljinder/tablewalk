@@ -180,6 +180,183 @@
     letter-spacing: 0;
   }
 
+  /* ---------- per-column masked badge ---------- */
+
+  .wb-masked-col-pill {
+    display: inline-flex;
+    align-items: center;
+    margin-inline-start: var(--space-1h);
+    padding: 0 var(--space-1h);
+    border-radius: 999px;
+    border: 1px solid var(--line-strong);
+    background: var(--warn-bg, var(--raised));
+    color: var(--ink-muted);
+    font: 500 var(--text-xs) var(--face-ui, var(--sans));
+    vertical-align: middle;
+  }
+
+  /* ---------- column header menu extras & profile popover ---------- */
+
+  .wb-th-section-head {
+    padding: var(--space-1h) var(--space-3) var(--space-1);
+    font: 600 var(--text-xs) var(--face-ui, var(--sans));
+    color: var(--ink-subtle);
+  }
+
+  .wb-col-profile-popover {
+    position: fixed;
+    z-index: 90;
+    inline-size: min(21rem, 92vw);
+    padding: var(--space-3h);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-card, var(--radius));
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: var(--shadow-pop, var(--shadow-raised));
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2h);
+  }
+
+  .wb-col-profile-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+
+  .wb-col-profile-title {
+    font: 600 var(--text-sm) var(--code);
+    color: var(--ink);
+  }
+
+  .wb-col-profile-close {
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--ground);
+    color: var(--ink-muted);
+    font: 500 var(--text-xs) var(--face-ui, var(--sans));
+    cursor: pointer;
+  }
+
+  .wb-col-profile-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    font: var(--text-xs) var(--figures, var(--code));
+    color: var(--ink-muted);
+  }
+
+  .wb-col-profile-metric {
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--ground);
+  }
+
+  .wb-col-profile-top-label {
+    font: 600 var(--text-xs) var(--face-ui, var(--sans));
+    color: var(--ink-subtle);
+  }
+
+  .wb-col-profile-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1h);
+  }
+
+  .wb-col-profile-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1h);
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--ground);
+    color: var(--ink);
+    font: var(--text-xs) var(--code);
+    cursor: pointer;
+    max-inline-size: 100%;
+  }
+
+  .wb-col-profile-chip-count {
+    color: var(--ink-subtle);
+  }
+
+  /* ---------- inline compiled-SQL execution plan ---------- */
+
+  .wb-explain-plan-btn {
+    margin-inline-end: var(--space-2);
+    padding: var(--space-1) var(--space-2h);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink-muted);
+    font: 500 var(--text-xs) var(--face-ui, var(--sans));
+    cursor: pointer;
+  }
+
+  .wb-inline-plan {
+    flex-basis: 100%;
+    margin-block-start: var(--space-2);
+    padding-block-start: var(--space-2);
+    border-top: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font: var(--text-xs) var(--code);
+  }
+
+  .wb-inline-plan-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: 1px var(--space-2);
+    border-radius: var(--radius);
+  }
+
+  .wb-inline-plan-row.tone-warn {
+    background: var(--warn-bg, var(--raised));
+  }
+
+  .wb-inline-plan-row.tone-ok {
+    background: var(--accent-soft);
+  }
+
+  .wb-inline-plan-tag {
+    padding: 0 var(--space-1h);
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    font: 500 var(--text-xs) var(--face-ui, var(--sans));
+    color: var(--ink-muted);
+  }
+
+  /* ---------- live external MCP agent topbar pill ---------- */
+
+  .wb-agent-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1h);
+    block-size: 28px;
+    padding: 0 var(--space-2h);
+    border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--line));
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent-ink, var(--ink));
+    font: 500 var(--text-xs) var(--face-ui, var(--sans));
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .wb-agent-pill-dot {
+    inline-size: var(--space-1h);
+    block-size: var(--space-1h);
+    border-radius: 999px;
+    background: var(--accent);
+  }
+
   @media (hover: hover) {
     .wb-filter-toggle:hover {
       border-color: var(--line-strong);
@@ -189,6 +366,17 @@
     .wb-sidebar-seg-btn:not(.active):hover {
       background: var(--raised);
       color: var(--ink);
+    }
+
+    .wb-col-profile-chip:hover,
+    .wb-col-profile-close:hover,
+    .wb-explain-plan-btn:hover {
+      border-color: var(--accent);
+      color: var(--ink);
+    }
+
+    .wb-agent-pill:hover {
+      border-color: var(--accent);
     }
   }
 }

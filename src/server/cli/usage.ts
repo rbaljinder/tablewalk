@@ -170,9 +170,11 @@ Options:
       --all-envs      With --query, --call or --batch: run a read-only call
                       across every environment of the target database in
                       parallel.
-      --format <fmt>  With --query, --call or --batch: output format — json,
-                      ndjson, tsv or md.
-      --export <fmt>  Print the schema as md, mermaid or json, then exit.
+      --format <fmt>  With --query, --call, --batch or --check: output format —
+                      json, ndjson, tsv or md.
+      --check         Dial configured connections, verify credentials and
+                      guardrails, print a readiness matrix, and exit.
+      --export <fmt>  Print the schema as md, mermaid, json or agent, then exit.
       --lint [fmt]    Report what the shape will cost — missing keys,
                       unindexed references, naive timestamps — as text or
                       json, then exit.
@@ -327,6 +329,7 @@ Common options:
       --host <addr>   Interface to bind (default 127.0.0.1, loopback only)
       --config <path> Read connections from this file
       --mcp           Speak MCP on stdio for coding agents, instead of HTTP
+      --check         Verify connections, credentials and guardrails, then exit
       --lint [fmt]    Report what the shape will cost, then exit
       --diff <conn>   Compare the active connection's shape with this one
   -v, --version       Print the version and stop
