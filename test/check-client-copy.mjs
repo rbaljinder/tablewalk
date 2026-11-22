@@ -91,6 +91,21 @@ const ALLOWED = [
     text: 'CREATE INDEX {} ON {} ({});',
     reason: 'a SQL CREATE INDEX statement copied to the clipboard',
   },
+  {
+    file: 'components/ShapeCheck.tsx',
+    text: 'ALTER TABLE {} ADD COLUMN {} {}{}{};',
+    reason: 'a SQL ALTER TABLE statement generated from schema drift',
+  },
+  {
+    file: 'components/ShapeCheck.tsx',
+    text: 'ALTER TABLE {} ALTER COLUMN {} {};',
+    reason: 'a SQL ALTER TABLE statement generated from schema drift',
+  },
+  {
+    file: 'components/ShapeCheck.tsx',
+    text: 'ALTER TABLE {} ALTER COLUMN {} TYPE {};',
+    reason: 'a SQL ALTER TABLE statement generated from schema drift',
+  },
 ];
 
 /** Attributes whose string value is read by a person, or said by a screen reader. */

@@ -43,6 +43,20 @@ export function listPrompts(answer: Answer): void {
             { name: 'connection', description: 'Connection id; defaults to the active one.', required: false },
           ],
         },
+        {
+          name: 'compare-environments',
+          title: 'Compare two environments',
+          description:
+            'Compare schema drift, live index/lock health, and aggregate row counts between two environments (such as staging and production).',
+          arguments: [
+            { name: 'from', description: 'Source connection id or db@env selector (defaults to active).', required: false },
+            {
+              name: 'to',
+              description: 'Target connection id or db@env selector (defaults to first sibling environment).',
+              required: false,
+            },
+          ],
+        },
       ],
     },
   });
@@ -51,6 +65,55 @@ export function listPrompts(answer: Answer): void {
 export async function getPrompt(registry: Registry, params: Record<string, unknown>, answer: Answer): Promise<void> {
   const { name: promptName, arguments: promptArgs = {} } = params as { name?: string; arguments?: Record<string, string> };
   try {
+    if (promptName === 'compare-environments') {
+      const { listEnrichedConnections, openFor: openConn } = await import('./toolkit.js');
+      const { diffReport, diffSchemas } = await import('../../shared/diff.js');
+      const leftOpen = await openConn(registry, promptArgs.from);
+      const enriched = listEnrichedConnections(registry);
+      const leftMeta = enriched.find((c) => c.id === leftOpen.id);
+      const fallbackTo = leftMeta?.siblings?.[0]?.id ?? enriched.find((c) => c.id !== leftOpen.id)?.id;
+      const wantedTo = promptArgs.to?.trim() || fallbackTo;
+      if (!wantedTo) {
+        return answer({
+          error: { code: -32602, message: 'Pass `to` naming another connection or configure at least two connections to compare.' },
+        });
+      }
+      const rightOpen = await openConn(registry, wantedTo);
+      const diff = diffSchemas(leftOpen.schema, rightOpen.schema);
+      return answer({
+        result: {
+          description: `Compare ${leftOpen.id} against ${rightOpen.id}`,
+          messages: [
+            {
+              role: 'user',
+              content: {
+                type: 'resource',
+                resource: {
+                  uri: `tablewalk://${encodeURIComponent(leftOpen.id)}/diff/${encodeURIComponent(rightOpen.id)}`,
+                  mimeType: 'text/markdown',
+                  text: diffReport(diff),
+                },
+              },
+            },
+            {
+              role: 'user',
+              content: {
+                type: 'text',
+                text:
+                  `Compare \`${leftOpen.id}\` (${leftOpen.schema.label}) against \`${rightOpen.id}\` (${rightOpen.schema.label}). ` +
+                  'Start from the attached structural schema diff (`diff`): inspect any tables, columns, nullability rules, ' +
+                  'or foreign-key delete rules that exist on only one side, and validate any candidate reconciliation DDL with ' +
+                  '`verify_ddl` before applying it. Next call `perf` with `envs: "all"` (or separately ' +
+                  `on \`${leftOpen.id}\` and \`${rightOpen.id}\`) to compare missing/duplicate indexes, sequential-scan hotspots, ` +
+                  'and lock contention. Finally run `breakdown` with `envs: "all"` on hub and event tables to spot row-count or ' +
+                  'status-distribution divergence without pulling raw PII rows.',
+              },
+            },
+          ],
+        },
+      });
+    }
+
     const conn = promptArgs.connection;
     const { schema, id: connId } = await openFor(registry, conn);
     const brief = (uri: string, text: string) => ({
@@ -68,10 +131,11 @@ export async function getPrompt(registry: Registry, params: Record<string, unkno
               content: {
                 type: 'text',
                 text:
-                  'Read the attached schema brief before calling anything. Then call schema_summary ' +
-                  'for the hubs and the deepest walk, and open your first table with `table` rather ' +
-                  'than guessing columns. Prefer `query` with `show` over `sql`; use `find` when you ' +
-                  'only know a name; call `refresh` after any DDL.',
+                  'Read the attached schema brief before calling anything. Call `connections` first when multiple environments ' +
+                  'are configured, then `schema_summary` for hubs and the deepest walk, and open tables with `table` rather ' +
+                  'than guessing columns. Use `path {from, to}` to discover shortest foreign-key join routes, `perf` and `anomalies` ' +
+                  'to check live index/scan health and relational data outliers, and prefer `query` with `show` over `sql`. ' +
+                  'Use `find` when you only know a name or value, and call `refresh` after any DDL.',
               },
             },
           ],
@@ -113,11 +177,11 @@ export async function getPrompt(registry: Registry, params: Record<string, unkno
                   'values decide whether a narrower type can land), and `tables` for row counts that ' +
                   `decide whether the migration needs batching. \`order {tables: ${JSON.stringify(wanted)}}\` gives the ` +
                   'order rows have to arrive and leave in, which is the order the DDL has to respect ' +
-                  'too, and names any cycle between them. `lint` on the same tables says what the ' +
-                  'shape already costs — an unindexed foreign key is a migration that scans, and a ' +
-                  'reference with no ON DELETE rule is a decision this migration could make instead of ' +
-                  'postponing again. If another connection already has the intended shape, `diff` says ' +
-                  'exactly what is missing. After the DDL runs, call `refresh` before anything else.',
+                  'too, and names any cycle between them. Call `lint` and `perf` on the same tables to see ' +
+                  'unindexed foreign keys, scan hotspots, and active lock contention. Once you draft the candidate DDL, ' +
+                  'dry-run it with `verify_ddl {sql}` so syntax, row constraints, and newly introduced lint findings are ' +
+                  'checked inside a rolled-back transaction or isolated copy before applying it. If another connection ' +
+                  'already has the intended shape, `diff` says exactly what is missing. After the DDL runs, call `refresh` before anything else.',
               },
             },
           ],
@@ -141,10 +205,10 @@ export async function getPrompt(registry: Registry, params: Record<string, unkno
                   'name, and the first rows of everything pointing at it. Follow the relationships whose ' +
                   'counts look wrong for the story the row tells; each carries a ready-to-run `query`. ' +
                   'When a column\u2019s value looks suspicious, `profile` its table to see whether the value ' +
-                  'is an outlier or the norm. When a value on the row appears somewhere you cannot ' +
-                  'account for — an id, a reference, a string out of a log — `find {value: "…"}` says ' +
-                  'which other tables mention it. Every answer carries a `link` — cite it, so a human ' +
-                  'can open exactly what you saw.',
+                  'is an outlier or the norm, or call `fixture` (`redact: true`) to extract a minimal reproducible ' +
+                  'row graph. When a value on the row appears somewhere you cannot account for — an id, a reference, ' +
+                  'a string out of a log — `find {value: "…"}` says which other tables mention it. Every answer ' +
+                  'carries a `link` — cite it, so a human can open exactly what you saw.',
               },
             },
           ],

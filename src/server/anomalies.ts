@@ -26,7 +26,12 @@ import {
 import { hopName } from '@mistriwork/engine/shared/view.js';
 import type { Severity } from '../shared/lint.js';
 
-export type AnomalyRule = 'temporal-inversion' | 'dangling-lifecycle' | 'nearly-always-present-fk';
+export type AnomalyRule =
+  | 'temporal-inversion'
+  | 'dangling-lifecycle'
+  | 'nearly-always-present-fk'
+  | 'negative-measure'
+  | 'future-timestamp';
 
 export interface AnomalyFinding {
   rule: AnomalyRule;
@@ -56,6 +61,14 @@ export const ANOMALY_RULES: Record<AnomalyRule, { severity: Severity; why: strin
     severity: 'medium',
     why: 'A nullable foreign key is populated on at least 95% of rows (20+ rows total) with a small tail of nulls — usually an unstated NOT NULL invariant with orphan outliers that will reject an `ALTER COLUMN ... SET NOT NULL` or disappear under an INNER JOIN.',
   },
+  'negative-measure': {
+    severity: 'high',
+    why: 'A non-negative quantity, price, total, duration or byte-size column holds negative values — usually an unguarded subtraction, reversal written into a magnitude column, or integer overflow.',
+  },
+  'future-timestamp': {
+    severity: 'medium',
+    why: 'A past-event audit timestamp (`created_at`, `paid_at`, `shipped_at`, `completed_at`) sits more than 24 hours in the future — usually a milliseconds-vs-seconds epoch bug or skewed client clock.',
+  },
 };
 
 const TEMPORAL_PAIRS: ReadonlyArray<readonly [earlier: string, later: string]> = [
@@ -81,6 +94,13 @@ const TEMPORAL_PAIRS: ReadonlyArray<readonly [earlier: string, later: string]> =
 const SOFT_DELETE_COLS = ['deleted_at', 'archived_at', 'deactivated_at', 'disabled_at', 'terminated_at'] as const;
 const CHILD_CLOSED_COLS = ['deleted_at', 'archived_at', 'closed_at', 'completed_at', 'ended_at', 'cancelled_at', 'canceled_at'] as const;
 
+const NON_NEGATIVE_MEASURE_NAME =
+  /(?:^|_)(?:total|subtotal|amount_due|price|unit_price|cost|fee|quantity|qty|count|bytes|size_bytes|duration|duration_ms|duration_s|duration_sec|duration_seconds|views|clicks|downloads)(?:$|_)/i;
+const SIGNED_MEASURE_NAME =
+  /(?:balance|delta|diff|change|adjust|discount|refund|credit|debit|profit|loss|margin|net|offset|lat|lon|lng|temp|score|rank|variance)/i;
+const PAST_AUDIT_TIMESTAMP_NAME =
+  /^(?:created_at|inserted_at|recorded_at|logged_at|paid_at|shipped_at|delivered_at|completed_at|resolved_at|closed_at|deleted_at|archived_at|signed_up|signed_up_at|registered_at|verified_at)$/i;
+
 const COUNT_CAP = 10_000;
 const MAX_TABLES_DEFAULT = 60;
 const MIN_ROWS_FOR_RATIO = 20;
@@ -90,6 +110,10 @@ function isTemporalColumn(table: TableMeta, name: string): boolean {
   const col = table.columns.find((c) => c.name === name);
   if (!col) return false;
   return /(date|time|timestamp)/i.test(col.type);
+}
+
+function isNumericColumnType(typeName: string): boolean {
+  return /(?:^|\b)(?:int|integer|bigint|smallint|int2|int4|int8|real|float|float4|float8|double|numeric|decimal|money)\b/i.test(typeName);
 }
 
 function isBooleanColumn(table: TableMeta, name: string): boolean {
@@ -235,6 +259,49 @@ export async function checkAnomalies(
             rows: counted.count,
             total,
             message: `${pct}% of ${total} rows populate ${fkColName} (→ ${fk.to.table}), leaving ${counted.count} null row${counted.count === 1 ? '' : 's'}.`,
+            query: q,
+            link: linkOf(q),
+          });
+        }
+      }
+    }
+
+    /* 3. Negative non-negative measures (`total < 0`, `quantity < 0`) and future-dated past-event audit timestamps. */
+    const fkCols = new Set(referencesFrom(schema, table.id).flatMap((f) => f.from.columns));
+    const futureCutoff = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    for (const col of table.columns) {
+      if (col.primaryKey || fkCols.has(col.name)) continue;
+
+      if (isNumericColumnType(col.type) && NON_NEGATIVE_MEASURE_NAME.test(col.name) && !SIGNED_MEASURE_NAME.test(col.name)) {
+        const q = `${table.id} ${col.name} < 0`;
+        const counted = await countQueryText(adapter, schema, q);
+        if (counted && counted.count > 0) {
+          findings.push({
+            rule: 'negative-measure',
+            severity: 'high',
+            table: table.id,
+            columns: [col.name],
+            rows: counted.count,
+            ...(counted.capped ? { capped: true } : {}),
+            total,
+            message: `${counted.count}${counted.capped ? '+' : ''} row${counted.count === 1 ? '' : 's'} have negative ${col.name} (< 0).`,
+            query: q,
+            link: linkOf(q),
+          });
+        }
+      } else if (isTemporalColumn(table, col.name) && PAST_AUDIT_TIMESTAMP_NAME.test(col.name)) {
+        const q = `${table.id} ${col.name} > ${futureCutoff}`;
+        const counted = await countQueryText(adapter, schema, q);
+        if (counted && counted.count > 0) {
+          findings.push({
+            rule: 'future-timestamp',
+            severity: 'medium',
+            table: table.id,
+            columns: [col.name],
+            rows: counted.count,
+            ...(counted.capped ? { capped: true } : {}),
+            total,
+            message: `${counted.count}${counted.capped ? '+' : ''} row${counted.count === 1 ? '' : 's'} have ${col.name} dated in the future (> ${futureCutoff}).`,
             query: q,
             link: linkOf(q),
           });

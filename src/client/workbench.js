@@ -60,9 +60,12 @@ const openAgentConsole = () => void import('./agent.js').then((m) => m.openAgent
  * a line is a decision with one home: a second copy in the modal would be
  * the one that forgets about `by` the next time the language grows.
  */
+/** @type {((query: string) => void) | null} */
+let queryObserver = null;
 const runQueryText = (raw) => {
   const text = String(raw ?? '').trim();
   if (!text) return;
+  queryObserver?.(text);
   const tableName = text.split(/\s+/)[0];
   const table = findTable(tableName) ?? state.schema.tables.find((t) => t.name === tableName);
   /* `by` is the one keyword that changes which endpoint answers, so the
@@ -214,7 +217,15 @@ function start(boot) {
     }
   });
   void import('./workbenchEnhancements.js').then((m) =>
-    m.initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, openSql, runQueryText }),
+    m.initWorkbenchEnhancements({
+      openShapeCheck,
+      openAgentConsole,
+      openSql,
+      runQueryText,
+      registerQueryObserver: (fn) => {
+        queryObserver = fn;
+      },
+    }),
   );
 }
 

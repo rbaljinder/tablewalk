@@ -20,6 +20,7 @@ npx tablewalk postgres://localhost/app --schema public --port 4200 --open
 | --- | --- |
 | `tablewalk` | Serves the browser and asks for a connection on the page |
 | `tablewalk <sqlite-file>` or `<postgres-url>` | Serves that database |
+| `tablewalk <dump.sql>` or `<file.csv\|dir/>` | Hydrates `.sql` dumps or `.csv` / `.tsv` / `.ndjson` files and folders into a read-only ephemeral SQLite database with inferred types, keys and `<stem>_id` foreign keys |
 | `tablewalk --demo` | Builds a throwaway sample database in the temp directory and opens it |
 | `tablewalk <db> --mcp` | The database's tools for a coding agent, on stdio ([MCP](/docs/mcp/)) |
 | `tablewalk <db> --export md` | Prints the schema, then exits |
@@ -33,7 +34,7 @@ A path typed on the command line is relative to the current directory; a path wr
 
 | Option | |
 | --- | --- |
-| `-d, --db <target>` | A SQLite file path or a `postgres://` URL. `DATABASE_URL` is used when nothing else names a connection. |
+| `-d, --db <target>` | A SQLite file path, a `postgres://` URL, or a `.sql` / `.csv` / `.tsv` / `.ndjson` file or folder. `DATABASE_URL` is used when nothing else names a connection. |
 | `--schema <name>` | PostgreSQL only; repeatable. All user schemas by default. |
 | `--config <path\|->` | Read connections from this file, a process-substitution FIFO, or `-` for piped vault JSON or `.env` lines on stdin. See [Connections and config](/docs/connections/). |
 | `--no-config` | Ignore any config file. |
@@ -96,7 +97,7 @@ See [Deploying](/docs/deploying/#behind-a-proxy) for when you need these.
 | `--args <json>` | With `--call` or `--query`: JSON object of tool arguments. |
 | `--batch [path\|-]` | Run newline-delimited queries, breakdowns or JSON `{"tool","args"}` calls over one session, print NDJSON, close all connections, and exit. |
 | `--all-envs` | With `--query`, `--call` or `--batch`: run a read-only call across every environment of the target database in parallel. |
-| `--format <fmt>` | With `--query`, `--call`, `--batch` or `--check`: output format (`json`, `ndjson`, `tsv` or `md`). |
+| `--format <fmt>` | With `--query`, `--call`, `--batch`, `--check` or `--verify-ddl`: output format (`json`, `ndjson`, `tsv` or `md`). |
 
 ## Checking connections and schemas
 
@@ -105,14 +106,16 @@ These print and exit, so they fit in CI and vault preflight scripts.
 | Option | |
 | --- | --- |
 | `--check` | Dial configured connections (or the target `--connection` / `--env`), verify credentials and guardrails, print a readiness matrix (`--format json` or `md`), and exit. |
+| `--verify-ddl <path\|->` | Dry-run candidate DDL (`.sql` file or `-` for stdin) in an isolated SQLite copy or rolled-back PostgreSQL transaction, print the structural schema diff and newly introduced `lint` findings (`--format md` or `json`), and exit non-zero on invalid DDL or `--fail-on` severity. |
 | `--export <fmt>` | The schema as `md`, `mermaid`, `json`, or `agent` (a compact operational brief for `CLAUDE.md` / `AGENTS.md`). |
 | `--lint [fmt]` | What the shape will cost (missing keys, unindexed references, naive timestamps), as text or `json`. |
-| `--fail-on <sev>` | With `--lint`: exit non-zero when a finding is at least `high`, `medium` or `low`. |
+| `--fail-on <sev>` | With `--lint` or `--verify-ddl`: exit non-zero when a finding is at least `high`, `medium` or `low`. |
 | `--diff <conn>` | Compare the active connection's shape with this one. Exits 1 when they differ, like `diff`. |
 
 ```sh
 npx tablewalk --config ./tablewalk.json --check --format md
 npx tablewalk "$DATABASE_URL" --lint --fail-on high
+npx tablewalk ./app.db --verify-ddl ./migrations/V4__add_po_number.sql --fail-on high
 ```
 
 ## migrate

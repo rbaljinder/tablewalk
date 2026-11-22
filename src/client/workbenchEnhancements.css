@@ -357,6 +357,148 @@
     background: var(--accent);
   }
 
+  .wb-col-impact-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font: var(--text-xs) var(--face-ui, var(--sans));
+    color: var(--ink-muted);
+  }
+
+  .wb-col-impact-item {
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius);
+    background: var(--ground);
+    border: 1px solid var(--line);
+    color: var(--ink);
+  }
+
+  /* ---------- Record Fixture & Cross-Env Compare Modal ---------- */
+
+  .wb-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 95;
+    background: color-mix(in srgb, var(--ink) 28%, transparent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-5);
+  }
+
+  .wb-modal-card {
+    inline-size: min(52rem, 94vw);
+    max-block-size: min(82dvh, 44rem);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-5);
+    background: var(--surface);
+    color: var(--ink);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-card, var(--radius));
+    box-shadow: var(--shadow-pop, var(--shadow-raised));
+    overflow: hidden;
+  }
+
+  .wb-modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
+
+  .wb-modal-title {
+    margin: 0;
+    font: 600 var(--text-md, var(--text-base)) var(--face-ui, var(--sans));
+    color: var(--ink);
+  }
+
+  .wb-fixture-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--ground);
+    font: var(--text-xs) var(--face-ui, var(--sans));
+  }
+
+  .wb-fixture-checks {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+
+  .wb-fixture-check {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1h);
+    cursor: pointer;
+    color: var(--ink);
+  }
+
+  .wb-fixture-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .wb-fixture-pre {
+    margin: 0;
+    padding: var(--space-3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--ground);
+    color: var(--ink);
+    font: var(--text-xs) var(--code);
+    overflow: auto;
+    max-block-size: 26rem;
+    white-space: pre;
+  }
+
+  .wb-compare-wrap {
+    overflow: auto;
+    max-block-size: 28rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+
+  .wb-compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    font: var(--text-xs) var(--code);
+  }
+
+  .wb-compare-table th,
+  .wb-compare-table td {
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .wb-compare-table th {
+    background: var(--ground);
+    font: 600 var(--text-xs) var(--face-ui, var(--sans));
+    color: var(--ink-muted);
+    position: sticky;
+    top: 0;
+  }
+
+  .wb-compare-row.is-diff td {
+    background: var(--warn-bg, var(--raised));
+  }
+
+  .wb-compare-missing {
+    color: var(--ink-subtle);
+    font-style: italic;
+  }
+
   @media (hover: hover) {
     .wb-filter-toggle:hover {
       border-color: var(--line-strong);

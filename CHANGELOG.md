@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.0.0-rc.23
+
+Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.77`.
+
+- **Record Workflows & Command Palette Continuity:**
+  - **1-Click `Extract fixture…` on Records:** Record headings add **Extract fixture…**, walking outgoing and optional
+    incoming foreign keys via `fixture` with interactive **Include child rows** and **Mask PII** (`redact: true`)
+    toggles, **SQL INSERTs** vs. **`insert_graph` JSON** switching, and 1-click **Copy fixture**.
+  - **Cross-Environment Record Diff (`Compare envs`):** When sibling environments (`local`, `staging`, `prod`) exist for
+    the active logical database, record headings add **Compare envs** to fan out `record` (`envs: "all"`) and render a
+    side-by-side field matrix highlighting missing rows and differing cell values across tiers.
+  - **Recent Queries & Breakdowns in `⌘K`:** Multi-token queries and breakdowns run in the query bar are stored in a
+    bounded per-database ring (`mistri.recentQueries.v1`, shared across sibling environments) and offered directly in
+    `⌘K`.
+- **Migration Safety & DDL Verification:**
+  - **Interactive `Verify DDL` in `SqlPane` & Column `Change impact…`:** The SQL editor adds **Verify DDL** alongside
+    **Explain**, running candidate `CREATE` / `ALTER` / `DROP` / `COMMENT ON` DDL inside an isolated SQLite copy or
+    rolled-back PostgreSQL transaction (`verify_ddl`) and rendering structural catalog diffs plus newly introduced
+    `lint` findings. Grid column header menus (`.th-menu`) add **Change impact…** (`change_impact`) showing row count,
+    null count, index status, incoming foreign keys with `ON DELETE` rules, and migration consequences.
+  - **CLI `tablewalk --verify-ddl <path|->` & Draft Migration SQL in `Environment drift`:** Added one-shot
+    `--verify-ddl <path|-> [--format json|md] [--fail-on high|medium|low]` for CI and agent preflight, plus directional
+    draft `ALTER TABLE` migration SQL (**Copy migration SQL** / **Verify in SQL**) inside **Check the shape →
+    Environment drift**.
+- **Direct File & Folder Opening (`ephemeralImport`):** `tablewalk ./dump.sql`, `tablewalk ./orders.csv` (`.csv`,
+  `.tsv`, `.ndjson`, `.jsonl`), and `tablewalk ./exports/` now hydrate a read-only ephemeral SQLite database on the fly
+  with automatic numeric/real/text type inference, `id` primary keys, and validated `<stem>_id -> <parent>(id)` foreign
+  keys so flat exports can be walked and queried immediately.
+- **Expanded Data Anomalies & MCP Prompts:**
+  - **`negative-measure` & `future-timestamp` Rules in `anomalies`:** Added zero-row-leak count checks for negative
+    unsigned business measures (`total`, `quantity`, `price < 0`, excluding signed delta/balance columns) and
+    future-dated past-event audit timestamps (`created_at`, `paid_at > tomorrow`).
+  - **4th MCP Prompt (`compare-environments`) & Modernized Guided Walks:** Updated `orient`, `pre-migration-check` and
+    `investigate-row` to guide agents through `perf`, `anomalies`, `verify_ddl` and `redact: true`, and added
+    `compare-environments` (`from`, `to`) with pre-computed `diff` findings.
+
 ## 1.0.0-rc.22
 
 Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.77`.

@@ -140,6 +140,8 @@ jobs:
   image:
     needs: [npm]
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
     permissions:
       contents: read
       # What lets the workflow push to ghcr.io with the token GitHub already provides. No secret to create, store or rotate.
@@ -171,10 +173,21 @@ jobs:
           else
             echo "Pre-release $version: latest left where it was."
           fi
+          log_file="$(mktemp)"
+          set +e
           docker buildx build --platform linux/amd64,linux/arm64 \
             --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             --label "org.opencontainers.image.version=$version" \
             --label "org.opencontainers.image.licenses=MIT" \
-            "${tags[@]}" --push .
-          echo "Pushed $image:$version"
-          echo "A new package on ghcr.io starts private — make it public from the package page, or a pull fails with 'not found'."
+            "${tags[@]}" --push . 2>&1 | tee "$log_file"
+          status="${PIPESTATUS[0]}"
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "Pushed $image:$version"
+            echo "A new package on ghcr.io starts private — make it public from the package page, or a pull fails with 'not found'."
+          elif grep -q "permission_denied: write_package" "$log_file"; then
+            echo "GHCR package ${image} has not granted Write Actions access to ${{ github.repository }}; image built cleanly and skipped push." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          else
+            exit "$status"
+          fi

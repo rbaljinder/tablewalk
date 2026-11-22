@@ -58,4 +58,7 @@ export const say = defineMessages({
   copiedJoinSql: 'Copied JOIN SQL',
   maskedBadge: 'masked',
   indexedBadge: 'indexed',
+  copyMigrationSql: 'Copy migration SQL',
+  copiedMigrationSql: 'Copied migration SQL',
+  verifyInSql: 'Verify in SQL',
 });

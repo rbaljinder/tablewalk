@@ -62,6 +62,29 @@ interface Statement {
   description?: string;
   source: 'saved' | 'config';
 }
+interface VerifyDdlTableDiff {
+  table: string;
+  onlyIn?: 'left' | 'right';
+  columnsOnlyLeft?: string[];
+  columnsOnlyRight?: string[];
+  changed?: Array<{ column: string; what: string; left: string; right: string }>;
+}
+interface VerifyDdlPayload {
+  valid: boolean;
+  dialect?: string;
+  statements?: number;
+  statementCount?: number;
+  statement?: string;
+  failedStatement?: string;
+  errors?: string[];
+  error?: string;
+  same?: boolean;
+  diff?: VerifyDdlTableDiff[] | { same?: boolean; tables?: VerifyDdlTableDiff[] };
+  introducedLint?: {
+    findings?: Array<{ table: string; rule: string; severity: string; message: string }>;
+  };
+  newLintFindings?: Array<{ table: string; rule: string; severity: string; message: string }>;
+}
 type Outcome =
   | { kind: 'idle' }
   | { kind: 'running' }
@@ -69,7 +92,8 @@ type Outcome =
   | { kind: 'written'; affected: number }
   | { kind: 'rows'; data: SqlResult }
   | { kind: 'fanout'; entries: FanoutEnvEntry[] }
-  | { kind: 'plan'; lines: string[]; ms: number };
+  | { kind: 'plan'; lines: string[]; ms: number }
+  | { kind: 'ddl'; data: VerifyDdlPayload; ms: number };
 
 interface SqlPaneProps {
   draft: string;
@@ -210,6 +234,36 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
       setOutcome({
         kind: 'plan',
         lines: reply.structuredContent.plan,
+        ms: Number(reply.structuredContent.stats?.ms ?? 0),
+      });
+    } catch (err) {
+      setOutcome({ kind: 'error', message: (err as Error).message });
+    }
+  };
+
+  const verifyDdlStatement = async () => {
+    const statement = (input.current?.value ?? '').trim();
+    if (!statement) return;
+    setOutcome({ kind: 'running' });
+    try {
+      const reply = (await api('/api/agent/call', {
+        name: 'verify_ddl',
+        arguments: {
+          sql: statement,
+          ...(connections.activeConnection ? { connection: connections.activeConnection } : {}),
+        },
+      })) as {
+        isError?: boolean;
+        content?: Array<{ text?: string }>;
+        structuredContent?: VerifyDdlPayload & { stats?: { ms?: number } };
+      };
+      if (reply.isError || !reply.structuredContent || typeof reply.structuredContent.valid !== 'boolean') {
+        setOutcome({ kind: 'error', message: reply.content?.[0]?.text ?? say('verifyDdlFailed') });
+        return;
+      }
+      setOutcome({
+        kind: 'ddl',
+        data: reply.structuredContent,
         ms: Number(reply.structuredContent.stats?.ms ?? 0),
       });
     } catch (err) {
@@ -360,9 +414,14 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
             </Button>
           ) : null}
           {canExplain ? (
-            <Button title={say('explainTitle')} onClick={() => void explainStatement()}>
-              {say('explain')}
-            </Button>
+            <>
+              <Button title={say('verifyDdlTitle')} onClick={() => void verifyDdlStatement()}>
+                {say('verifyDdl')}
+              </Button>
+              <Button title={say('explainTitle')} onClick={() => void explainStatement()}>
+                {say('explain')}
+              </Button>
+            </>
           ) : null}
           <Button title={say('keepThisStatementUnder')} onClick={() => void save()}>
             {say('save')}
@@ -445,7 +504,10 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
 
 function classifyPlanLine(line: string): 'warn' | 'ok' | null {
   const trimmed = line.trim();
-  if (/\b(?:Index(?: Only)? Scan|Bitmap Index Scan)\b/i.test(trimmed) || /\bUSING\s+(?:COVERING\s+)?INDEX\b/i.test(trimmed)) {
+  if (
+    /\b(?:Index(?: Only)? Scan|Bitmap Index Scan)\b/i.test(trimmed) ||
+    /\bUSING\s+(?:(?:COVERING|INTEGER)\s+)?(?:INDEX|PRIMARY\s+KEY)\b/i.test(trimmed)
+  ) {
     return 'ok';
   }
   if (/\bSeq Scan\b/i.test(trimmed) || /^SCAN\s+/i.test(trimmed) || /\bSCAN TABLE\b/i.test(trimmed)) {
@@ -477,6 +539,69 @@ function PlanResult({ lines, ms }: { lines: string[]; ms: number }) {
             ) : null}
           </div>
         ))}
+      </div>
+    </>
+  );
+}
+
+function VerifyDdlResultView({ data, ms }: { data: VerifyDdlPayload; ms: number }) {
+  const diffTables = Array.isArray(data.diff) ? data.diff : (data.diff?.tables ?? []);
+  const diffLines: string[] = [];
+  for (const td of diffTables) {
+    if (td.onlyIn === 'right') diffLines.push(say('ddlAddedTable', { table: td.table }));
+    else if (td.onlyIn === 'left') diffLines.push(say('ddlDroppedTable', { table: td.table }));
+    else {
+      if (td.columnsOnlyRight?.length) {
+        diffLines.push(say('ddlAddedColumns', { table: td.table, columns: td.columnsOnlyRight.join(', ') }));
+      }
+      if (td.columnsOnlyLeft?.length) {
+        diffLines.push(say('ddlDroppedColumns', { table: td.table, columns: td.columnsOnlyLeft.join(', ') }));
+      }
+      for (const ch of td.changed ?? []) {
+        diffLines.push(say('ddlChangedColumn', { table: td.table, column: ch.column, what: ch.what, left: ch.left, right: ch.right }));
+      }
+    }
+  }
+  const lintItems = data.introducedLint?.findings ?? data.newLintFindings ?? [];
+  const stmtCount = data.statements ?? data.statementCount;
+  const errText = data.errors?.[0] ?? data.error;
+  const failedStmt = data.statement ?? data.failedStatement;
+  return (
+    <>
+      <div className="sql-stats">
+        <span className={`sql-ddl-badge ${data.valid ? 'is-ok' : 'is-bad'}`}>
+          {data.valid ? say('ddlValidBadge') : say('ddlInvalidBadge')}
+        </span>
+        {stmtCount !== undefined ? <span>{say('ddlStatementsCount', { count: stmtCount })}</span> : null}
+        <span>{say('msMs', { ms })}</span>
+      </div>
+      <div className="sql-ddl-card" role="region" aria-label={say('verifyDdl')}>
+        {!data.valid ? (
+          <>
+            <p className="sql-error" role="alert">
+              {errText ?? say('verifyDdlFailed')}
+            </p>
+            {failedStmt ? <pre className="confirm-params">{failedStmt}</pre> : null}
+          </>
+        ) : diffLines.length > 0 ? (
+          <div className="sql-ddl-list">
+            {diffLines.map((line, idx) => (
+              <div key={idx}>{line}</div>
+            ))}
+          </div>
+        ) : (
+          <p className="note">{say('ddlNoStructuralChanges')}</p>
+        )}
+        {lintItems.length > 0 ? (
+          <div className="sql-ddl-lint">
+            <span className="sql-ddl-lint-head">{say('ddlNewLintHeading', { count: lintItems.length })}</span>
+            <div className="sql-ddl-list">
+              {lintItems.map((f, idx) => (
+                <div key={idx}>{`[${f.severity}] ${f.table} (${f.rule}): ${f.message}`}</div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
     </>
   );
@@ -527,6 +652,8 @@ function Results({
       return <RowsResult data={outcome.data} onClose={onClose} />;
     case 'plan':
       return <PlanResult lines={outcome.lines} ms={outcome.ms} />;
+    case 'ddl':
+      return <VerifyDdlResultView data={outcome.data} ms={outcome.ms} />;
     case 'fanout': {
       const picked = outcome.entries[fanoutIdx] ?? outcome.entries[0];
       const normalized = picked ? normalizeFanoutSqlResult(picked) : null;

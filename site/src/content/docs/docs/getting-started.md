@@ -21,11 +21,12 @@ It needs Node.js 24.22.1 or newer, and there is no build step. The server prints
 | `npx tablewalk` | Nothing yet: the page asks for a connection |
 | `npx tablewalk --demo` | A throwaway sample database in your temp directory, opened in a browser |
 | `npx tablewalk ./app.db` | A SQLite file (`.db`, `.sqlite`, `.sqlite3`, or `sqlite:<path>`) |
+| `npx tablewalk ./dump.sql` or `./exports/` | A `.sql` dump, or `.csv` / `.tsv` / `.ndjson` files and folders hydrated into an ephemeral read-only SQLite database with inferred keys and `<stem>_id` foreign keys |
 | `npx tablewalk postgres://user@host:5432/db` | A PostgreSQL database (`postgresql://` works too) |
 | `npx tablewalk --db "$DATABASE_URL"` | The same, as a flag; `DATABASE_URL` alone works when no config names connections |
 | `npx tablewalk --config team.json` | Every connection a [config file](/docs/connections/) lists |
 
-SQLite and PostgreSQL are the two databases tablewalk reads. MySQL and MariaDB are refused with a message that says so.
+SQLite (plus `.sql`, CSV/TSV and NDJSON exports) and PostgreSQL are the databases tablewalk reads. MySQL and MariaDB are refused with a message that says so.
 
 Add `--open` to have it open your browser, and `--port <n>` to listen somewhere other than 4111.
 
