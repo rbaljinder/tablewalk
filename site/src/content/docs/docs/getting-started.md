@@ -48,7 +48,8 @@ From here:
 - Click **Check shape & perf** or **Join paths** (or press `⌘K`) to inspect missing foreign-key indexes, live scan and index health, data anomalies, and shortest multi-hop joins.
 - Press `⌘K` to jump to any table, page, sibling environment or recent query.
 - Press `?` for the query language, with examples that run against your own tables.
-- Choose **Preferences** in the `···` menu for the look: Graphite and cobalt by default, with Fog and moss and other palettes, light or dark.
+- Press `⌘⇧↵` (or click **SQL**) to open the syntax-highlighted SQL workbench with schema-aware autocomplete, `.sql` folder workspaces, inline `:param` inputs, and execution plans.
+- Choose **Preferences** in the `···` menu for the look: **Folio** (warm archival paper and deep forest-green links) by default, with **Instrument** (Stone, Graphite, Fog, Slate, Ink), **Braun**, **Broadsheet**, **Obsidian**, **Gallery**, **Lumen** and more, light or dark.
 - Choose **Take the tour** in the `···` menu for a short walk through the screen.
 
 ## Next

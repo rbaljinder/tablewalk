@@ -7,6 +7,7 @@
  * table" has nothing in it to retry with.
  */
 import { Refusal, clampLimit, STATEMENT_TIMEOUT_MS, distance, type DatabaseSchema } from '@mistriwork/engine/host';
+import { bindTypedSqlParameters } from '../../../shared/sqlScript.js';
 import { resolveSavedQuery, shelfOf } from '../shelf.js';
 import { ENV_ARG, getConnectionRuntimePolicy, READS, STATS, type Handler, ToolError } from '../toolkit.js';
 
@@ -15,8 +16,9 @@ export const definitions = [
     name: 'sql',
     description:
       'Run a read-only SQL SELECT when the query language cannot say it — window functions, ' +
-      'CTEs, self-joins — or pass `saved` to run a named statement from tablewalk.json ' +
-      '(see `tablewalk://{connection}/queries`). Ordinary grouping is `breakdown` now, and that ' +
+      'CTEs, self-joins — or pass `saved` to run a named statement from tablewalk.json or a `.sql` ' +
+      'file from the connection SQL workspace (see `tablewalk://{connection}/queries`), with optional ' +
+      'named `params` for `:param` / `{{param}}` placeholders. Ordinary grouping is `breakdown` now, and that ' +
       'is the one to reach for first: it binds every value and checks every path against the ' +
       'catalog, where this hands the database text it did not build. The connection is read-only: ' +
       'writes fail at the database. Results are row-limited; say LIMIT yourself for anything else. ' +
@@ -31,7 +33,13 @@ export const definitions = [
         statement: { type: 'string', description: 'A read-only SELECT. Exclusive with `saved`.' },
         saved: {
           type: 'string',
-          description: 'Name of a saved query in tablewalk.json (`tablewalk://{connection}/queries`). Exclusive with `statement`.',
+          description:
+            'Name of a saved query in tablewalk.json or relative path of a `.sql` file in the SQL workspace (`tablewalk://{connection}/queries`). Exclusive with `statement`.',
+        },
+        params: {
+          type: 'object',
+          description: 'Named parameter values to bind to `:param` or `{{param}}` placeholders in `statement` or `saved`.',
+          additionalProperties: { type: ['string', 'number', 'boolean', 'null'] },
         },
         limit: { type: 'number' },
         timeout_ms: {
@@ -118,10 +126,23 @@ export const handlers = {
     if (!rawStatement && !rawSaved) {
       throw new ToolError('invalid_argument', 'sql: missing "statement", which is required unless "saved" names a configured query.');
     }
+    const rawParams = args.params;
+    if (rawParams !== undefined && (rawParams === null || typeof rawParams !== 'object' || Array.isArray(rawParams))) {
+      throw new ToolError('invalid_argument', 'sql: "params" must be an object mapping parameter names to values.');
+    }
     const connName = registry.list().find((c) => c.id === id)?.name;
-    const picked = rawSaved ? resolveSavedQuery(shelfOf(registry).queries, id, connName, rawSaved) : undefined;
-    const statement = picked ? picked.sql.trim() : rawStatement!;
-    if (!statement) throw new ToolError('invalid_argument', 'Nothing to run.');
+    const picked = rawSaved ? resolveSavedQuery(shelfOf(registry).queries, id, connName, rawSaved, registry) : undefined;
+    const baseStatement = picked ? picked.sql.trim() : rawStatement!;
+    if (!baseStatement) throw new ToolError('invalid_argument', 'Nothing to run.');
+    const dialect = schema.dialect === 'sqlite' ? 'sqlite' : 'postgres';
+    const bound = bindTypedSqlParameters(baseStatement, rawParams as Record<string, unknown> | undefined, dialect);
+    if (bound.missing.length > 0) {
+      throw new ToolError(
+        'invalid_argument',
+        `sql: missing required parameter(s): ${bound.missing.map((m) => `:${m}`).join(', ')}. Pass them in \`params\`.`,
+      );
+    }
+    const statement = bound.sql;
     const connTimeout = getConnectionRuntimePolicy(registry, id)?.timeoutMs;
     const askedTimeout = args.timeout_ms === undefined ? undefined : Number(args.timeout_ms);
     const effectiveTimeout =

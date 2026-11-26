@@ -15,6 +15,8 @@ import { formatNumber } from '@mistriwork/kit/client/locale.js';
 import { looksLikeBreakdown } from '@mistriwork/engine/shared/breakdowntext.js';
 import type { TableMeta } from '@mistriwork/engine/shared/schema.js';
 import { Modal, type ModalHandle } from '@mistriwork/ui/Modal.js';
+import { Tabs, type TabItem } from '@mistriwork/ui/Tabs.js';
+import { barSpan, extentOf, formatChartNumber, valueScale } from '@mistriwork/ui/charts/core.js';
 import { enrichConnectionsWithEnvironments, type EnvironmentTier } from '../../shared/environments.js';
 import type { ForeignKeyPath } from '../../shared/path.js';
 import { say } from '../copy/workbench/components/ShapeCheck.js';
@@ -143,6 +145,56 @@ function indexDdlFor(tableMeta: TableMeta | undefined, finding: Finding): string
   const qualified = qualifiedTableName(tableMeta, finding.table);
   const idxName = `idx_${baseName.replace(/[^a-zA-Z0-9_]/g, '_')}_${cols.join('_').replace(/[^a-zA-Z0-9_]/g, '_')}`;
   return `CREATE INDEX ${quoteIdent(idxName)} ON ${qualified} (${cols.map(quoteIdent).join(', ')});`;
+}
+
+interface DiagnosticBarRow {
+  label: string;
+  value: number;
+  display?: string;
+  tone: 'high' | 'medium' | 'low';
+}
+
+function DiagnosticBars({ heading, rows }: { heading: string; rows: DiagnosticBarRow[] }) {
+  const top = rows.filter((r) => r.value > 0).slice(0, 6);
+  if (!top.length) return null;
+  const { min, max } = extentOf(
+    top.map((r) => r.value),
+    0,
+  );
+  const scale = valueScale({ min: Math.min(0, min), max: Math.max(max, 1) }, { intervals: 4 });
+  const rowH = 22;
+  const labelW = 148;
+  const valueW = 64;
+  const barX = labelW + 8;
+  const barW = 320;
+  const totalW = barX + barW + valueW + 8;
+  const totalH = top.length * rowH;
+  const zeroAt = barX + scale.share(0) * barW;
+  return (
+    <div className="shape-diag-chart" role="figure" aria-label={heading}>
+      <p className="shape-diag-chart-head">{heading}</p>
+      <svg className="shape-diag-chart-svg" viewBox={`0 0 ${totalW} ${totalH}`} role="img" aria-label={heading}>
+        {top.map((row, idx) => {
+          const y = idx * rowH;
+          const valueAt = barX + scale.share(row.value) * barW;
+          const span = barSpan(valueAt, zeroAt, 3);
+          const shortLabel = row.label.length > 22 ? `${row.label.slice(0, 21)}…` : row.label;
+          return (
+            <g key={`${row.label}:${idx}`} transform={`translate(0, ${y})`}>
+              <text x={0} y={14} className="shape-diag-bar-label">
+                {shortLabel}
+              </text>
+              <rect x={barX} y={5} width={barW} height={10} rx={3} className="shape-diag-bar-track" />
+              <rect x={span.start} y={5} width={span.length} height={10} rx={3} className={`shape-diag-bar-fill tone-${row.tone}`} />
+              <text x={barX + barW + 8} y={14} className="shape-diag-bar-value">
+                {row.display ?? formatChartNumber(row.value)}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
 }
 
 export function ShapeCheckDialog({ onClose, initialTab = 'lint' }: { onClose: () => void; initialTab?: ShapeTab }) {
@@ -293,66 +345,61 @@ export function ShapeCheckDialog({ onClose, initialTab = 'lint' }: { onClose: ()
         </button>
       </div>
 
-      <div className="shape-check-tabs" role="tablist">
-        <button
-          type="button"
-          role="tab"
-          aria-label={say('tabSchemaPerf')}
-          aria-selected={tab === 'lint'}
-          className={`shape-check-tab${tab === 'lint' ? ' active' : ''}`}
-          onClick={() => setTab('lint')}
-        >
-          <span>{say('tabSchemaPerf')}</span>
-          {lint.isSuccess ? <span className={`shape-tab-badge${badgeToneFor(counts)}`}>{findings.length}</span> : null}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-label={say('tabLivePerf')}
-          aria-selected={tab === 'perf'}
-          className={`shape-check-tab${tab === 'perf' ? ' active' : ''}`}
-          onClick={() => setTab('perf')}
-        >
-          <span>{say('tabLivePerf')}</span>
-          {perf.isSuccess ? <span className={`shape-tab-badge${badgeToneFor(perfCounts)}`}>{perfList.length}</span> : null}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-label={say('tabAnomalies')}
-          aria-selected={tab === 'anomalies'}
-          className={`shape-check-tab${tab === 'anomalies' ? ' active' : ''}`}
-          onClick={() => setTab('anomalies')}
-        >
-          <span>{say('tabAnomalies')}</span>
-          {anomalies.isSuccess ? <span className={`shape-tab-badge${badgeToneFor(anomalyCounts)}`}>{anomalyList.length}</span> : null}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-label={say('tabJoinPaths')}
-          aria-selected={tab === 'paths'}
-          className={`shape-check-tab${tab === 'paths' ? ' active' : ''}`}
-          onClick={() => setTab('paths')}
-        >
-          <span>{say('tabJoinPaths')}</span>
-        </button>
-        {siblingsFirst.length > 0 ? (
-          <button
-            type="button"
-            role="tab"
-            aria-label={say('tabEnvDrift')}
-            aria-selected={tab === 'drift'}
-            className={`shape-check-tab${tab === 'drift' ? ' active' : ''}`}
-            onClick={() => setTab('drift')}
-          >
-            <span>{say('tabEnvDrift')}</span>
-            {drift.isSuccess ? (
-              <span className={`shape-tab-badge${diffTables.length > 0 ? ' tone-medium' : ''}`}>{diffTables.length}</span>
-            ) : null}
-          </button>
-        ) : null}
-      </div>
+      <Tabs<ShapeTab>
+        className="shape-check-tabs"
+        variant="underline"
+        ariaLabel={say('tabsAriaLabel')}
+        value={tab}
+        onValueChange={(next) => setTab(next)}
+        tabs={
+          [
+            {
+              value: 'lint',
+              label: say('tabSchemaPerf'),
+              count: lint.isSuccess ? (
+                <span aria-hidden="true" className={`shape-tab-badge${badgeToneFor(counts)}`}>
+                  {findings.length}
+                </span>
+              ) : undefined,
+            },
+            {
+              value: 'perf',
+              label: say('tabLivePerf'),
+              count: perf.isSuccess ? (
+                <span aria-hidden="true" className={`shape-tab-badge${badgeToneFor(perfCounts)}`}>
+                  {perfList.length}
+                </span>
+              ) : undefined,
+            },
+            {
+              value: 'anomalies',
+              label: say('tabAnomalies'),
+              count: anomalies.isSuccess ? (
+                <span aria-hidden="true" className={`shape-tab-badge${badgeToneFor(anomalyCounts)}`}>
+                  {anomalyList.length}
+                </span>
+              ) : undefined,
+            },
+            {
+              value: 'paths',
+              label: say('tabJoinPaths'),
+            },
+            ...(siblingsFirst.length > 0
+              ? [
+                  {
+                    value: 'drift' as const,
+                    label: say('tabEnvDrift'),
+                    count: drift.isSuccess ? (
+                      <span aria-hidden="true" className={`shape-tab-badge${diffTables.length > 0 ? ' tone-medium' : ''}`}>
+                        {diffTables.length}
+                      </span>
+                    ) : undefined,
+                  },
+                ]
+              : []),
+          ] as TabItem<ShapeTab>[]
+        }
+      />
 
       <div className="shape-dialog-body">
         {tab === 'lint' && lint.isPending ? (
@@ -450,6 +497,29 @@ export function ShapeCheckDialog({ onClose, initialTab = 'lint' }: { onClose: ()
                     : say('noPerfFindings')}
                 </span>
               </p>
+              {perfList.length > 0 ? (
+                <DiagnosticBars
+                  heading={say('perfChartHeading')}
+                  rows={groupFindings(perfList)
+                    .map(([table, list]) => {
+                      const meta = findTable(table) as TableMeta | undefined;
+                      const maxRows = Math.max(
+                        0,
+                        meta?.approxRows ?? 0,
+                        ...list.map((f) => (typeof f.approxRows === 'number' ? f.approxRows : 0)),
+                      );
+                      const maxBytes = Math.max(0, ...list.map((f) => (typeof f.bytes === 'number' ? f.bytes : 0)));
+                      const tone: 'high' | 'medium' | 'low' = list.some((f) => f.severity === 'high')
+                        ? 'high'
+                        : list.some((f) => f.severity === 'medium')
+                          ? 'medium'
+                          : 'low';
+                      const value = maxRows > 0 ? maxRows : maxBytes > 0 ? maxBytes : list.length;
+                      return { label: meta?.name ?? table, value, tone };
+                    })
+                    .sort((a, b) => b.value - a.value)}
+                />
+              ) : null}
               {groupFindings(perfList).map(([table, list]) => {
                 const meta = findTable(table) as TableMeta | undefined;
                 const approx = meta?.approxRows ?? list.find((f) => f.approxRows !== undefined)?.approxRows;
@@ -533,6 +603,19 @@ export function ShapeCheckDialog({ onClose, initialTab = 'lint' }: { onClose: ()
                     : say('noAnomaliesFound')}
                 </span>
               </p>
+              {anomalyList.some((f) => typeof f.rows === 'number' && f.rows > 0) ? (
+                <DiagnosticBars
+                  heading={say('anomaliesChartHeading')}
+                  rows={[...anomalyList]
+                    .filter((f) => typeof f.rows === 'number' && f.rows > 0)
+                    .sort((a, b) => (b.rows ?? 0) - (a.rows ?? 0))
+                    .map((f) => ({
+                      label: `${f.table} · ${f.rule}`,
+                      value: f.rows ?? 0,
+                      tone: f.severity ?? 'low',
+                    }))}
+                />
+              ) : null}
               {groupFindings(anomalyList).map(([table, list]) => {
                 const meta = findTable(table) as TableMeta | undefined;
                 return (

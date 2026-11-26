@@ -69,7 +69,14 @@ vi.mock('@mistriwork/kit/client/palette.js', () => ({
   addPaletteSource: () => {},
 }));
 
-const { appendShowProjection, recordRecentQueryInStore, syncSiblingBrowserStores } = await import('./workbenchEnhancements.js');
+const {
+  appendShowProjection,
+  buildQuickCellFilter,
+  extractVisibleGridData,
+  inspectCellValue,
+  recordRecentQueryInStore,
+  syncSiblingBrowserStores,
+} = await import('./workbenchEnhancements.js');
 const { saveStatement, savedStatements } = await import('./sqlsaved.js');
 
 beforeEach(() => {
@@ -147,4 +154,58 @@ test('saved SQL statements and browser stores share across sibling environments 
 
   const pins = store.get('mistri.pins.v1') as Record<string, Record<string, string[]>>;
   expect(pins['billing-staging']?.invoice).toEqual(['id', 'total']);
+});
+
+test('inspectCellValue recognizes JSON, ISO timestamps, UUIDs, multiline text, and nulls', () => {
+  const jsonInfo = inspectCellValue('{"tier":"pro","seats":5}');
+  expect(jsonInfo.kind).toBe('json');
+  expect(jsonInfo.formatted).toContain('\n  "tier": "pro"');
+  expect(jsonInfo.meta).toEqual(['2 keys']);
+
+  const tsInfo = inspectCellValue('2026-05-01T14:30:00Z');
+  expect(tsInfo.kind).toBe('timestamp');
+  expect(tsInfo.utc).toBe('2026-05-01T14:30:00.000Z');
+
+  const uuidInfo = inspectCellValue('550e8400-e29b-41d4-a716-446655440000');
+  expect(uuidInfo.kind).toBe('uuid');
+
+  const nullInfo = inspectCellValue('', true);
+  expect(nullInfo.kind).toBe('null');
+  expect(nullInfo.formatted).toBe('NULL');
+
+  const textInfo = inspectCellValue('line 1\nline 2');
+  expect(textInfo.kind).toBe('text');
+  expect(textInfo.meta).toEqual(['13 chars', '2 lines']);
+});
+
+test('buildQuickCellFilter composes =, !=, is empty, and is not empty filters cleanly', () => {
+  expect(buildQuickCellFilter('invoice sort total desc', 'invoice', 'status', 'paid', '=')).toBe("invoice status = 'paid' sort total desc");
+  expect(buildQuickCellFilter("invoice status = 'paid'", 'invoice', 'currency', 'EUR', '!=')).toBe(
+    "invoice status = 'paid' and currency != 'EUR'",
+  );
+  expect(buildQuickCellFilter('invoice', 'invoice', 'paid_at', null, 'empty')).toBe('invoice paid_at is empty');
+  expect(buildQuickCellFilter('invoice', 'invoice', 'paid_at', null, 'not-empty')).toBe('invoice paid_at is not empty');
+});
+
+test('extractVisibleGridData extracts headers, numeric values, and nulls from a rendered grid table', () => {
+  const table = document.createElement('table');
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th data-column="id"><span class="th-label">id</span></th>
+        <th data-column="name"><span class="th-label">name</span></th>
+        <th data-column="total"><span class="th-label">total</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td>Ada</td><td>1,250.50</td></tr>
+      <tr><td>2</td><td class="null">null</td><td>500</td></tr>
+    </tbody>
+  `;
+  const data = extractVisibleGridData(table);
+  expect(data.columns).toEqual(['id', 'name', 'total']);
+  expect(data.rows).toEqual([
+    [1, 'Ada', 1250.5],
+    [2, null, 500],
+  ]);
 });

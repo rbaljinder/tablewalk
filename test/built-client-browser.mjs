@@ -164,17 +164,13 @@ try {
   const cold = await visit(context, url, schema);
   assert.deepEqual(cold.errors, [], `${label}: errors on a cold visit`);
   assertShipped(label, cold.files);
-  // The browser's own look (Graphite, native.css) sets its text in Inter and its
-  // data in IBM Plex Mono, so a landing fetches exactly those two faces and
-  // no weight or script the first paint does not draw.
+  // The browser's own look (Folio, native.css) sets text and landing data in
+  // Inter (keeping monospace only for code), so a landing fetches only Inter
+  // and no weight or script the first paint does not draw.
   const faces = [
     ...new Set(cold.files.filter((file) => file.path.endsWith('.woff2')).map((file) => file.path.replace(/-[\w-]{8}\.woff2$/, ''))),
   ].sort();
-  assert.deepEqual(
-    faces,
-    ['/assets/ibm-plex-mono-400', '/assets/inter-latin'],
-    `${label}: only the faces the browser's own look draws are fetched`,
-  );
+  assert.deepEqual(faces, ['/assets/inter-latin'], `${label}: only the faces the browser's own look draws are fetched`);
   const chunks = cold.files.filter((file) => /^\/assets\/.+\.js$/.test(file.path)).map((file) => file.path.replace(/-[\w-]{8}\.js$/, ''));
   await cold.page.close();
   const warm = await visit(context, url, schema);

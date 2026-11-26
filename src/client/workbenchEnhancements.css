@@ -262,14 +262,17 @@
 
   .wb-col-profile-chips {
     display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-1h);
+    flex-direction: column;
+    gap: var(--space-1);
   }
 
   .wb-col-profile-chip {
-    display: inline-flex;
+    position: relative;
+    overflow: hidden;
+    display: flex;
     align-items: center;
-    gap: var(--space-1h);
+    justify-content: space-between;
+    gap: var(--space-2);
     padding: var(--space-1) var(--space-2);
     border: 1px solid var(--line);
     border-radius: var(--radius);
@@ -277,11 +280,46 @@
     color: var(--ink);
     font: var(--text-xs) var(--code);
     cursor: pointer;
-    max-inline-size: 100%;
+    inline-size: 100%;
+    text-align: start;
+  }
+
+  .wb-col-profile-bar {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    pointer-events: none;
+  }
+
+  .wb-col-profile-chip-val,
+  .wb-col-profile-chip-count {
+    position: relative;
+    z-index: 1;
+  }
+
+  .wb-col-profile-chip-val {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .wb-col-profile-chip-count {
+    flex: none;
     color: var(--ink-subtle);
+    font-family: var(--figures, var(--code));
+  }
+
+  .wb-col-profile-fill {
+    display: flex;
+    block-size: 5px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: var(--raised);
+  }
+
+  .wb-col-profile-fill-present {
+    background: var(--accent);
   }
 
   /* ---------- inline compiled-SQL execution plan ---------- */
@@ -516,10 +554,158 @@
     white-space: nowrap;
   }
 
+  /* ---------- Phase 2: Cell Inspector, Column Chooser, Copy Rows As, Grid Aggregates ---------- */
+
+  .wb-grid-pop {
+    position: fixed;
+    z-index: 90;
+    min-inline-size: 16rem;
+    max-inline-size: min(28rem, calc(100vw - 24px));
+    max-block-size: min(26rem, calc(100vh - 24px));
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2h) var(--space-3);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-pop, var(--radius));
+    background: var(--surface);
+    box-shadow: var(--shadow-pop, none);
+    color: var(--ink);
+    font: var(--text-xs) var(--face-ui, var(--sans));
+    overflow: hidden;
+  }
+
+  .wb-grid-pop-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+
+  .wb-grid-pop-title {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1h);
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .wb-cell-kind-badge {
+    padding: 0 var(--space-1h);
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    background: var(--ground);
+    color: var(--accent);
+    font: 600 var(--text-xs) var(--code);
+  }
+
+  .wb-cell-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    color: var(--ink-subtle);
+    font: var(--text-xs) var(--code);
+  }
+
+  .wb-cell-pre {
+    margin: 0;
+    padding: var(--space-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--ground);
+    color: var(--ink);
+    font: var(--text-xs)/1.5 var(--code);
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow: auto;
+    max-block-size: 14rem;
+  }
+
+  .wb-cell-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1h);
+  }
+
+  .wb-pop-action {
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--ground);
+    color: var(--ink);
+    font: 500 var(--text-xs) var(--face-ui, var(--sans));
+    cursor: pointer;
+    text-align: start;
+  }
+
+  .wb-col-search {
+    inline-size: 100%;
+    padding: var(--space-1h) var(--space-2);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: var(--ground);
+    color: var(--ink);
+    font: var(--text-xs) var(--code);
+    box-sizing: border-box;
+  }
+
+  .wb-col-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    overflow: auto;
+    max-block-size: 16rem;
+  }
+
+  .wb-col-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    border: 0;
+    border-radius: var(--radius-item, var(--radius));
+    background: transparent;
+    color: var(--ink);
+    font: var(--text-xs) var(--code);
+    cursor: pointer;
+    text-align: start;
+  }
+
+  .wb-col-type {
+    color: var(--ink-subtle);
+    font: var(--text-xs) var(--face-ui, var(--sans));
+  }
+
+  .wb-th-flash {
+    background: var(--accent-soft, var(--raised));
+  }
+
+  .wb-grid-agg-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    padding: var(--space-1h) var(--space-4);
+    border-top: 1px solid var(--line);
+    background: var(--ground);
+    color: var(--ink-muted);
+    font: var(--text-xs) var(--figures, var(--code));
+  }
+
   @media (hover: hover) {
-    .wb-filter-toggle:hover {
+    .wb-filter-toggle:hover,
+    .wb-pop-action:hover {
       border-color: var(--line-strong);
       color: var(--ink);
+    }
+
+    .wb-col-item:hover {
+      background: var(--raised);
     }
 
     .wb-sidebar-seg-btn:not(.active):hover {

@@ -34,6 +34,7 @@ The print-and-exit commands need a target, though — there is nothing for
 npx tablewalk mydata.sqlite --export md >> CLAUDE.md    # the schema, as a committed brief
 npx tablewalk postgres://… --lint --fail-on high         # what the shape costs, for CI
 npx tablewalk mydata.sqlite --verify-ddl migration.sql   # dry-run DDL diff + new lint check
+npx tablewalk mydata.sqlite --sql-file reports/orders.sql --param status=paid --out orders.csv
 npx tablewalk --config ./tablewalk.json --diff staging   # is staging the same shape?
 ```
 
@@ -197,6 +198,27 @@ open. Bounded, and honest about it: it says which tables it could not read and
 where it stopped. It is the same `find` the MCP server offers, through the
 same endpoint, so the two cannot disagree about what a match is.
 
+**SQL workbench and `.sql` workspaces** (`⌘⇧↵` or **SQL**) pair the one-line
+query language with full dialect-aware SQL highlighting and schema-aware
+autocomplete (tables, columns, statement-scoped aliases, CTEs, foreign-key
+`JOIN … ON` clauses, named `:params` and dialect functions). Attach a local
+`.sql` folder per database (`--sql-dir` / `"sqlDir"` in `tablewalk.json`, or
+**Import folder…** in the browser), edit across multiple console and file tabs
+with `⌘S` save and per-database **History**, run the statement at caret (`⌘↵`)
+or an entire multi-statement **Run script**, fill `:param` / `{{param}}`
+placeholders from an inline bar, copy/download results as CSV, JSON, Markdown,
+`INSERT` or `IN (…)`, and toggle **Diff envs** inside **Compare envs**.
+
+In every table grid, right-click (or `Shift+Click`) any cell for the **Cell
+Inspector** (pretty-printed JSON, UTC/local timestamps, UUIDs, multiline copy,
+and 1-click `=`, `!=` and `is empty` quick filters), use **Columns** to search
+and jump across wide tables, **Copy…** to copy visible rows, and read automatic
+numeric `sum / avg / min / max` aggregates in the sticky footer. The browser
+boots in **Folio** (warm archival paper, printed horizontal rules and deep
+forest-green links, light or warm-charcoal dark), with **Instrument** (Stone,
+Graphite, Fog, Slate, Ink), **Braun**, **Broadsheet**, **Obsidian**,
+**Gallery**, **Lumen** and more in **Preferences**.
+
 Everything is a link. In the database browser the URL carries the whole
 trail — connection, queries, rows, page — so a walk can be pasted into a ticket
 and arrive intact. A page is named in the link rather than identified:
@@ -237,8 +259,8 @@ in the UI, and says what it cost in rows and milliseconds.
 | `query` | the query language, or a named `view` from `tablewalk.json` (even on `"hidden"`-column connections); errors carry suggestions and the table's real columns |
 | `breakdown` | counts and sums grouped by something — `invoice count by month invoice_date` |
 | `record` | one row, its human name, and everything that points at it |
-| `sql` | read-only `SELECT` or a named `saved` query from `tablewalk.json`; never over tablewalk's own tables |
-| `export` | a `query`, named `view`, `sql` or `saved` query written to a file (csv, ndjson, json; optionally gzip and `redact: true`) in the temp directory, not into the reply |
+| `sql` | read-only `SELECT` or a named `saved` query (from `tablewalk.json` or a `.sql` file under `--sql-dir` / `"sqlDir"`), with optional `params` for `:param` / `{{param}}` placeholders; never over tablewalk's own tables |
+| `export` | a `query`, named `view`, `sql` or `saved` query (including workspace `.sql` files with `params`) written to a file (csv, ndjson, json; optionally gzip and `redact: true`) in the temp directory, not into the reply |
 | `explain` | the planner's account of a statement without running it — feed a `query` answer's `sql` back |
 | `profile` | what a column actually holds: null share, distinct count, range, the values that repeat |
 | `lint` | what the shape will cost: keyless tables, unindexed references, naive timestamps |
@@ -345,12 +367,16 @@ mistri — whether the statement names them, reaches them
 through a view, or could only name a table when it runs.
 
 The shelf your team already keeps is readable and runnable too. Named views,
-named queries and page definitions from your `tablewalk.json`, and pages saved
-from the browser, are served as MCP **resources** —
-`tablewalk://{connection}/views`, `tablewalk://{connection}/queries`,
-`tablewalk://{connection}/pages` and `tablewalk://{connection}/page/{page}` —
-beside the schema brief. Reading them does not run them; `query`, `sql` and
-`export` run named `view` and `saved` entries on demand. From the browser,
+named queries and page definitions from your `tablewalk.json`, `.sql` files in a
+connection's workspace (`sqlDir` / `--sql-dir`, with each file's required
+`:param` names listed), and pages saved from the browser are served as MCP
+**resources** — `tablewalk://{connection}/views`,
+`tablewalk://{connection}/queries`, `tablewalk://{connection}/pages` and
+`tablewalk://{connection}/page/{page}` — beside the schema brief. Reading them
+does not run them; `query`, `sql` and `export` run named `view` and `saved`
+entries on demand (passing typed `params` for `:param` / `{{param}}`
+placeholders), and the same parameterized `.sql` export works directly from the
+CLI with `--sql-file`, `--param` and `--out`. From the browser,
 **Copy brief for agent** (`⌘K` or `···`) copies a compact Markdown handoff of
 the current record, query or schema with its deep link and exact MCP call.
 
@@ -397,10 +423,13 @@ every tool accepts `"connection": "app@staging"`, `"@staging"`, or
 `"env": "staging"`, and implicit writes while a `prod` environment is active are
 refused unless `"connection"` or `"env": "prod"` is named explicitly.
 
-A PostgreSQL entry can size its read pool and idle window,
-`"pool": { "read": 16, "idleSeconds": 300, "minIdle": 2 }` (`read` 1 to 64, default
-4 or `--read-pool`; `idleSeconds` 1 to 86400, default 300 or `TABLEWALK_POOL_IDLE`;
-`minIdle` 0 to 64, default 2 warm readers). The database browser writes through one
+A PostgreSQL entry can size its read pool, idle window and socket timeouts,
+`"pool": { "read": 16, "idleSeconds": 300, "minIdle": 2, "connectTimeoutMs": 10000, "queryTimeoutMs": 60000 }`
+(`read` 1 to 64, default 4 or `--read-pool`; `idleSeconds` 1 to 86400, default
+300 or `TABLEWALK_POOL_IDLE`; `minIdle` 0 to 64, default 2 warm readers;
+`connectTimeoutMs` 1000 to 120000, default 10 s; `queryTimeoutMs` 1000 to
+3600000, default statement timeout + 30 s / 60 s, closing silent sockets alongside
+10 s TCP keepalive). The database browser writes through one
 connection, one write at a time, which its Undo needs. A write waits at most
 `--lock-timeout` (5 s) for a row another transaction holds, and is then
 refused with a retry. `--pooler transaction` is for a deployment behind
@@ -433,7 +462,11 @@ They appear above the SQL editor and in ⌘K. Leaving `connection` out offers th
 statement on every database, which is right for one about a schema several of
 them share and wrong for one about a table only production has. Statements you
 save in the browser sit in the same list; the only difference is that a
-committed one is not yours to delete.
+committed one is not yours to delete. You can also attach a folder of `.sql`
+files with `"sqlDir"` (top-level or per connection, or via `--sql-dir`):
+sibling environments sharing a `database` share the same folder automatically,
+and its `.sql` files are runnable in the SQL workbench, over MCP (`saved` +
+`params`), and from the CLI (`--sql-file`, `--param`, `--out`).
 
 It can also carry the built surfaces, so the interface a team agrees on lives
 in version control rather than in one person's browser. Four sections, all
@@ -682,6 +715,9 @@ mistri --app <dir>            an App, served: the App framework's, npx @mistriwo
       --audit-log <path|stderr>
                               append zero-PII JSONL audit receipts for every
                               tool call
+      --sql-dir <dir>         attach a local folder of .sql files as the default
+                              SQL workspace (or "sqlDir" in tablewalk.json, or
+                              set TABLEWALK_SQL_DIR)
       --base-path <path>      the path a reverse proxy serves this server
                               under, like /tools: every address, asset, API
                               call, cookie and link carries it. Or "basePath"
@@ -704,7 +740,10 @@ mistri --app <dir>            an App, served: the App framework's, npx @mistriwo
                               close all connections, and exit
       --call <tool>           run one MCP tool by name, print the result, close
                               all connections, and exit
-      --args <json>           with --call or --query: JSON object of arguments
+      --args <json>           with --call, --query or --sql-file: JSON object of arguments
+      --sql-file <path>       run or export a .sql file (on disk or under --sql-dir) and exit
+      --param <key=value>     with --sql-file or --call: bind :param or {{param}}; repeatable
+      --out <path>            with --sql-file, --query or --call export: write directly to this file (.csv, .ndjson, .json, or .gz)
       --batch [path|-]        run newline-delimited queries or JSON {"tool","args"}
                               calls over one session, print NDJSON, and exit
       --all-envs              with --query, --call or --batch: run a read-only
@@ -789,7 +828,7 @@ as given, from the current directory.
 An option it does not recognize is an error, not a shrug: `tablewalk --prot
 4111` says so rather than quietly serving the default port.
 
-`--tools` offers one job's worth of tools instead of all twenty-seven. Most
+`--tools` offers one job's worth of tools instead of all twenty-eight. Most
 sessions are one job — an agent reading a schema does not need the graph
 writers, one seeding a fixture does not need `explain` — and the listing is a
 fixed cost paid on connect, before anything is asked. `connections` and
@@ -887,6 +926,7 @@ cannot drift out of reach of the person who needs it.
 | `t` | focus the table filter |
 | `⌘K` | command palette: tables, pages, actions, recent queries |
 | `⌘B` | show or hide the table list |
+| `⌘⇧↵` | open the SQL workbench (`⌘↵` runs selection/caret statement, `⌘S` saves `.sql` file, `Ctrl+Space` completes) |
 | `Backspace` or `⌘[` | walk back one step |
 | `?` | the query-language panel |
 | `Space` | in a result grid: glance at that row's record |
@@ -901,6 +941,7 @@ mode, density — and the rows-per-page control lives with the pager.
 
 In a result grid: arrows move a cell cursor, `Enter` opens that row's record,
 `Space` glances at it without leaving the list, `⌘C` copies the cell,
+`Shift+Click` (or right-click) opens the Cell Inspector and quick filters, and
 `Home`/`End` jump to the first and last column. A record opened from a list —
 its page, a glance or a dialog — says where it sits ("3 of 20") beside its
 name, and `j`/`k` or the arrows there step through that list, past its page too.

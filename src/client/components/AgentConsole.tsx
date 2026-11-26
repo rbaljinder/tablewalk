@@ -6,6 +6,8 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Button } from '@mistriwork/ui/Button.js';
+import { Resizable } from '@mistriwork/ui/Resizable.js';
 import { api, loadJson, saveJson, state, toast, trapFocus } from '@mistriwork/kit/client/core.js';
 import { formatNumber } from '@mistriwork/kit/client/locale.js';
 import { say } from '../copy/workbench/components/AgentConsole.js';
@@ -317,166 +319,185 @@ export function AgentConsole({ onClose }: { onClose: () => void }) {
         <div className="conn-head-actions">
           {mcpUrl ? (
             <>
-              <button
-                type="button"
-                className={`ghost${followAgent ? ' active' : ''}`}
+              <Button
+                variant={followAgent ? 'soft' : 'ghost'}
+                className={followAgent ? 'active' : undefined}
                 aria-pressed={followAgent}
                 title={say('followAgentTitle')}
                 onClick={toggleFollowAgent}
               >
                 {say('followAgent')}
-              </button>
-              <button type="button" className="ghost" onClick={() => void copyMcpUrl()}>
+              </Button>
+              <Button variant="ghost" onClick={() => void copyMcpUrl()}>
                 {say('copyMcpEndpoint', { url: mcpUrl })}
-              </button>
+              </Button>
             </>
           ) : null}
-          <button type="button" onClick={onClose}>
-            {say('common.done')}
-          </button>
+          <Button onClick={onClose}>{say('common.done')}</Button>
         </div>
       </div>
       <div className="agent-body">
-        <div className="agent-rail">
-          {list.length > 6 ? (
-            <input
-              type="search"
-              className="agent-tool-search"
-              aria-label={say('filterToolsLabel')}
-              placeholder={say('filterToolsPlaceholder', { count: list.length })}
-              value={toolFilter}
-              onChange={(e) => setToolFilter(e.currentTarget.value)}
-            />
-          ) : null}
-          <div className="agent-tools" role="listbox" aria-label={say('tools')}>
-            {groupedTools.length === 0 ? (
-              <p className="note">{say('noMatchingTools', { query: toolFilter.trim() })}</p>
-            ) : list.length > 6 ? (
-              groupedTools.map(({ cat, items }) => (
-                <div key={cat} role="presentation">
-                  <div className="agent-cat-head" aria-hidden="true">
-                    {categoryLabel(cat)}
+        <Resizable
+          className="agent-split"
+          direction="horizontal"
+          ariaLabel={say('workspaceSplitLabel')}
+          panels={[
+            {
+              label: say('tools'),
+              defaultSize: 24,
+              minSize: 16,
+              children: (
+                <div className="agent-rail">
+                  {list.length > 6 ? (
+                    <input
+                      type="search"
+                      className="agent-tool-search"
+                      aria-label={say('filterToolsLabel')}
+                      placeholder={say('filterToolsPlaceholder', { count: list.length })}
+                      value={toolFilter}
+                      onChange={(e) => setToolFilter(e.currentTarget.value)}
+                    />
+                  ) : null}
+                  <div className="agent-tools" role="listbox" aria-label={say('tools')}>
+                    {groupedTools.length === 0 ? (
+                      <p className="note">{say('noMatchingTools', { query: toolFilter.trim() })}</p>
+                    ) : list.length > 6 ? (
+                      groupedTools.map(({ cat, items }) => (
+                        <div key={cat} role="presentation">
+                          <div className="agent-cat-head" aria-hidden="true">
+                            {categoryLabel(cat)}
+                          </div>
+                          {items.map((t) => (
+                            <button
+                              key={t.name}
+                              type="button"
+                              className={`agent-tool${t.name === tool?.name ? ' active' : ''}`}
+                              role="option"
+                              aria-selected={t.name === tool?.name}
+                              onClick={() => pick(t.name)}
+                            >
+                              <span className="agent-tool-name">{t.name}</span>
+                              <span className="agent-tool-badges">
+                                <Badges tool={t} />
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      ))
+                    ) : (
+                      filteredTools.map((t) => (
+                        <button
+                          key={t.name}
+                          type="button"
+                          className={`agent-tool${t.name === tool?.name ? ' active' : ''}`}
+                          role="option"
+                          aria-selected={t.name === tool?.name}
+                          onClick={() => pick(t.name)}
+                        >
+                          <span className="agent-tool-name">{t.name}</span>
+                          <span className="agent-tool-badges">
+                            <Badges tool={t} />
+                          </span>
+                        </button>
+                      ))
+                    )}
                   </div>
-                  {items.map((t) => (
-                    <button
-                      key={t.name}
-                      type="button"
-                      className={`agent-tool${t.name === tool?.name ? ' active' : ''}`}
-                      role="option"
-                      aria-selected={t.name === tool?.name}
-                      onClick={() => pick(t.name)}
-                    >
-                      <span className="agent-tool-name">{t.name}</span>
-                      <span className="agent-tool-badges">
-                        <Badges tool={t} />
-                      </span>
-                    </button>
-                  ))}
                 </div>
-              ))
-            ) : (
-              filteredTools.map((t) => (
-                <button
-                  key={t.name}
-                  type="button"
-                  className={`agent-tool${t.name === tool?.name ? ' active' : ''}`}
-                  role="option"
-                  aria-selected={t.name === tool?.name}
-                  onClick={() => pick(t.name)}
-                >
-                  <span className="agent-tool-name">{t.name}</span>
-                  <span className="agent-tool-badges">
-                    <Badges tool={t} />
-                  </span>
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-        <div className="agent-main">
-          {enrichedConnections.length > 0 ? (
-            <div className="agent-target-bar" role="group" aria-label={say('targetConnectionsGroup')}>
-              <span className="agent-target-label">{say('targetConnectionLabel')}</span>
-              <div className="agent-target-list">
-                {enrichedConnections.map((conn) => {
-                  const current = !isAllEnvs && conn.id === targetId;
-                  const rowsRead = activity.data?.egress?.[conn.id] ?? 0;
-                  const connMax = activity.data?.maxRows?.[conn.id] ?? conn.maxRows;
-                  return (
-                    <button
-                      key={conn.id}
-                      type="button"
-                      className={`agent-target-pill tone-${conn.tier}${current ? ' active' : ''}`}
-                      aria-pressed={current}
-                      onClick={() => setPinnedTarget(conn.id === activeId ? null : conn.id)}
-                    >
-                      <span className="env-pill-dot" aria-hidden="true" />
-                      <span className="agent-target-name">{conn.name}</span>
-                      {conn.env ? <span className={`env-pill compact tone-${conn.tier}`}>{conn.env}</span> : null}
-                      <span className="agent-target-posture">
-                        {conn.rows === false
-                          ? say('shapeOnlyBadge')
-                          : conn.redactsRows
-                            ? say('maskedBadge')
-                            : conn.writable
-                              ? say('writableBadge')
-                              : say('readOnly')}
-                      </span>
-                      {connMax !== undefined ? (
-                        <span className={`agent-target-egress${rowsRead >= connMax ? ' at-cap' : ''}`}>
-                          {say('rowsBudgetPill', { read: formatNumber(rowsRead), max: formatNumber(connMax) })}
-                        </span>
-                      ) : rowsRead > 0 ? (
-                        <span className="agent-target-egress">{say('rowsReadPill', { read: formatNumber(rowsRead) })}</span>
-                      ) : null}
-                    </button>
-                  );
-                })}
-                {fanoutEligible ? (
-                  <button
-                    type="button"
-                    className={`agent-target-pill${isAllEnvs ? ' active' : ''}`}
-                    aria-pressed={isAllEnvs}
-                    title={say('allEnvsTitle')}
-                    onClick={() => setPinnedTarget(isAllEnvs ? null : ALL_ENVS_TARGET)}
-                  >
-                    <span>{say('allEnvsPill', { count: siblingEnvCount })}</span>
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-          {tool ? (
-            <>
-              <ToolForm
-                key={tool.name}
-                tool={tool}
-                targetConnection={isAllEnvs ? undefined : targetId}
-                onCall={call}
-                onBadJson={(message) => setAnswer({ kind: 'error', message })}
-              />
-              <div className="agent-result">
-                {answer.kind === 'running' ? (
-                  <p className="loading">{say('calling', { tool: answer.tool })}</p>
-                ) : answer.kind === 'error' ? (
-                  <p className="agent-error" role="alert">
-                    {answer.message}
-                  </p>
-                ) : answer.kind === 'answer' ? (
-                  <AnswerView answer={answer.answer} onClose={onClose} />
-                ) : null}
-              </div>
-              <LiveActivityTrail
-                calls={externalCalls}
-                egress={activity.data?.egress}
-                onShow={(a) => setAnswer({ kind: 'answer', answer: a })}
-              />
-              <Transcript calls={transcript} onShow={(a) => setAnswer({ kind: 'answer', answer: a })} />
-            </>
-          ) : (
-            <p className="note">{say('noToolsIsTheServer')}</p>
-          )}
-        </div>
+              ),
+            },
+            {
+              label: say('workspacePaneLabel'),
+              defaultSize: 76,
+              minSize: 45,
+              children: (
+                <div className="agent-main">
+                  {enrichedConnections.length > 0 ? (
+                    <div className="agent-target-bar" role="group" aria-label={say('targetConnectionsGroup')}>
+                      <span className="agent-target-label">{say('targetConnectionLabel')}</span>
+                      <div className="agent-target-list">
+                        {enrichedConnections.map((conn) => {
+                          const current = !isAllEnvs && conn.id === targetId;
+                          const rowsRead = activity.data?.egress?.[conn.id] ?? 0;
+                          const connMax = activity.data?.maxRows?.[conn.id] ?? conn.maxRows;
+                          return (
+                            <button
+                              key={conn.id}
+                              type="button"
+                              className={`agent-target-pill tone-${conn.tier}${current ? ' active' : ''}`}
+                              aria-pressed={current}
+                              onClick={() => setPinnedTarget(conn.id === activeId ? null : conn.id)}
+                            >
+                              <span className="env-pill-dot" aria-hidden="true" />
+                              <span className="agent-target-name">{conn.name}</span>
+                              {conn.env ? <span className={`env-pill compact tone-${conn.tier}`}>{conn.env}</span> : null}
+                              <span className="agent-target-posture">
+                                {conn.rows === false
+                                  ? say('shapeOnlyBadge')
+                                  : conn.redactsRows
+                                    ? say('maskedBadge')
+                                    : conn.writable
+                                      ? say('writableBadge')
+                                      : say('readOnly')}
+                              </span>
+                              {connMax !== undefined ? (
+                                <span className={`agent-target-egress${rowsRead >= connMax ? ' at-cap' : ''}`}>
+                                  {say('rowsBudgetPill', { read: formatNumber(rowsRead), max: formatNumber(connMax) })}
+                                </span>
+                              ) : rowsRead > 0 ? (
+                                <span className="agent-target-egress">{say('rowsReadPill', { read: formatNumber(rowsRead) })}</span>
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                        {fanoutEligible ? (
+                          <button
+                            type="button"
+                            className={`agent-target-pill${isAllEnvs ? ' active' : ''}`}
+                            aria-pressed={isAllEnvs}
+                            title={say('allEnvsTitle')}
+                            onClick={() => setPinnedTarget(isAllEnvs ? null : ALL_ENVS_TARGET)}
+                          >
+                            <span>{say('allEnvsPill', { count: siblingEnvCount })}</span>
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+                  {tool ? (
+                    <>
+                      <ToolForm
+                        key={tool.name}
+                        tool={tool}
+                        targetConnection={isAllEnvs ? undefined : targetId}
+                        onCall={call}
+                        onBadJson={(message) => setAnswer({ kind: 'error', message })}
+                      />
+                      <div className="agent-result">
+                        {answer.kind === 'running' ? (
+                          <p className="loading">{say('calling', { tool: answer.tool })}</p>
+                        ) : answer.kind === 'error' ? (
+                          <p className="agent-error" role="alert">
+                            {answer.message}
+                          </p>
+                        ) : answer.kind === 'answer' ? (
+                          <AnswerView answer={answer.answer} onClose={onClose} />
+                        ) : null}
+                      </div>
+                      <LiveActivityTrail
+                        calls={externalCalls}
+                        egress={activity.data?.egress}
+                        onShow={(a) => setAnswer({ kind: 'answer', answer: a })}
+                      />
+                      <Transcript calls={transcript} onShow={(a) => setAnswer({ kind: 'answer', answer: a })} />
+                    </>
+                  ) : (
+                    <p className="note">{say('noToolsIsTheServer')}</p>
+                  )}
+                </div>
+              ),
+            },
+          ]}
+        />
       </div>
     </div>
   );
@@ -582,9 +603,9 @@ function ToolForm({
         );
       })}
       <div className="agent-run-row">
-        <button type="button" className="primary" onClick={run}>
+        <Button variant="primary" onClick={run}>
           {say('callTool')}
-        </button>
+        </Button>
       </div>
     </div>
   );

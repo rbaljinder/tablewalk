@@ -84,6 +84,11 @@ const BROWSER_DATA: DataHooks = {
 /** Its routes, tried in order; the last answers whatever is left. */
 const ROUTES: readonly Route<RequestContext>[] = [
   (ctx) => connectionRoutes(ctx),
+  async (ctx) => {
+    if (!ctx.path.startsWith('/api/sql/workspace') && !ctx.path.startsWith('/api/sql/files')) return false;
+    const { sqlWorkspaceRoutes } = await import('./sqlWorkspaceRoutes.js');
+    return sqlWorkspaceRoutes(ctx);
+  },
   /* Everything else that takes a body, on the source the body names (dataRoutes.ts). */
   async (ctx) => {
     if (ctx.req.method !== 'POST' || !ctx.path.startsWith('/api/')) return false;

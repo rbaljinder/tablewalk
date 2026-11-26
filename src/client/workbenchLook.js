@@ -17,7 +17,10 @@ import {
   hostLookChoice,
   visualThemeChoice,
   visualThemeOverrides,
+  visualThemePalette,
 } from '@mistriwork/kit/client/visualTheme.js';
+import { effectiveThemePalette } from '@mistriwork/engine/shared/themePresets.js';
+import { fieldEdge, heatTop } from '@mistriwork/engine/shared/themeColor.js';
 import { setThemeScheme } from '@mistriwork/kit/client/theme.js';
 import { setDensityDefault } from '@mistriwork/kit/client/density.js';
 import { addHostListener, shellBody, shellRoot } from '@mistriwork/kit/client/shellHost.js';
@@ -26,6 +29,8 @@ import { addHostListener, shellBody, shellRoot } from '@mistriwork/kit/client/sh
 let customTokenKeys = /** @type {string[]} */ ([]);
 let partTokenKeys = /** @type {string[]} */ ([]);
 let watched = false;
+
+const LOOK_ROOT_ATTRS = ['data-nav-current', 'data-pill-radius', 'data-control-radius', 'data-rules-control', 'data-field-fill'];
 
 export function wearWorkbenchLook() {
   configureVisualThemes(undefined, undefined, false, undefined, undefined, { locked: false, isolated: false });
@@ -40,29 +45,35 @@ export function wearWorkbenchLook() {
   shellBody().classList.remove('app-readonly');
   for (const key of ['--accent', '--accent-ink', '--on-accent', '--focus', '--link', '--accent-soft', '--radius', '--chart-1'])
     style.removeProperty(key);
-  const root = shellRoot().style;
+  const rootEl = shellRoot();
+  const root = rootEl.style;
   /* The native default takes every look token back, and keeps style.css's code face. A host look (hostLooks.js) is the
      same here: its sheet, keyed on data-host-look, writes its own tokens, and the kit has no theme of that name. */
   if (visualThemeChoice() === 'default' || hostLookChoice()) {
     for (const key of customTokenKeys) root.removeProperty(key);
     customTokenKeys = [];
+    for (const attr of LOOK_ROOT_ATTRS) rootEl.removeAttribute(attr);
     root.removeProperty('--mono');
     setDensityDefault(undefined);
     return;
   }
   /* A look the reader picked: its tokens on the root, its corner unless it is square, its data face. */
   const look = visualThemeOverrides();
-  const dark =
-    shellRoot().dataset.theme === 'dark' || (!shellRoot().dataset.theme && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const dark = rootEl.dataset.theme === 'dark' || (!rootEl.dataset.theme && window.matchMedia('(prefers-color-scheme: dark)').matches);
   const tokens = customThemeTokens(dark);
+  const worn = effectiveThemePalette(visualThemePalette(dark), dark, {});
+  tokens['--heat-top'] = `${Math.round(heatTop(worn) * 100)}%`;
+  const edge = fieldEdge(worn);
+  if (edge) tokens['--field-edge'] = edge;
   if (look.radius) tokens['--radius'] = look.radius;
   for (const key of customTokenKeys) if (!(key in tokens)) root.removeProperty(key);
   for (const [key, value] of Object.entries(tokens)) root.setProperty(key, value);
   customTokenKeys = Object.keys(tokens);
-  shellRoot().toggleAttribute('data-nav-current', '--nav-current' in tokens);
-  shellRoot().toggleAttribute('data-pill-radius', '--pill-radius' in tokens);
-  shellRoot().toggleAttribute('data-control-radius', '--control-radius' in tokens);
-  shellRoot().toggleAttribute('data-rules-control', '--control-border-w' in tokens);
+  rootEl.toggleAttribute('data-nav-current', '--nav-current' in tokens);
+  rootEl.toggleAttribute('data-pill-radius', '--pill-radius' in tokens);
+  rootEl.toggleAttribute('data-control-radius', '--control-radius' in tokens);
+  rootEl.toggleAttribute('data-rules-control', '--control-border-w' in tokens);
+  rootEl.toggleAttribute('data-field-fill', '--field-fill' in tokens);
   root.setProperty('--mono', look.font);
   setDensityDefault(undefined);
 }

@@ -88,12 +88,16 @@ async function served(args: string[]): Promise<string[]> {
    that needs it. `--mcp` is 175, not 172, since the server modules take the engine's names from its host entry point
    (`@mistriwork/engine/host`): one module that re-exports them, and the few modules behind it that the deeper paths did not
    reach in this mode. Engine 1.0.0-rc.49 raised `--mcp` to 187 and serving to 258: the adapters it opens now load
-   their own reserved-table check (`reservedSql`), network policy and pool admission. Those are the engine's modules,
-   behind the same host entry point, and the modules each mode must not load still stay out. */
-const HELP_CEILING = 36;
+   their own reserved-table check (`reservedSql`), network policy and pool admission. Engine 1.0.0-rc.90 added
+   `adapters/postgresSilence` (silent-peer socket timeout, pulled in by `postgresPool`), `shared/computedWhere`, and
+   `shared/coverPhotos`, raising `--help` from 36 to 37, `--mcp` from 187 to 193, and serving from 258 to 264; those
+   are the engine's modules behind the same host entry point, and the modules each mode must not load still stay out.
+   Engine 1.0.0-rc.91 added `shared/cte`, `adapters/postgresCte`, `shared/appMessages`, and `shared/pageEmptyActions`,
+   raising `--mcp` to 197 and serving to 270 while every forbidden mode module still stays out. */
+const HELP_CEILING = 38;
 const VERSION_CEILING = 70;
-const MCP_CEILING = 190;
-const SERVE_CEILING = 260;
+const MCP_CEILING = 200;
+const SERVE_CEILING = 272;
 
 const oneTable = (t: { after(fn: () => void): void }): string => {
   const directory = mkdtempSync(join(tmpdir(), 'tablewalk-startup-db-'));

@@ -36,8 +36,8 @@ async function nativeLook(page: Page) {
   for (const attribute of ['data-visual-theme', 'data-theme-style', 'data-custom-theme', 'data-theme-palette', 'data-record-branding']) {
     await expect(root).not.toHaveAttribute(attribute);
   }
-  // Graphite's ground: the browser's own look is Instrument in the Graphite and cobalt palette (native.css).
-  await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(246, 247, 249)');
+  // Folio's warm archival paper ground (#f8f7f4): the browser's own look (native.css).
+  await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(248, 247, 244)');
   expect(
     await root.evaluate((node) =>
       ['--ground', '--surface', '--heading-font', '--field-radius', '--mono'].map((key) =>

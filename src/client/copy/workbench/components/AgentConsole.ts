@@ -45,4 +45,6 @@ export const say = defineMessages({
   catSafeWrites: 'Safe writes',
   followAgent: 'Follow agent',
   followAgentTitle: 'Automatically open the table, query or record an external MCP agent inspects',
+  workspaceSplitLabel: 'Agent tools and workspace',
+  workspacePaneLabel: 'Tool workspace',
 });

@@ -89,6 +89,8 @@ let suggester = () => [];
 /** @type {(text: string, caret: number) => { word: string, start: number }} */
 let splitter = (text, caret) => tokenAt(text, caret);
 let anchor = 'field';
+/** @type {((value: string) => void) | null} */
+let onAccept = null;
 
 export function initComplete() {
   attachComplete($('query'), suggestionsFor);
@@ -106,7 +108,7 @@ export function initComplete() {
  *
  * @param {HTMLInputElement|HTMLTextAreaElement} input
  * @param {(text: string, caret: number) => Array} suggest
- * @param {{ anchor?: 'field' | 'caret', preserveRole?: boolean, split?: (text: string, caret: number) => {word: string, start: number} }} [options]
+ * @param {{ anchor?: 'field' | 'caret', preserveRole?: boolean, split?: (text: string, caret: number) => {word: string, start: number}, onAccept?: (value: string) => void }} [options]
  */
 export function attachComplete(input, suggest, options = {}) {
   /* The combobox contract: without it a screen reader hears nothing when
@@ -125,6 +127,7 @@ export function attachComplete(input, suggest, options = {}) {
     suggester = suggest;
     splitter = options.split ?? tokenAt;
     anchor = options.anchor ?? 'field';
+    onAccept = options.onAccept ?? null;
   };
 
   input.addEventListener('input', () => {
@@ -569,10 +572,12 @@ function acceptMany(input, chosen) {
   const { start } = splitter(input.value, caret);
   const after = input.value.slice(caret);
   const text = chosen.map((c) => c.value).join(', ');
-  const insert = text + (after.startsWith(' ') ? '' : ' ');
+  const suppressSpace = chosen.length === 1 && Boolean(chosen[0].noSpace);
+  const insert = text + (suppressSpace || after.startsWith(' ') ? '' : ' ');
   input.value = input.value.slice(0, start) + insert + after;
   const next = start + insert.length;
   input.setSelectionRange(next, next);
+  onAccept?.(input.value);
   close();
   // Chain straight into the next suggestion: pick a table, get its columns.
   update(input);
@@ -610,6 +615,10 @@ function onKey(e, input) {
       accept(input, items[index >= 0 ? index : 0]);
       return;
     case 'Enter':
+      if (e.metaKey || e.ctrlKey) {
+        close();
+        return;
+      }
       /* Enter only completes when something is explicitly highlighted.
          Otherwise it submits, so a finished query is one keystroke away and
          does not need Escape first. */

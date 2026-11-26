@@ -191,3 +191,19 @@ test('groups multi-environment databases under logical headers in pipeline order
   await user.click(screen.getAllByRole('button', { name: '+ Env' })[0]);
   expect(onCloneEnv).toHaveBeenCalledWith(expect.objectContaining({ id: 'billing-local', database: 'billing' }), expect.any(Function));
 });
+
+test('displays configured PostgreSQL pool timeout badges on connection rows', async () => {
+  api.mockResolvedValueOnce({
+    active: 'prod',
+    connections: [
+      {
+        ...list[0],
+        pool: { read: 8, connectTimeoutMs: 15000, queryTimeoutMs: 90000 },
+      },
+    ],
+  });
+  draw();
+  const row = await screen.findByRole('option');
+  expect(row).toHaveTextContent('connect 15,000 ms');
+  expect(row).toHaveTextContent('idle-socket 90,000 ms');
+});

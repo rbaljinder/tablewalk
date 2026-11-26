@@ -31,6 +31,7 @@ import {
 import { MAX_LIMIT } from '@mistriwork/engine/shared/reads.js';
 import { resolveOrder, tableDialect, type Order } from '@mistriwork/engine/shared/schema.js';
 import { continueGroups, keysetAfter, keysetOrder, pageBounds } from '@mistriwork/engine/shared/keysetPage.js';
+import { bindTypedSqlParameters } from '../../../shared/sqlScript.js';
 import { resolveNamedView, resolveSavedQuery, shelfOf } from '../shelf.js';
 import { ENV_ARG, getConnectionRuntimePolicy, STATS, type Handler, ToolError } from '../toolkit.js';
 
@@ -40,7 +41,8 @@ export const definitions = [
     description:
       'Write a result to a file on this machine instead of returning its rows — for more data than fits in a ' +
       'reply. Give exactly one of `query` (the query language, as `query` takes it), `view` (a named view from ' +
-      'tablewalk.json), `sql` (a read-only SELECT, as `sql` takes it) or `saved` (a named query from tablewalk.json). ' +
+      'tablewalk.json), `sql` (a read-only SELECT, as `sql` takes it) or `saved` (a named query from tablewalk.json ' +
+      'or a `.sql` file from the connection SQL workspace, with optional `params` for `:param` / `{{param}}` placeholders). ' +
       'Pass `redact: true` to deterministically mask emails, phones, names, addresses and secrets in both the file and ' +
       'the five-row sample. The file is csv (default), ndjson or json, in tablewalk-exports under the temp directory; the ' +
       'answer is its absolute path, row and byte counts, the columns, five sample rows, and how to load it (DuckDB, ' +
@@ -57,7 +59,16 @@ export const definitions = [
           description: 'Name or id of a configured view in tablewalk.json. Exclusive with `query`, `sql` and `saved`.',
         },
         sql: { type: 'string', description: 'A read-only SELECT. Exclusive with `query`, `view` and `saved`.' },
-        saved: { type: 'string', description: 'Name of a saved query in tablewalk.json. Exclusive with `query`, `view` and `sql`.' },
+        saved: {
+          type: 'string',
+          description:
+            'Name of a saved query in tablewalk.json or relative path of a `.sql` file in the SQL workspace (`tablewalk://{connection}/queries`). Exclusive with `query`, `view` and `sql`.',
+        },
+        params: {
+          type: 'object',
+          description: 'Named parameter values to bind to `:param` or `{{param}}` placeholders when exporting `saved` or `sql`.',
+          additionalProperties: { type: ['string', 'number', 'boolean', 'null'] },
+        },
         format: { type: 'string', enum: ['csv', 'ndjson', 'json'], description: 'Default csv.' },
         limit: { type: 'number', description: 'Rows wanted. Absent: every row (a `sql` export stops at the cap).' },
         compress: { type: 'string', enum: ['gzip'], description: 'Gzip the file (`.gz`). Default: uncompressed.' },
@@ -170,6 +181,15 @@ export const handlers = {
         'export: give exactly one of `query` (the query language), `view` (a named view), `sql` (a read-only SELECT) or `saved` (a named query).',
       );
     }
+    const rawParams = args.params;
+    if (rawParams !== undefined) {
+      if (rawParams === null || typeof rawParams !== 'object' || Array.isArray(rawParams)) {
+        throw new ToolError('invalid_argument', 'export: "params" must be an object mapping parameter names to values.');
+      }
+      if (!namedSaved && !statement) {
+        throw new ToolError('invalid_argument', 'export: "params" is only supported with `saved` or `sql`.');
+      }
+    }
     const wanted = args.limit === undefined || args.limit === null ? undefined : Math.floor(Number(args.limit));
     if (wanted !== undefined && !(wanted >= 1))
       throw new ToolError('invalid_argument', 'export: "limit" must be a whole number of at least 1.');
@@ -194,6 +214,7 @@ export const handlers = {
     inFlight++;
     try {
       const connName = registry?.list().find((c) => c.id === id)?.name;
+      const dialect = schema.dialect === 'sqlite' ? 'sqlite' : 'postgres';
       let source: Source & { table: string };
       let defaultStem: string | undefined;
       if (text) {
@@ -204,11 +225,25 @@ export const handlers = {
         source = viewDefSource(adapter, schema, viewDef, wanted);
         defaultStem = clean(viewDef.name || viewDef.id) || viewDef.base;
       } else if (namedSaved) {
-        const picked = resolveSavedQuery(registry ? shelfOf(registry).queries : [], id, connName, namedSaved);
-        source = await sqlSource(adapter, schema, picked.sql.trim(), wanted);
+        const picked = resolveSavedQuery(registry ? shelfOf(registry).queries : [], id, connName, namedSaved, registry);
+        const bound = bindTypedSqlParameters(picked.sql.trim(), rawParams as Record<string, unknown> | undefined, dialect);
+        if (bound.missing.length > 0) {
+          throw new ToolError(
+            'invalid_argument',
+            `export: missing required parameter(s) for "${picked.name}": ${bound.missing.map((m) => `:${m}`).join(', ')}. Pass them in \`params\`.`,
+          );
+        }
+        source = await sqlSource(adapter, schema, bound.sql, wanted);
         defaultStem = clean(picked.name) || 'sql';
       } else {
-        source = await sqlSource(adapter, schema, statement, wanted);
+        const bound = bindTypedSqlParameters(statement, rawParams as Record<string, unknown> | undefined, dialect);
+        if (bound.missing.length > 0) {
+          throw new ToolError(
+            'invalid_argument',
+            `export: missing required parameter(s): ${bound.missing.map((m) => `:${m}`).join(', ')}. Pass them in \`params\`.`,
+          );
+        }
+        source = await sqlSource(adapter, schema, bound.sql, wanted);
       }
       const needsExplicitMask = redact || (connRedacts && Boolean(redactColumns?.length));
       const maskModule = needsExplicitMask ? await import('../../mask.js') : undefined;

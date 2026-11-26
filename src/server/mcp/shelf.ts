@@ -25,6 +25,8 @@ import type { PageDef, PageSection } from '@mistriwork/engine/shared/page.js';
 // the browser downloads and the CLI prints, offered as ambient context.
 import { listEnrichedConnections, openFor, ToolError } from './toolkit.js';
 import type { Answer } from './protocol.js';
+import { workspaceQueriesFor } from '../sqlWorkspace.js';
+import { extractSqlParameters } from '../../shared/sqlScript.js';
 
 /**
  * The team's own work, as things an agent can read and run by name.
@@ -102,8 +104,28 @@ export function resolveNamedView(
   return found;
 }
 
-export function resolveSavedQuery(all: SavedQuery[], connectionId: string, connectionName: string | undefined, wanted: string): SavedQuery {
-  const mine = queriesFor(all, connectionId, connectionName);
+export function allSavedQueriesFor(
+  all: SavedQuery[],
+  connectionId: string,
+  connectionName: string | undefined,
+  registry?: Registry,
+): SavedQuery[] {
+  const configMine = queriesFor(all, connectionId, connectionName);
+  if (!registry) return configMine;
+  const ws = workspaceQueriesFor(registry, connectionId);
+  if (!ws.length) return configMine;
+  const seen = new Set(configMine.map((q) => q.name.toLowerCase()));
+  return [...configMine, ...ws.filter((q) => !seen.has(q.name.toLowerCase()))];
+}
+
+export function resolveSavedQuery(
+  all: SavedQuery[],
+  connectionId: string,
+  connectionName: string | undefined,
+  wanted: string,
+  registry?: Registry,
+): SavedQuery {
+  const mine = allSavedQueriesFor(all, connectionId, connectionName, registry);
   const needle = wanted.trim().toLowerCase();
   const found = mine.find((q) => q.name.toLowerCase() === needle);
   if (!found) {
@@ -118,18 +140,22 @@ export function resolveSavedQuery(all: SavedQuery[], connectionId: string, conne
   return found;
 }
 
-function queriesBrief(shelf: Shelf, connection: string, name: string): string {
-  const mine = queriesFor(shelf.queries, connection, name);
+function queriesBrief(registry: Registry, shelf: Shelf, connection: string, name: string): string {
+  const mine = allSavedQueriesFor(shelf.queries, connection, name, registry);
   if (!mine.length) return `# Named queries — ${name}\n\nNone written down for this connection.`;
   const lines = [
     `# Named queries — ${name}`,
     '',
-    `${mine.length} statement${mine.length === 1 ? '' : 's'} from your config. Run one with \`sql\` or \`export\` by passing \`saved: "<name>"\`.`,
+    `${mine.length} statement${mine.length === 1 ? '' : 's'} from your config and SQL workspace. Run one with \`sql\` or \`export\` by passing \`saved: "<name>"\`.`,
     '',
   ];
   for (const query of mine) {
     lines.push(`## ${query.name}`, '');
     if (query.description) lines.push(query.description, '');
+    const params = extractSqlParameters(query.sql);
+    if (params.length) {
+      lines.push(`Parameters (pass via \`params\`): ${params.map((p) => `\`${p}\``).join(', ')}`, '');
+    }
     lines.push('```sql', query.sql.trim(), '```', '');
   }
   return lines.join('\n').trim();
@@ -321,7 +347,7 @@ export function listResources(registry: Registry, shelf: Shelf, answer: Answer):
               },
             ]
           : []),
-        ...(queriesFor(shelf.queries, c.id, c.name).length
+        ...(allSavedQueriesFor(shelf.queries, c.id, c.name, registry).length
           ? [
               {
                 uri: `tablewalk://${encodeURIComponent(c.id)}/queries`,
@@ -431,7 +457,7 @@ export async function readResource(registry: Registry, shelf: Shelf, params: Rec
         match[2] === 'views'
           ? viewsBrief(shelf, connId, label)
           : match[2] === 'queries'
-            ? queriesBrief(shelf, connId, label)
+            ? queriesBrief(registry, shelf, connId, label)
             : pagesBrief(
                 shelf.pages.filter((p) => !p.connection || p.connection === connId || p.connection === label),
                 (await shelf.savedPages?.(connId)) ?? {},

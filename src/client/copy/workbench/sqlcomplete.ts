@@ -5,4 +5,8 @@ export const say = defineMessages({
   columns: { one: '{count} column', other: '{count} columns' },
   alias: 'alias for {name}',
   notInThisStatement: '{name} · not in this statement',
+  cte: 'CTE in this statement',
+  fkJoin: 'FK join via {ref}',
+  param: 'parameter',
+  fn: 'function',
 });

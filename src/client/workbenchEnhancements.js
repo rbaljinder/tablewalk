@@ -20,6 +20,7 @@ import {
   quote,
   saveJson,
   state,
+  toast,
   viewportBox,
   viewportSize,
   whenConnectionChanges,
@@ -34,11 +35,14 @@ import {
   navFollow,
   onNavigate,
   portalRoot,
+  removeHostListener,
   shellBody,
   shellById,
   shellQuery,
   shellQueryAll,
 } from '@mistriwork/kit/client/shellHost.js';
+import { barSpan, extentOf, formatChartNumber, valueScale } from '@mistriwork/ui/charts/core.js';
+import { computeColumnAggregates, formatResultExport } from '../shared/sqlScript.js';
 import { say } from './copy/workbench/workbenchEnhancements.js';
 import './workbenchEnhancements.css';
 
@@ -234,6 +238,113 @@ function appendEqualityFilter(queryText, tableId, condition) {
     .trim();
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ISO_TS_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/;
+
+/**
+ * Inspect a grid cell's text for structured display (JSON pretty-print, ISO timestamps, UUIDs, multiline text).
+ * @param {string} rawText
+ * @param {boolean} [isNull]
+ */
+export function inspectCellValue(rawText, isNull = false) {
+  if (isNull) {
+    return { kind: /** @type {const} */ ('null'), formatted: 'NULL', meta: [] };
+  }
+  const trimmed = String(rawText ?? '').trim();
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object') {
+        const meta = Array.isArray(parsed)
+          ? [say('cellMetaJsonItems', { count: parsed.length })]
+          : [say('cellMetaJsonKeys', { count: Object.keys(parsed).length })];
+        return { kind: /** @type {const} */ ('json'), formatted: JSON.stringify(parsed, null, 2), meta };
+      }
+    } catch {
+      // Not valid JSON; fall through to text inspection.
+    }
+  }
+  if (ISO_TS_RE.test(trimmed)) {
+    const d = new Date(trimmed);
+    if (!Number.isNaN(d.getTime())) {
+      const utc = d.toISOString();
+      const local = d.toLocaleString('en-US');
+      return {
+        kind: /** @type {const} */ ('timestamp'),
+        formatted: trimmed,
+        meta: [say('cellUtcLabel', { value: utc }), say('cellLocalLabel', { value: local })],
+        utc,
+        local,
+      };
+    }
+  }
+  if (UUID_RE.test(trimmed)) {
+    return { kind: /** @type {const} */ ('uuid'), formatted: trimmed, meta: [say('cellMetaChars', { count: trimmed.length })] };
+  }
+  const text = String(rawText ?? '');
+  const lines = text ? text.split(/\r?\n/).length : 0;
+  return {
+    kind: /** @type {const} */ ('text'),
+    formatted: text,
+    meta: [say('cellMetaChars', { count: text.length }), say('cellMetaLines', { count: lines })],
+  };
+}
+
+/**
+ * Build an updated query string applying a quick cell filter (`=`, `!=`, `is empty`, `is not empty`).
+ * @param {string} queryText
+ * @param {string} tableId
+ * @param {string} column
+ * @param {string | null} value
+ * @param {'=' | '!=' | 'empty' | 'not-empty'} op
+ */
+export function buildQuickCellFilter(queryText, tableId, column, value, op) {
+  if (op === 'empty') return appendEqualityFilter(queryText, tableId, `${column} is empty`);
+  if (op === 'not-empty') return appendEqualityFilter(queryText, tableId, `${column} is not empty`);
+  const literal = quote(value ?? '');
+  return appendEqualityFilter(queryText, tableId, `${column} ${op} ${literal}`);
+}
+
+/**
+ * Read visible column headers and row cells from a rendered Workbench table grid.
+ * @param {HTMLTableElement} tableEl
+ */
+export function extractVisibleGridData(tableEl) {
+  const ths = [...tableEl.querySelectorAll('thead th')];
+  const columns = ths.map((th) => {
+    const col =
+      th.getAttribute('data-column') ??
+      th.querySelector('.th-filter[data-column]')?.getAttribute('data-column') ??
+      th.querySelector('.th-label')?.textContent?.trim() ??
+      th.textContent?.trim() ??
+      '';
+    return col.trim();
+  });
+  const keepIdx = columns.map((c, i) => (c && c !== '▸' ? i : -1)).filter((i) => i >= 0);
+  const keptCols = keepIdx.map((i) => columns[i]);
+  /** @type {unknown[][]} */
+  const rows = [];
+  for (const tr of tableEl.querySelectorAll('tbody tr')) {
+    const tds = [...tr.querySelectorAll('td')];
+    if (!tds.length) continue;
+    rows.push(
+      keepIdx.map((ci) => {
+        const td = tds[ci];
+        if (!td) return null;
+        if (td.classList.contains('null') || td.querySelector('.null')) return null;
+        const txt = td.textContent?.trim() ?? '';
+        if (!txt) return '';
+        const cleaned = txt.replace(/,/g, '');
+        if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(cleaned) && Math.abs(Number(cleaned)) <= Number.MAX_SAFE_INTEGER) {
+          return Number(cleaned);
+        }
+        return txt;
+      }),
+    );
+  }
+  return { columns: keptCols, rows };
+}
+
 /**
  * @param {{
  *   openShapeCheck: (tab?: import('./components/ShapeCheck.js').ShapeTab) => void;
@@ -408,6 +519,284 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
     shellById('wb-col-profile-popover')?.remove();
     shellById('wb-col-impact-popover')?.remove();
     shellById('wb-record-modal')?.remove();
+    shellById('wb-cell-inspector-popover')?.remove();
+    shellById('wb-col-chooser-popover')?.remove();
+    shellById('wb-copy-rows-popover')?.remove();
+  };
+
+  /**
+   * Position and mount a lightweight floating popover clamped inside the viewport.
+   * @param {HTMLElement} pop
+   * @param {{ left: number; top: number; bottom: number }} anchorBox
+   */
+  const mountGridPopover = (pop, anchorBox) => {
+    const view = viewportSize();
+    pop.style.left = `${Math.max(12, Math.min(anchorBox.left, view.width - 360))}px`;
+    pop.style.top = `${Math.max(12, Math.min(anchorBox.bottom + 6, view.height - 280))}px`;
+    (portalRoot() ?? shellBody()).append(pop);
+    const onOutside = (/** @type {MouseEvent} */ ev) => {
+      if (!pop.isConnected) {
+        removeHostListener(document, 'mousedown', onOutside, true);
+        return;
+      }
+      if (!pop.contains(/** @type {Node} */ (ev.target))) {
+        pop.remove();
+        removeHostListener(document, 'mousedown', onOutside, true);
+      }
+    };
+    const onEsc = (/** @type {KeyboardEvent} */ ev) => {
+      if (!pop.isConnected) {
+        removeHostListener(document, 'keydown', onEsc, true);
+        return;
+      }
+      if (ev.key === 'Escape') {
+        ev.stopPropagation();
+        pop.remove();
+        removeHostListener(document, 'keydown', onEsc, true);
+      }
+    };
+    window.setTimeout(() => {
+      addHostListener(document, 'mousedown', onOutside, true);
+      addHostListener(document, 'keydown', onEsc, true);
+    }, 0);
+  };
+
+  /**
+   * Open the Cell Inspector & Quick Cell Filter popover for a grid cell.
+   * @param {HTMLTableCellElement} td
+   * @param {string} colName
+   * @param {string | null} tableId
+   */
+  const openCellInspector = (td, colName, tableId) => {
+    closeProfilePopover();
+    const isNull = td.classList.contains('null') || Boolean(td.querySelector('.null'));
+    const rawText = isNull ? '' : (td.textContent ?? '');
+    const info = inspectCellValue(rawText, isNull);
+
+    const pop = document.createElement('div');
+    pop.id = 'wb-cell-inspector-popover';
+    pop.className = 'wb-grid-pop';
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-label', say('cellInspectorTitle', { column: colName }));
+
+    const head = document.createElement('div');
+    head.className = 'wb-grid-pop-head';
+    const title = document.createElement('span');
+    title.className = 'wb-grid-pop-title';
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = say('cellInspectorTitle', { column: colName });
+    const kindBadge = document.createElement('span');
+    kindBadge.className = 'wb-cell-kind-badge';
+    kindBadge.textContent =
+      info.kind === 'json'
+        ? say('cellKindJson')
+        : info.kind === 'timestamp'
+          ? say('cellKindTimestamp')
+          : info.kind === 'uuid'
+            ? say('cellKindUuid')
+            : info.kind === 'null'
+              ? say('cellKindNull')
+              : say('cellKindText');
+    title.append(nameSpan, kindBadge);
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'wb-col-profile-close';
+    closeBtn.textContent = say('profileClose');
+    closeBtn.addEventListener('click', () => pop.remove());
+    head.append(title, closeBtn);
+    pop.append(head);
+
+    if (info.meta.length > 0) {
+      const metaEl = document.createElement('div');
+      metaEl.className = 'wb-cell-meta';
+      for (const m of info.meta) {
+        const s = document.createElement('span');
+        s.textContent = m;
+        metaEl.append(s);
+      }
+      pop.append(metaEl);
+    }
+
+    const pre = document.createElement('pre');
+    pre.className = 'wb-cell-pre';
+    pre.textContent = info.formatted;
+    pop.append(pre);
+
+    const actions = document.createElement('div');
+    actions.className = 'wb-cell-actions';
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'wb-pop-action';
+    copyBtn.textContent = say('cellCopyValue');
+    copyBtn.addEventListener('click', () => {
+      void navigator.clipboard
+        .writeText(info.formatted)
+        .then(() => toast(say('cellCopiedToast'), 'ok'))
+        .catch(() => toast(say('copyFailedToast'), 'bad'));
+    });
+    actions.append(copyBtn);
+
+    if (tableId && runQueryText) {
+      const entry = currentEntry();
+      const baseQuery = typeof entry?.query === 'string' && entry.query.trim() ? entry.query : tableId;
+      /** @type {Array<[string, '=' | '!=' | 'empty' | 'not-empty']>} */
+      const filterOps = isNull
+        ? [
+            [say('cellFilterIsEmpty'), 'empty'],
+            [say('cellFilterNotEmpty'), 'not-empty'],
+          ]
+        : [
+            [say('cellFilterEquals'), '='],
+            [say('cellFilterNotEquals'), '!='],
+          ];
+      for (const [label, op] of filterOps) {
+        const fBtn = document.createElement('button');
+        fBtn.type = 'button';
+        fBtn.className = 'wb-pop-action';
+        fBtn.textContent = label;
+        fBtn.addEventListener('click', () => {
+          const nextQ = buildQuickCellFilter(baseQuery, tableId, colName, isNull ? null : rawText.trim(), op);
+          pop.remove();
+          const qInput = /** @type {HTMLInputElement | null} */ (shellById('query'));
+          if (qInput) qInput.value = nextQ;
+          runQueryText(nextQ);
+        });
+        actions.append(fBtn);
+      }
+    }
+
+    pop.append(actions);
+    mountGridPopover(pop, viewportBox(td));
+  };
+
+  /**
+   * Open the searchable Column Chooser / Jump-to-Column popover for a grid table.
+   * @param {HTMLElement} anchorEl
+   * @param {HTMLTableElement} gridTable
+   * @param {string | null} tableId
+   */
+  const openColumnChooser = (anchorEl, gridTable, tableId) => {
+    if (shellById('wb-col-chooser-popover')) {
+      shellById('wb-col-chooser-popover')?.remove();
+      return;
+    }
+    closeProfilePopover();
+    const ths = [...gridTable.querySelectorAll('thead th')];
+    const tableMeta = /** @type {Array<{ id: string; columns?: Array<{ name: string; type: string; primaryKey?: boolean }> }>} */ (
+      state.schema?.tables ?? []
+    ).find((t) => t.id === tableId);
+    const items = ths
+      .map((th) => {
+        const name = (
+          th.getAttribute('data-column') ??
+          th.querySelector('.th-filter[data-column]')?.getAttribute('data-column') ??
+          th.querySelector('.th-label')?.textContent ??
+          th.textContent ??
+          ''
+        ).trim();
+        const colMeta = tableMeta?.columns?.find((c) => c.name === name);
+        return { name, th, type: colMeta?.type ?? '', pk: Boolean(colMeta?.primaryKey) };
+      })
+      .filter((x) => x.name && x.name !== '▸');
+
+    const pop = document.createElement('div');
+    pop.id = 'wb-col-chooser-popover';
+    pop.className = 'wb-grid-pop';
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-label', say('columnsBtn'));
+
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.className = 'wb-col-search';
+    search.placeholder = say('columnsSearchPlaceholder');
+    search.setAttribute('aria-label', say('columnsSearchPlaceholder'));
+    pop.append(search);
+
+    const list = document.createElement('div');
+    list.className = 'wb-col-list';
+    pop.append(list);
+
+    const renderList = (/** @type {string} */ needle) => {
+      list.replaceChildren();
+      const q = needle.trim().toLowerCase();
+      const matched = q ? items.filter((it) => it.name.toLowerCase().includes(q) || it.type.toLowerCase().includes(q)) : items;
+      if (!matched.length) {
+        const empty = document.createElement('span');
+        empty.className = 'wb-cell-meta';
+        empty.textContent = say('columnsNoMatch');
+        list.append(empty);
+        return;
+      }
+      for (const it of matched) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'wb-col-item';
+        const left = document.createElement('span');
+        left.textContent = it.name;
+        const right = document.createElement('span');
+        right.className = 'wb-col-type';
+        right.textContent = it.pk && it.type ? say('colPkType', { type: it.type }) : it.type;
+        btn.append(left, right);
+        btn.addEventListener('click', () => {
+          pop.remove();
+          it.th.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+          it.th.classList.add('wb-th-flash');
+          window.setTimeout(() => it.th.classList.remove('wb-th-flash'), 1200);
+        });
+        list.append(btn);
+      }
+    };
+
+    search.addEventListener('input', () => renderList(search.value));
+    renderList('');
+    mountGridPopover(pop, viewportBox(anchorEl));
+    search.focus();
+  };
+
+  /**
+   * Open the Copy Rows As popover for visible grid rows.
+   * @param {HTMLElement} anchorEl
+   * @param {HTMLTableElement} gridTable
+   * @param {string} tableName
+   */
+  const openCopyRowsPopover = (anchorEl, gridTable, tableName) => {
+    if (shellById('wb-copy-rows-popover')) {
+      shellById('wb-copy-rows-popover')?.remove();
+      return;
+    }
+    closeProfilePopover();
+    const { columns, rows } = extractVisibleGridData(gridTable);
+    const pop = document.createElement('div');
+    pop.id = 'wb-copy-rows-popover';
+    pop.className = 'wb-grid-pop';
+    pop.setAttribute('role', 'dialog');
+    pop.setAttribute('aria-label', say('copyRowsBtn'));
+
+    /** @type {Array<[import('../shared/sqlScript.js').ResultExportFormat, string, string]>} */
+    const formats = [
+      ['csv', say('copyAsCsv'), say('fmtCsv')],
+      ['json', say('copyAsJson'), say('fmtJson')],
+      ['markdown', say('copyAsMarkdown'), say('fmtMarkdown')],
+      ['insert', say('copyAsInsert'), say('fmtInsert')],
+      ['in', say('copyAsIn'), say('fmtIn')],
+    ];
+    for (const [fmt, label, shortName] of formats) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'wb-pop-action';
+      btn.textContent = label;
+      btn.addEventListener('click', () => {
+        const text = formatResultExport(columns, rows, fmt, tableName || 'table_name');
+        pop.remove();
+        void navigator.clipboard
+          .writeText(text)
+          .then(() => toast(say('copiedRowsToast', { count: rows.length, format: shortName }), 'ok'))
+          .catch(() => toast(say('copyFailedToast'), 'bad'));
+      });
+      pop.append(btn);
+    }
+    mountGridPopover(pop, viewportBox(anchorEl));
   };
 
   /**
@@ -493,6 +882,16 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
         ) {
           addMetric(say('profileRange', { min: String(info.min), max: String(info.max) }));
         }
+        if (rowCount > 0 || typeof info.nullFrac === 'number' || typeof info.nullFraction === 'number') {
+          const fillBar = document.createElement('div');
+          fillBar.className = 'wb-col-profile-fill';
+          fillBar.setAttribute('aria-hidden', 'true');
+          const present = document.createElement('span');
+          present.className = 'wb-col-profile-fill-present';
+          present.style.width = `${Math.max(0, Math.min(100, 100 - nullPct))}%`;
+          fillBar.append(present);
+          body.append(fillBar);
+        }
         body.append(metrics);
 
         const top = Array.isArray(info.common ?? info.topValues ?? info.top) ? (info.common ?? info.topValues ?? info.top) : [];
@@ -502,26 +901,56 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
           topLabel.textContent = say('profileTopValues');
           const chips = document.createElement('div');
           chips.className = 'wb-col-profile-chips';
-          for (const item of top.slice(0, 6)) {
-            const rawVal = item?.value;
-            if (rawVal === null || rawVal === undefined) continue;
-            const valText = String(rawVal);
+          const entries = top
+            .slice(0, 6)
+            .filter((item) => item?.value !== null && item?.value !== undefined)
+            .map((item) => {
+              const valText = String(item.value);
+              const estCount =
+                item?.count !== undefined
+                  ? Number(item.count)
+                  : typeof item?.frac === 'number' && rowCount > 0
+                    ? Math.max(1, Math.round(item.frac * rowCount))
+                    : undefined;
+              const weight =
+                estCount !== undefined && Number.isFinite(estCount)
+                  ? estCount
+                  : typeof item?.frac === 'number' && Number.isFinite(item.frac)
+                    ? item.frac
+                    : 0;
+              return { valText, estCount, weight };
+            });
+          const weights = entries.map((e) => e.weight).filter((w) => w > 0);
+          const scale = weights.length
+            ? valueScale(
+                {
+                  min: 0,
+                  max: Math.max(extentOf(weights, 0).max, 1),
+                },
+                { intervals: 4 },
+              )
+            : null;
+          const zeroAt = scale ? scale.share(0) * 100 : 0;
+          for (const { valText, estCount, weight } of entries) {
             const chip = document.createElement('button');
             chip.type = 'button';
             chip.className = 'wb-col-profile-chip';
+            if (scale && weight > 0) {
+              const span = barSpan(scale.share(weight) * 100, zeroAt, 2);
+              const bar = document.createElement('span');
+              bar.className = 'wb-col-profile-bar';
+              bar.setAttribute('aria-hidden', 'true');
+              bar.style.width = `${Math.max(0, Math.min(100, span.length))}%`;
+              chip.append(bar);
+            }
             const vSpan = document.createElement('span');
+            vSpan.className = 'wb-col-profile-chip-val';
             vSpan.textContent = valText.length > 28 ? `${valText.slice(0, 28)}…` : valText;
             chip.append(vSpan);
-            const estCount =
-              item?.count !== undefined
-                ? Number(item.count)
-                : typeof item?.frac === 'number' && rowCount > 0
-                  ? Math.max(1, Math.round(item.frac * rowCount))
-                  : undefined;
             if (estCount !== undefined) {
               const cSpan = document.createElement('span');
               cSpan.className = 'wb-col-profile-chip-count';
-              cSpan.textContent = formatNumber(estCount);
+              cSpan.textContent = estCount >= 10_000 ? formatChartNumber(estCount) : formatNumber(estCount);
               chip.append(cSpan);
             }
             chip.addEventListener('click', () => {
@@ -1137,6 +1566,88 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
       existingToggle.remove();
     }
 
+    /* 1b. Table room ergonomics: searchable Columns jump popover, Copy Rows As… menu, & visible numeric aggregates footer */
+    const gridTable = /** @type {HTMLTableElement | null} */ (shellQuery('#content .result-table table, #content .grid-host table'));
+    const gridContainer = gridTable?.closest('.result-table') ?? gridTable?.closest('.grid-host') ?? null;
+    const activeTableEntry = currentEntry();
+    const activeTableId = typeof activeTableEntry?.table === 'string' ? activeTableEntry.table : null;
+    if (tabs && gridTable && gridTable.querySelector('thead th')) {
+      if (!shellById('wb-col-chooser-btn')) {
+        const colBtn = document.createElement('button');
+        colBtn.id = 'wb-col-chooser-btn';
+        colBtn.type = 'button';
+        colBtn.tabIndex = -1;
+        colBtn.className = 'wb-filter-toggle';
+        colBtn.title = say('columnsBtnTitle');
+        colBtn.textContent = say('columnsBtn');
+        colBtn.addEventListener('click', () => {
+          const latestTable = /** @type {HTMLTableElement | null} */ (
+            shellQuery('#content .result-table table, #content .grid-host table')
+          );
+          const latestEntry = currentEntry();
+          if (latestTable) {
+            openColumnChooser(colBtn, latestTable, typeof latestEntry?.table === 'string' ? latestEntry.table : null);
+          }
+        });
+        const anchor = shellById('wb-filter-toggle') ?? tabs.querySelector(':scope > button:not(.tab):last-of-type');
+        if (anchor) anchor.insertAdjacentElement('afterend', colBtn);
+        else tabs.append(colBtn);
+      }
+      if (!shellById('wb-copy-rows-btn')) {
+        const copyBtn = document.createElement('button');
+        copyBtn.id = 'wb-copy-rows-btn';
+        copyBtn.type = 'button';
+        copyBtn.tabIndex = -1;
+        copyBtn.className = 'wb-filter-toggle';
+        copyBtn.title = say('copyRowsBtnTitle');
+        copyBtn.textContent = say('copyRowsBtn');
+        copyBtn.addEventListener('click', () => {
+          const latestTable = /** @type {HTMLTableElement | null} */ (
+            shellQuery('#content .result-table table, #content .grid-host table')
+          );
+          const latestEntry = currentEntry();
+          if (latestTable) {
+            openCopyRowsPopover(copyBtn, latestTable, typeof latestEntry?.table === 'string' ? latestEntry.table : 'rows');
+          }
+        });
+        const anchor = shellById('wb-col-chooser-btn') ?? tabs.querySelector(':scope > button:not(.tab):last-of-type');
+        if (anchor) anchor.insertAdjacentElement('afterend', copyBtn);
+        else tabs.append(copyBtn);
+      }
+
+      const { columns, rows } = extractVisibleGridData(gridTable);
+      const aggs = rows.length >= 2 ? computeColumnAggregates(columns, rows).slice(0, 4) : [];
+      const existingAgg = shellById('wb-grid-agg-footer');
+      if (aggs.length > 0 && gridContainer) {
+        const sig = `${activeTableId ?? ''}:${rows.length}:${aggs.map((a) => `${a.column}=${a.sum}`).join('|')}`;
+        if (!existingAgg || existingAgg.dataset.wbAggSig !== sig) {
+          const footer = existingAgg ?? document.createElement('div');
+          footer.id = 'wb-grid-agg-footer';
+          footer.className = 'wb-grid-agg-footer';
+          footer.dataset.wbAggSig = sig;
+          footer.replaceChildren();
+          for (const agg of aggs) {
+            const span = document.createElement('span');
+            span.textContent = say('gridAggItem', {
+              col: agg.column,
+              sum: formatChartNumber(agg.sum),
+              avg: formatChartNumber(agg.avg),
+              min: formatChartNumber(agg.min),
+              max: formatChartNumber(agg.max),
+            });
+            footer.append(span);
+          }
+          if (!footer.isConnected) gridContainer.append(footer);
+        }
+      } else {
+        existingAgg?.remove();
+      }
+    } else {
+      shellById('wb-col-chooser-btn')?.remove();
+      shellById('wb-copy-rows-btn')?.remove();
+      shellById('wb-grid-agg-footer')?.remove();
+    }
+
     /* 2. Compiled-SQL `#explain-pane` inline `Plan` button */
     const explainPane = shellById('explain-pane');
     const explainPre = shellById('explain');
@@ -1454,6 +1965,31 @@ export function initWorkbenchEnhancements({ openShapeCheck, openAgentConsole, ru
   const content = shellById('content');
   if (content) {
     new MutationObserver(scheduleSync).observe(content, { childList: true, subtree: true });
+    const tryInspectCell = (/** @type {MouseEvent} */ ev) => {
+      if (shell().inApp()) return;
+      const target = /** @type {HTMLElement | null} */ (ev.target instanceof HTMLElement ? ev.target : null);
+      const td = /** @type {HTMLTableCellElement | null} */ (target?.closest('.result-table tbody td, .grid-host tbody td') ?? null);
+      if (!td) return;
+      const tableEl = /** @type {HTMLTableElement | null} */ (td.closest('table'));
+      if (!tableEl) return;
+      const th = tableEl.querySelectorAll('thead th')[td.cellIndex];
+      const colName = (
+        th?.getAttribute('data-column') ??
+        th?.querySelector('.th-filter[data-column]')?.getAttribute('data-column') ??
+        th?.querySelector('.th-label')?.textContent ??
+        th?.textContent ??
+        ''
+      ).trim();
+      if (!colName) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const entry = currentEntry();
+      openCellInspector(td, colName, typeof entry?.table === 'string' ? entry.table : null);
+    };
+    content.addEventListener('contextmenu', tryInspectCell);
+    content.addEventListener('click', (ev) => {
+      if (ev.shiftKey) tryInspectCell(ev);
+    });
   }
   const explainPaneEl = shellById('explain-pane');
   if (explainPaneEl) {

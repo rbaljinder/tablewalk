@@ -101,6 +101,7 @@ test('lists the tools with what they may do, calls with typed arguments, and lin
   draw();
   const options = await screen.findAllByRole('option');
   expect(options).toHaveLength(4);
+  expect(screen.getByRole('separator', { name: 'Resize Tools and Tool workspace' })).toBeInTheDocument();
   expect(within(options[0]).getByText('read-only')).toBeInTheDocument();
   expect(within(options[1]).getByText('writes file')).toBeInTheDocument();
   expect(within(options[1]).queryByText('writes')).toBeNull();

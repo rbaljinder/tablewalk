@@ -37,10 +37,11 @@ Connections appear in the picker at the top of the page, and each opens when it 
 | `focus` / `focusHops` | Scope a connection's catalog, queries, views, records, exports and writes to `focus` tables (`["invoice", "customer"]`) and their N-hop foreign-key neighborhood (`focusHops`, `0` to `5`, default `1`), withholding unrelated tables and raw SQL. |
 | `credentialCommand` | Shell command executed on the operator's machine before opening or re-opening an idle-evicted connection (`"vault kv get -format=json secret/db"`), returning JSON (`{ "secrets": { ... } }` or `{ "KEY": "VALUE" }`) or `.env` lines into isolated in-memory `${VAR}` expansion without touching `process.env` or disk. |
 | `lease` | Bound connection lifetime (`120`, `"5m"`, or `{ "idleSeconds": 30, "maxSeconds": 300, "exitOnExpire": true }`), top-level, per `environments` tier, or per connection: lowers PostgreSQL `minIdle` to `0`, closes idle adapters after `idleSeconds`, and expires the session at `maxSeconds`. |
-| `pool` | PostgreSQL only: `{ "read": 8, "idleSeconds": 300, "minIdle": 2 }` (`read` 1 to 64, default 4; `idleSeconds` 1 to 86400, default 300 or `TABLEWALK_POOL_IDLE`; `minIdle` 0 to 64, default 2 warm readers). |
+| `pool` | PostgreSQL only: `{ "read": 8, "idleSeconds": 300, "minIdle": 2, "connectTimeoutMs": 10000, "queryTimeoutMs": 60000 }` (`read` 1 to 64, default 4; `idleSeconds` 1 to 86400, default 300 or `TABLEWALK_POOL_IDLE`; `minIdle` 0 to 64, default 2 warm readers; `connectTimeoutMs` 1000 to 120000, default 10 s; `queryTimeoutMs` 1000 to 3600000, default 60 s silent-socket recovery alongside 10 s TCP keepalive). |
 | `replicas` | PostgreSQL only: read replica URLs. Lists and counts read from them in turn; a record, every write and the catalog stay on the primary. |
 | `backstop` | Leave it out. `"rls"` marks a connection that signs in as a tenant App's restricted role, which sees no tenant row, so tablewalk refuses it at start (and `tablewalk journal` and `--mcp` with it), by name. Use the owner's URL instead. |
 | `migrations` | Where `tablewalk migrate` finds its files: `{ "dir": "db/migrations", "table": "flyway_schema_history" }`. |
+| `sqlDir` | Local folder of `.sql` files attached as this connection's SQL workspace (also valid at the top level of `tablewalk.json` as a default, or via `--sql-dir`). Sibling environments sharing a `database` share the same workspace and expose its `.sql` files to MCP and `--sql-file`. |
 
 A top-level `"environments"` object (`"local"`, `"dev"`, `"test"`, `"staging"`, `"replica"`, `"prod"`, or custom `env` names) sets shared `writable`, `rows`, `lease`, `blocklist`, `redact` / `redactColumns`, `maxRows`, `timeoutMs` and `focus` / `focusHops` defaults across every connection in that tier, with explicit per-connection fields taking precedence.
 
@@ -77,6 +78,19 @@ The same file can carry named SQL statements, offered above the SQL editor and i
 ```
 
 Leave out `connection` to offer the statement on every database. A statement from the file is marked **Defined in tablewalk.json** and cannot be deleted from the page. The file can also carry `views`, `pages` and `layouts`: see [Pages, layouts and views](/docs/pages/#sharing-them-with-a-team).
+
+You can also point a connection (or the whole config file) at a folder of `.sql` files with `"sqlDir"` — or pass `--sql-dir <dir>` on the command line:
+
+```json
+{
+  "sqlDir": "./sql",
+  "connections": [
+    { "name": "billing-local", "database": "billing", "env": "local", "url": "postgres://localhost/billing", "sqlDir": "./sql/billing" }
+  ]
+}
+```
+
+Sibling environments that share a `database` share the same SQL workspace folder automatically, and `.sql` files inside it also appear on the MCP saved-query shelf (`tablewalk://{connection}/queries`). On loopback you can attach, create, edit and delete `.sql` files directly from the SQL panel's **Files** drawer; anywhere else, **Import folder…** lets you load a folder of `.sql` files into the browser workspace scoped to the active database.
 
 ## An API instead of a database
 

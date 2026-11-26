@@ -23,8 +23,14 @@ import { ConfirmDialog } from '@mistriwork/kit/client/components/Prompt.js';
 import { say } from '../copy/workbench/components/ConnectionDialog.js';
 import { addHostListener, removeHostListener } from '@mistriwork/kit/client/shellHost.js';
 import { classifyEnvTier, resolveConnectionEnvironment } from '../../shared/environments.js';
+import './ConnectionDialog.css';
 
 const QUICK_ENVS = ['local', 'dev', 'staging', 'prod', 'replica'] as const;
+
+export interface PoolTimeouts {
+  connectTimeoutMs?: number | null;
+  queryTimeoutMs?: number | null;
+}
 
 export interface Parts {
   driver: string;
@@ -41,6 +47,7 @@ export interface Submission {
   schemas: string[];
   database?: string;
   env?: string;
+  pool?: PoolTimeouts;
 }
 export interface ConnectionDialogProps {
   title: string;
@@ -49,6 +56,7 @@ export interface ConnectionDialogProps {
   schemas?: string[];
   database?: string;
   env?: string;
+  pool?: { connectTimeoutMs?: number; queryTimeoutMs?: number };
   verb: string;
   /** Returns `{ error }` to keep the dialog open with the message, or null to close it. */
   run: (submission: Submission) => Promise<{ error: string } | null | undefined>;
@@ -85,6 +93,7 @@ export function ConnectionDialog({
   schemas: schemasValue,
   database: databaseValue,
   env: envProp,
+  pool: poolProp,
   verb,
   run,
   onClose,
@@ -101,6 +110,10 @@ export function ConnectionDialog({
   const [schemas, setSchemas] = useState((schemasValue ?? []).join(', '));
   const [databaseGroup, setDatabaseGroup] = useState(databaseValue ?? '');
   const [envValue, setEnvValue] = useState(envProp ?? '');
+  const [connectTimeout, setConnectTimeout] = useState(() =>
+    poolProp?.connectTimeoutMs !== undefined ? String(poolProp.connectTimeoutMs) : '',
+  );
+  const [queryTimeout, setQueryTimeout] = useState(() => (poolProp?.queryTimeoutMs !== undefined ? String(poolProp.queryTimeoutMs) : ''));
   const [secretMode, setSecretMode] = useState<'typed' | 'env'>(() =>
     /^\$\{?[A-Za-z_]/.test(parse(urlValue ?? '').password ?? '') ? 'env' : 'typed',
   );
@@ -113,7 +126,7 @@ export function ConnectionDialog({
   const alive = useRef(true);
   const approvedClose = useRef(false);
   const testGeneration = useRef(0);
-  const fingerprint = JSON.stringify([parts, urlText, name, schemas, databaseGroup, envValue]);
+  const fingerprint = JSON.stringify([parts, urlText, name, schemas, databaseGroup, envValue, connectTimeout, queryTimeout]);
   const initial = useRef(fingerprint);
 
   useEffect(() => {
@@ -194,6 +207,16 @@ export function ConnectionDialog({
     urlBox.current?.focus();
   };
 
+  const poolPatch = (): PoolTimeouts | undefined => {
+    const patch: PoolTimeouts = {};
+    const cTrim = connectTimeout.trim();
+    const qTrim = queryTimeout.trim();
+    const prevC = poolProp?.connectTimeoutMs !== undefined ? String(poolProp.connectTimeoutMs) : '';
+    const prevQ = poolProp?.queryTimeoutMs !== undefined ? String(poolProp.queryTimeoutMs) : '';
+    if (cTrim !== prevC) patch.connectTimeoutMs = cTrim ? Number(cTrim) : null;
+    if (qTrim !== prevQ) patch.queryTimeoutMs = qTrim ? Number(qTrim) : null;
+    return Object.keys(patch).length > 0 ? patch : undefined;
+  };
   const test = async () => {
     if (busy.current || testing) return;
     const generation = ++testGeneration.current;
@@ -207,7 +230,15 @@ export function ConnectionDialog({
     setTesting(true);
     setResult(null);
     try {
-      const answer = await api('/api/connections/test', { url: target, name: chosenName(), schemas: schemaList() });
+      const testPool: PoolTimeouts = {};
+      if (connectTimeout.trim()) testPool.connectTimeoutMs = Number(connectTimeout.trim());
+      if (queryTimeout.trim()) testPool.queryTimeoutMs = Number(queryTimeout.trim());
+      const answer = await api('/api/connections/test', {
+        url: target,
+        name: chosenName(),
+        schemas: schemaList(),
+        ...(Object.keys(testPool).length > 0 ? { pool: testPool } : {}),
+      });
       if (!current()) return;
       const where = answer.secret && answer.secret !== 'none' ? say('passwordFromSecret', { secret: answer.secret }) : '';
       setResult({
@@ -231,12 +262,14 @@ export function ConnectionDialog({
     try {
       const nextDb = databaseGroup.trim();
       const nextEnv = envValue.trim();
+      const nextPool = poolPatch();
       const submission: Submission = {
         url: targetUrl().trim(),
         name: chosenName(),
         schemas: schemaList(),
         ...(nextDb || databaseValue !== undefined ? { database: nextDb } : {}),
         ...(nextEnv || envProp !== undefined ? { env: nextEnv } : {}),
+        ...(nextPool ? { pool: nextPool } : {}),
       };
       const outcome = await run(submission);
       if (!alive.current) return;
@@ -325,7 +358,7 @@ export function ConnectionDialog({
               ariaLabel={say('driver')}
               value={parts.driver}
               items={(DRIVERS as string[]).map((d) => ({ value: d, label: d }))}
-              onChange={(driver) => updateParts({ ...parts, driver })}
+              onValueChange={(driver) => updateParts({ ...parts, driver })}
             />
           </label>
           {parts.driver === 'sqlite' ? (
@@ -459,6 +492,45 @@ export function ConnectionDialog({
             aria-label={say('postgresSchemasToBrowse')}
           />
         </label>
+        {parts.driver !== 'sqlite' ? (
+          <details className="conn-pool-details" open={Boolean(connectTimeout || queryTimeout)}>
+            <summary>{say('poolTimeouts')}</summary>
+            <div className="conn-dialog-env-grid">
+              <label className="field-stack">
+                <span>{say('connectTimeoutMs')}</span>
+                <input
+                  type="number"
+                  className="cell-edit"
+                  inputMode="numeric"
+                  min={1000}
+                  max={120000}
+                  step={1000}
+                  value={connectTimeout}
+                  onChange={(e) => setConnectTimeout(e.currentTarget.value)}
+                  placeholder="10000"
+                  aria-label={say('connectTimeoutMs')}
+                />
+                <span className="field-hint">{say('connectTimeoutHint')}</span>
+              </label>
+              <label className="field-stack">
+                <span>{say('queryTimeoutMs')}</span>
+                <input
+                  type="number"
+                  className="cell-edit"
+                  inputMode="numeric"
+                  min={1000}
+                  max={3600000}
+                  step={1000}
+                  value={queryTimeout}
+                  onChange={(e) => setQueryTimeout(e.currentTarget.value)}
+                  placeholder="60000"
+                  aria-label={say('queryTimeoutMs')}
+                />
+                <span className="field-hint">{say('queryTimeoutHint')}</span>
+              </label>
+            </div>
+          </details>
+        ) : null}
         <p className="conn-fineprint">{say('thisConnectionLastsUntil')}</p>
       </fieldset>
       <div
@@ -487,7 +559,7 @@ export function ConnectionDialog({
         <Button disabled={testing || submitting} onClick={() => void test()}>
           {testing ? say('testing') : say('test')}
         </Button>
-        <Button intent="primary" disabled={submitting} onClick={() => void submit()}>
+        <Button variant="primary" disabled={submitting} onClick={() => void submit()}>
           {submitting ? say('saving') : verb}
         </Button>
       </div>

@@ -172,8 +172,9 @@ function addDialog(onAdded, refresh, preset) {
     schemas: preset?.schemas,
     database: preset?.database,
     env: preset?.env,
+    pool: preset?.pool,
     verb: say('addAndOpen'),
-    run: async ({ url, name, schemas, database, env }) => {
+    run: async ({ url, name, schemas, database, env, pool }) => {
       if (!current()) return { error: say('theWorkspaceChangedClose') };
       if (!url) return { error: say('aConnectionStringOrFile') };
       try {
@@ -183,6 +184,7 @@ function addDialog(onAdded, refresh, preset) {
           schemas,
           ...(database ? { database } : {}),
           ...(env ? { env } : {}),
+          ...(pool ? { pool } : {}),
         };
         const data = await api('/api/connections', payload);
         if (typeof data.added !== 'string') return { error: say('additionWasNotConfirmed') };
@@ -223,6 +225,7 @@ function cloneEnvDialog(conn, refresh) {
     schemas: conn.schemas,
     database: baseDb,
     env: nextEnv,
+    pool: conn.pool,
   });
 }
 
@@ -237,8 +240,9 @@ function editDialog(conn, refresh) {
     schemas: conn.schemas,
     database: conn.explicit ? conn.database : undefined,
     env: conn.explicit ? conn.env : undefined,
+    pool: conn.pool,
     verb: say('common.saveChanges'),
-    run: async ({ url, name, schemas, database, env }) => {
+    run: async ({ url, name, schemas, database, env, pool }) => {
       if (!current()) return { error: say('theWorkspaceChangedClose') };
       if (pending.has(conn.id)) return { error: say('aChangeToThisConnection') };
       const body = { id: conn.id };
@@ -249,6 +253,7 @@ function editDialog(conn, refresh) {
       const prevEnv = conn.explicit ? (conn.env ?? '') : '';
       if (database !== undefined && database !== prevDb) body.database = database;
       if (env !== undefined && env !== prevEnv) body.env = env;
+      if (pool && Object.keys(pool).length > 0) body.pool = pool;
       if (Object.keys(body).length === 1) return { error: say('nothingToChange') };
       pending.add(conn.id);
       try {
