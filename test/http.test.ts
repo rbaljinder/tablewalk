@@ -851,7 +851,38 @@ describe('connections, over HTTP', () => {
     const missing = await post('/api/connections/test', {});
     assert.equal(missing.status, 400);
 
+    const badPool = await post('/api/connections/test', { url: RO_DB, pool: { connectTimeoutMs: 50 } });
+    assert.equal(badPool.status, 400);
+    assert.match(String(badPool.json.error), /connectTimeoutMs/);
+
     assert.equal((await get('/api/connections')).json.connections.length, before, 'and none of that added a connection');
+  });
+
+  test('adding and updating a connection validates and wires pool timeouts', async () => {
+    const invalid = await post('/api/connections', { name: 'bad-pool', url: RO_DB, pool: { queryTimeoutMs: 999 } });
+    assert.equal(invalid.status, 400);
+    assert.match(String(invalid.json.error), /queryTimeoutMs/);
+
+    const added = await post('/api/connections', {
+      name: 'pooled-session',
+      url: RO_DB,
+      pool: { connectTimeoutMs: 12_000, queryTimeoutMs: 75_000 },
+    });
+    assert.equal(added.status, 200);
+    const created = (added.json.connections as Array<{ id: string; pool?: Record<string, number> }>).find((c) => c.id === added.json.added);
+    assert.deepEqual(created?.pool, { connectTimeoutMs: 12_000, queryTimeoutMs: 75_000 });
+
+    const updated = await post('/api/connections/update', {
+      id: added.json.added,
+      pool: { connectTimeoutMs: null, queryTimeoutMs: 90_000 },
+    });
+    assert.equal(updated.status, 200);
+    const afterUpdate = (updated.json.connections as Array<{ id: string; pool?: Record<string, number> }>).find(
+      (c) => c.id === added.json.added,
+    );
+    assert.deepEqual(afterUpdate?.pool, { queryTimeoutMs: 90_000 });
+
+    await post('/api/connections/remove', { id: added.json.added });
   });
 
   test('saving writes the connections, and the writable flag only when true', async () => {

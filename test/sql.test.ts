@@ -341,6 +341,7 @@ describe('SQL completion', () => {
       createElement: () => ({ style: {}, classList: { add() {}, toggle() {} }, append() {}, setAttribute() {} }),
       createTextNode: () => ({}),
       querySelector: () => null,
+      addEventListener: () => {},
     };
     core = await import('@mistriwork/kit/client/core.js');
     complete = await import('../src/client/sqlcomplete.js');
@@ -412,6 +413,29 @@ describe('SQL completion', () => {
 
   test('an empty statement offers keywords to start with', () => {
     assert.equal(labels('|')[0], 'SELECT');
+  });
+
+  test('stays silent inside comments and string literals', () => {
+    assert.deepEqual(at("select 'from cust|' from customer"), []);
+    assert.deepEqual(at('select 1 -- from cust|'), []);
+  });
+
+  test('suggests CTE names after FROM and FK join clauses after JOIN', () => {
+    assert.ok(labels('with big_accounts as (select * from customer) select * from big|').includes('big_accounts'));
+    const joins = labels('select * from customer c join |');
+    assert.ok(joins.some((l: string) => /invoice\s+ON\s+invoice\.customer_id\s*=\s*c\.id/i.test(l)));
+  });
+
+  test('suggests named parameters after : and scopes aliases to the current statement', () => {
+    assert.ok(labels('select * from customer where credit_limit > :min_limit and id = :m|').includes(':min_limit'));
+    // Alias `c` in statement 1 must not bleed into statement 2.
+    assert.deepEqual(at('select c.id from customer c; select c.| from invoice i'), []);
+  });
+
+  test('splits on dot in tokenAt so qualified completion keeps the alias prefix', () => {
+    const tok = complete.tokenAt('select c.na', 11);
+    assert.equal(tok.word, 'na');
+    assert.equal(tok.start, 9);
   });
 });
 

@@ -10,6 +10,7 @@ import { productVersion } from '@mistriwork/engine/server/product.js';
 import { untrustedTargetRefusal } from '@mistriwork/engine/server/http/trust.js';
 import { readBounded, readJson, send } from '@mistriwork/engine/server/http/reply.js';
 import type { RequestContext } from '@mistriwork/engine/server/http/context.js';
+import { getConnectionSqlDir } from '../sqlWorkspace.js';
 import {
   agentActivity,
   agentTools,
@@ -23,20 +24,98 @@ import {
   setConnectionEnvMeta,
 } from '../mcp.js';
 
-/** Public connection list for HTTP: attaches environment topology whenever a connection has an env, explicit metadata, or siblings. */
+const MIN_CONNECT_TIMEOUT_MS = 1_000;
+const MAX_CONNECT_TIMEOUT_MS = 120_000;
+const MIN_QUERY_TIMEOUT_MS = 1_000;
+const MAX_QUERY_TIMEOUT_MS = 3_600_000;
+
+interface PoolPatch {
+  connectTimeoutMs?: number | null;
+  queryTimeoutMs?: number | null;
+}
+
+function parsePoolTimeouts(raw: unknown): { patch?: PoolPatch; error?: string } {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== 'object' || Array.isArray(raw)) return { error: 'pool must be an object.' };
+  const input = raw as Record<string, unknown>;
+  const patch: PoolPatch = {};
+  for (const key of Object.keys(input)) {
+    if (key !== 'connectTimeoutMs' && key !== 'queryTimeoutMs') {
+      return { error: `Unknown pool setting "${key}". Expected "connectTimeoutMs" or "queryTimeoutMs".` };
+    }
+  }
+  if ('connectTimeoutMs' in input) {
+    const v = input.connectTimeoutMs;
+    if (v === null || v === '') patch.connectTimeoutMs = null;
+    else if (typeof v === 'number' && Number.isInteger(v) && v >= MIN_CONNECT_TIMEOUT_MS && v <= MAX_CONNECT_TIMEOUT_MS) {
+      patch.connectTimeoutMs = v;
+    } else {
+      return {
+        error: `connectTimeoutMs must be whole milliseconds from ${MIN_CONNECT_TIMEOUT_MS} to ${MAX_CONNECT_TIMEOUT_MS}.`,
+      };
+    }
+  }
+  if ('queryTimeoutMs' in input) {
+    const v = input.queryTimeoutMs;
+    if (v === null || v === '') patch.queryTimeoutMs = null;
+    else if (typeof v === 'number' && Number.isInteger(v) && v >= MIN_QUERY_TIMEOUT_MS && v <= MAX_QUERY_TIMEOUT_MS) {
+      patch.queryTimeoutMs = v;
+    } else {
+      return {
+        error: `queryTimeoutMs must be whole milliseconds from ${MIN_QUERY_TIMEOUT_MS} to ${MAX_QUERY_TIMEOUT_MS}.`,
+      };
+    }
+  }
+  return Object.keys(patch).length > 0 ? { patch } : {};
+}
+
+function mergePoolPatch(
+  existing: NonNullable<ReturnType<RequestContext['registry']['configOf']>>['pool'] | undefined,
+  patch: PoolPatch,
+): NonNullable<ReturnType<RequestContext['registry']['configOf']>>['pool'] | undefined {
+  const next = { ...(existing ?? {}) };
+  if ('connectTimeoutMs' in patch) {
+    if (patch.connectTimeoutMs === null) delete next.connectTimeoutMs;
+    else next.connectTimeoutMs = patch.connectTimeoutMs;
+  }
+  if ('queryTimeoutMs' in patch) {
+    if (patch.queryTimeoutMs === null) delete next.queryTimeoutMs;
+    else next.queryTimeoutMs = patch.queryTimeoutMs;
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+/** Public connection list for HTTP: attaches environment topology and non-secret pool settings when configured. */
 function wireConnections(registry: RequestContext['registry']) {
-  return listEnrichedConnections(registry).map(({ database, env, tier, explicit, siblings, ...base }) =>
-    env || explicit || siblings.length > 0
+  return listEnrichedConnections(registry).map(({ database, env, tier, explicit, siblings, ...base }) => {
+    const cfgPool = registry.configOf(base.id)?.pool;
+    const pool =
+      cfgPool && Object.keys(cfgPool).length > 0
+        ? {
+            ...(cfgPool.read !== undefined ? { read: cfgPool.read } : {}),
+            ...(cfgPool.idleSeconds !== undefined ? { idleSeconds: cfgPool.idleSeconds } : {}),
+            ...(cfgPool.minIdle !== undefined ? { minIdle: cfgPool.minIdle } : {}),
+            ...(cfgPool.connectTimeoutMs !== undefined ? { connectTimeoutMs: cfgPool.connectTimeoutMs } : {}),
+            ...(cfgPool.queryTimeoutMs !== undefined ? { queryTimeoutMs: cfgPool.queryTimeoutMs } : {}),
+          }
+        : undefined;
+    const hasSqlWorkspace = Boolean(getConnectionSqlDir(registry, base.id));
+    const withPool = {
+      ...base,
+      ...(pool ? { pool } : {}),
+      ...(hasSqlWorkspace ? { hasSqlWorkspace: true } : {}),
+    };
+    return env || explicit || siblings.length > 0
       ? {
-          ...base,
+          ...withPool,
           database,
           ...(env ? { env } : {}),
           tier,
           ...(explicit ? { explicit: true } : {}),
           siblings,
         }
-      : base,
-  );
+      : withPool;
+  });
 }
 
 /** Session connections added from the page: enough for any real session, bounded so an exposed listener cannot grow the registry forever. */
@@ -205,13 +284,28 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
       }
     }
 
+    const poolParsed = parsePoolTimeouts(body.pool);
+    if (poolParsed.error) {
+      send(res, 400, { error: poolParsed.error });
+      return true;
+    }
+
     let adapter;
     try {
       const resolved = await resolveConnection(String(body.name ?? '').trim() || 'test', target, { secrets: trusted });
+      const testPool = mergePoolPatch(undefined, poolParsed.patch ?? {});
       adapter = connect(resolved.url, {
         schemas: Array.isArray(body.schemas) ? (body.schemas as string[]) : [],
         label: 'test',
         ...(trusted ? {} : { network: UNTRUSTED_NETWORK }),
+        ...(testPool && /^postgres(ql)?:\/\//i.test(resolved.url)
+          ? {
+              postgres: {
+                ...(testPool.connectTimeoutMs !== undefined ? { connectTimeoutMs: testPool.connectTimeoutMs } : {}),
+                ...(testPool.queryTimeoutMs !== undefined ? { queryTimeoutMs: testPool.queryTimeoutMs } : {}),
+              },
+            }
+          : {}),
       });
       const schema = await adapter.introspect();
       send(res, 200, {
@@ -298,6 +392,12 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
         return true;
       }
     }
+    const poolParsed = parsePoolTimeouts(body.pool);
+    if (poolParsed.error) {
+      send(res, 400, { error: poolParsed.error });
+      return true;
+    }
+    const pool = poolParsed.patch ? mergePoolPatch(undefined, poolParsed.patch) : undefined;
     if (registry.configs().filter((c) => c.source === 'session').length >= MAX_SESSION_CONNECTIONS) {
       send(res, 429, {
         error: `At most ${MAX_SESSION_CONNECTIONS} session connections can be kept at once. Remove one before adding another.`,
@@ -315,6 +415,7 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
         name: String(body.name ?? '').trim() || redact(target),
         url: target,
         schemas: Array.isArray(body.schemas) ? (body.schemas as string[]) : undefined,
+        ...(pool ? { pool } : {}),
         source: 'session',
       },
       { untrusted: !trusted },
@@ -363,10 +464,20 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
     if (typeof body.name === 'string' && body.name.trim()) patch.name = body.name.trim();
     if (typeof body.url === 'string' && body.url.trim()) patch.url = body.url.trim();
     if (Array.isArray(body.schemas)) patch.schemas = body.schemas as string[];
+    const poolParsed = parsePoolTimeouts(body.pool);
+    if (poolParsed.error) {
+      send(res, 400, { error: poolParsed.error });
+      return true;
+    }
+    let poolChanged = false;
+    if (poolParsed.patch) {
+      patch.pool = mergePoolPatch(registry.configOf(id)?.pool, poolParsed.patch);
+      poolChanged = true;
+    }
     const hasDatabase = typeof body.database === 'string';
     const hasEnv = typeof body.env === 'string';
 
-    if (!trusted && (patch.url || patch.schemas)) {
+    if (!trusted && (patch.url || patch.schemas || poolChanged)) {
       /* A connection the operator wrote into the config is not the network's
          to redirect: pointing "production" at another host from a browser on
          another machine changes what every other reader of this server sees.
@@ -391,7 +502,7 @@ export async function connectionRoutes(ctx: RequestContext): Promise<boolean> {
         await registry.update(id, patch, { untrusted: !trusted });
         /* Opened straight away when the target changed, so a typo fails here
            rather than the next time someone clicks the connection. */
-        if (patch.url || patch.schemas) await registry.open(id);
+        if (patch.url || patch.schemas || poolChanged) await registry.open(id);
       }
       if (hasDatabase || hasEnv) {
         const prevMeta = getConnectionEnvMeta(registry, id) ?? {};

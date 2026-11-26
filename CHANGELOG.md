@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.0.0-rc.25
+
+Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.91`.
+
+- **`Folio` as the Native Default Look:**
+  - Promoted **`Folio`** (warm archival paper, printed book-style horizontal table rules, quiet near-black actions, deep
+    forest-green foreign-key links, and warm charcoal dark mode) into `looks/native.css` so it paints on first load with
+    zero extra stylesheet fetches.
+  - Kept **`Instrument`** (`Stone`, `Graphite`, `Fog`, `Slate`, `Ink`) as selectable on-demand host looks alongside
+    `Braun`, `Broadsheet`, `Obsidian`, `Blueprint`, `Console`, `Gallery`, `Lumen` and the rest of the shared Mistri themes.
+- **SQL Workbench, `.sql` Workspaces, Syntax Highlighting & Autocomplete:**
+  - **Dialect-Aware SQL Highlighting & Schema Autocomplete:** Added 5-color SQL syntax highlighting (PostgreSQL & SQLite)
+    and upgraded autocomplete supporting tables, columns, statement-scoped aliases, CTE names, foreign-key-guided
+    `JOIN … ON` clauses (including composite FKs), named `:params`, and dialect functions — silent inside strings and
+    comments.
+  - **Connection-Scoped `.sql` Workspaces (`--sql-dir` / `"sqlDir"`):** Attach a local `.sql` folder on disk (loopback,
+    CLI `--sql-dir`, or `tablewalk.json` `"sqlDir"`, shared automatically across sibling environments of the same logical
+    database) or **Import folder…** in the browser; manage subfolders and files, edit multiple scratch consoles and file
+    tabs with `⌘S` save, and browse per-database execution **History**.
+  - **Statement-at-Caret, Multi-Statement Scripts & Inline Parameters:** `⌘↵` runs your selection or the statement under
+    the caret; multi-statement scripts add **Run script** (`POST /api/sql/script`) executing sequentially and stopping on
+    the first error; `:param` and `{{param}}` placeholders open an inline parameter bar remembered per database.
+  - **SQL Result Exports, Numeric Aggregates & Env Row Diff:** Copy SQL results as CSV, JSON, Markdown, `INSERT` or
+    `IN (…)`, download `.csv`, view automatic numeric `sum / avg / min / max` aggregates, and toggle **Diff envs** inside
+    **Compare envs** to see added, removed, and changed rows side by side.
+- **Parameterized `.sql` Execution & Exports in MCP and CLI:**
+  - **MCP `sql`, `export`, and Shelf:** Workspace `.sql` files appear on `tablewalk://{connection}/queries` with their
+    required `:param` names listed, and both `sql` and `export` accept typed `params` (refusing missing parameters with
+    `invalid_argument` naming the missing keys).
+  - **CLI Syntactic Sugar (`--sql-file`, `--param`, `--out`):** Execute or export parameterized `.sql` files (on disk or
+    from `--sql-dir` / `"sqlDir"`) directly from scripts and CI, inferring `.csv`, `.ndjson` / `.jsonl`, `.json`, and
+    `.gz` compression from `--out` (or streaming `--format tsv|json|ndjson|md` to stdout when `--out` is omitted).
+- **Table Grid Ergonomics:**
+  - Right-click or `Shift+Click` any table cell for the **Cell Inspector** (pretty-printed JSON, UTC/local timestamp
+    conversions, UUID inspection, multiline copy, and 1-click `=`, `!=`, `is empty` quick cell filters).
+  - Added searchable **Columns** jump chooser for wide tables, **Copy…** (`CSV`, `TSV`, `JSON`, `Markdown`, `INSERT`,
+    `IN (…)`) for visible rows, and a sticky **Grid Aggregates** (`sum / avg / min / max`) footer.
+- **Mistri `1.0.0-rc.91` Platform Adoption:**
+  - Added optional PostgreSQL pool timeouts (`connectTimeoutMs` / `queryTimeoutMs`) in `ConnectionDialog` and connection
+    docs; adopted `@mistriwork/ui` `Tabs`, `Resizable`, `Button` and `@mistriwork/ui/charts/core.js` horizontal diagnostic
+    and column-profile bars.
+
 ## 1.0.0-rc.24
 
 Built on `@mistriwork/engine`, `@mistriwork/kit` and `@mistriwork/ui` at exactly `1.0.0-rc.77`.

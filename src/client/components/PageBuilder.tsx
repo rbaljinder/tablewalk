@@ -839,7 +839,7 @@ function SectionRow({
               { value: `${c}:desc`, label: `${c} ↓`, detail: say('highestFirst') },
             ]),
           ]}
-          onChange={(v) => {
+          onValueChange={(v) => {
             if (!v) {
               section.orderBy = undefined;
             } else {
@@ -861,7 +861,7 @@ function SectionRow({
               detail: fn === 'count' ? say('rowsAtAnyDistance') : say('ofAColumnOne', { fn }),
               disabled: fn !== 'count' && numeric.length === 0,
             }))}
-            onChange={(value) => {
+            onValueChange={(value) => {
               const fn = METRIC_FUNCTIONS.find((fn) => fn === value);
               if (!fn) return;
               section.fn = fn;
@@ -877,7 +877,7 @@ function SectionRow({
                 { value: '', label: numeric.length ? say('columnMore') : say('noNumberColumns') },
                 ...numeric.map((c) => ({ value: c, label: c })),
               ]}
-              onChange={(c) => {
+              onValueChange={(c) => {
                 section.column = c || undefined;
                 draw();
               }}
@@ -907,7 +907,7 @@ function SectionRow({
             { value: 'fit', label: say('fitColumns') },
             { value: 'scroll', label: say('scrollColumns') },
           ]}
-          onChange={(value) => {
+          onValueChange={(value) => {
             if (value === 'scroll') section.sizing = 'scroll';
             else delete section.sizing;
             draw();
@@ -927,7 +927,7 @@ function SectionRow({
                 detail: n === 1 ? say('oneUnderAnother') : say('acrossFilledLeftToRight', { n }),
               })),
             ]}
-            onChange={(v) => {
+            onValueChange={(v) => {
               section.columns = FIELD_COLUMNS.find((n) => String(n) === v);
               draw();
             }}
@@ -939,7 +939,7 @@ function SectionRow({
           ariaLabel={say('width')}
           value={section.width ?? 'full'}
           items={WIDTHS.map((w) => ({ value: w, label: w, detail: WIDTH_MEANS[w] }))}
-          onChange={(w) => {
+          onValueChange={(w) => {
             section.width = WIDTHS.find((width) => width === w);
             draw();
           }}
@@ -952,7 +952,7 @@ function SectionRow({
           { value: 'main', label: say('main') },
           { value: 'aside', label: say('aside') },
         ]}
-        onChange={(region) => {
+        onValueChange={(region) => {
           if (region === 'aside') section.region = 'aside';
           else delete section.region;
           draw();
@@ -976,7 +976,7 @@ function SectionRow({
                     detail: say('ofEmptySpace', { offset: OFFSET_MEANS[o] }),
                   })),
                 ]}
-                onChange={(o) => {
+                onValueChange={(o) => {
                   section[key] = OFFSETS.find((offset) => offset === o);
                   draw();
                 }}

@@ -68,6 +68,10 @@ interface BrowserExtraArgs {
   redact?: boolean;
   focus?: string;
   focusHops?: string;
+  sqlDir?: string;
+  sqlFile?: string;
+  params?: string[];
+  out?: string;
   format?: string;
   auditLog?: string;
   lazy?: boolean;
@@ -126,6 +130,21 @@ function extractBrowserExtraArgs(argv: readonly string[]): BrowserExtraArgs {
     } else if (arg === '--focus-hops') {
       const got = takeValue(arg, argv[i + 1], i);
       if (got) [out.focusHops, i] = got;
+    } else if (arg === '--sql-dir') {
+      const got = takeValue(arg, argv[i + 1], i);
+      if (got) [out.sqlDir, i] = got;
+    } else if (arg === '--sql-file') {
+      const got = takeValue(arg, argv[i + 1], i);
+      if (got) [out.sqlFile, i] = got;
+    } else if (arg === '--param') {
+      const got = takeValue(arg, argv[i + 1], i);
+      if (got) {
+        (out.params ??= []).push(got[0]);
+        i = got[1];
+      }
+    } else if (arg === '--out') {
+      const got = takeValue(arg, argv[i + 1], i);
+      if (got) [out.out, i] = got;
     } else if (arg === '--format') {
       const got = takeValue(arg, argv[i + 1], i);
       if (got) [out.format, i] = got;
@@ -153,22 +172,30 @@ function extractBrowserExtraArgs(argv: readonly string[]): BrowserExtraArgs {
       rest.push(arg);
     }
   }
-  const toolModes = [out.query !== undefined, out.call !== undefined, out.batch !== undefined].filter(Boolean).length;
+  const toolModes = [out.query !== undefined, out.call !== undefined, out.sqlFile !== undefined, out.batch !== undefined].filter(
+    Boolean,
+  ).length;
   const modes = toolModes + (out.check ? 1 : 0) + (out.verifyDdl !== undefined ? 1 : 0);
   if (modes > 1) {
-    out.error ??= 'Pass only one of --query, --call, --batch, --check, or --verify-ddl.';
+    out.error ??= 'Pass only one of --query, --call, --sql-file, --batch, --check, or --verify-ddl.';
   }
-  if (out.args !== undefined && out.call === undefined && out.query === undefined) {
-    out.error ??= '--args goes with --call (or --query).';
+  if (out.args !== undefined && out.call === undefined && out.query === undefined && out.sqlFile === undefined) {
+    out.error ??= '--args goes with --call, --query, or --sql-file.';
+  }
+  if (out.params?.length && out.sqlFile === undefined && out.call === undefined) {
+    out.error ??= '--param goes with --sql-file or --call.';
+  }
+  if (out.out !== undefined && out.sqlFile === undefined && out.query === undefined && out.call !== 'export') {
+    out.error ??= '--out goes with --sql-file, --query, or --call export.';
   }
   if (out.allEnvs && out.env !== undefined) {
     out.error ??= 'Pass either --env <env> or --all-envs, not both.';
   }
   if (out.allEnvs && toolModes === 0) {
-    out.error ??= '--all-envs goes with --query, --call, or --batch.';
+    out.error ??= '--all-envs goes with --query, --call, --sql-file, or --batch.';
   }
   if (out.format !== undefined && modes === 0) {
-    out.error ??= '--format goes with --query, --call, --batch, --check, or --verify-ddl.';
+    out.error ??= '--format goes with --query, --call, --sql-file, --batch, --check, or --verify-ddl.';
   }
   return out;
 }
@@ -240,7 +267,7 @@ export const main: Main = async () => {
     }
   }
 
-  const oneShotTool = extra.query !== undefined || Boolean(extra.call) || extra.batch !== undefined;
+  const oneShotTool = extra.query !== undefined || Boolean(extra.call) || Boolean(extra.sqlFile) || extra.batch !== undefined;
   /* Detect piped/FIFO/`TABLEWALK_CONFIG_JSON` config before `configNamesApps` touches `opts.config` (reading a FIFO
      twice would lose its contents). Avoids importing `vaultConfig.js` on ordinary starts. */
   const maybePiped =
@@ -499,6 +526,44 @@ export const main: Main = async () => {
     }
   }
 
+  const cliSqlDir = extra.sqlDir ?? process.env.TABLEWALK_SQL_DIR?.trim();
+  const hasConfigSqlDir = Boolean(config.loadedConfigText && /"sqlDir"\s*:/.test(config.loadedConfigText));
+  if (cliSqlDir || hasConfigSqlDir) {
+    const [{ setConnectionSqlDir, setDefaultSqlDir, validateWorkspaceRoot }, { dirname, resolve }] = await Promise.all([
+      import('../sqlWorkspace.js'),
+      import('node:path'),
+    ]);
+    try {
+      const baseDir = config.configPath ? dirname(resolve(config.configPath)) : process.cwd();
+      if (hasConfigSqlDir && config.loadedConfigText) {
+        const parsed = JSON.parse(config.loadedConfigText) as Record<string, unknown>;
+        if (typeof parsed.sqlDir === 'string' && parsed.sqlDir.trim()) {
+          setDefaultSqlDir(registry, validateWorkspaceRoot(resolve(baseDir, parsed.sqlDir.trim())));
+        }
+        if (Array.isArray(parsed.connections)) {
+          const allConns = registry.list();
+          for (const rawConn of parsed.connections) {
+            if (!rawConn || typeof rawConn !== 'object') continue;
+            const rec = rawConn as Record<string, unknown>;
+            if (typeof rec.sqlDir !== 'string' || !rec.sqlDir.trim()) continue;
+            const name = typeof rec.name === 'string' ? rec.name.trim() : '';
+            const match = allConns.find((c) => c.name === name || c.id === name);
+            if (match) {
+              setConnectionSqlDir(registry, match.id, validateWorkspaceRoot(resolve(baseDir, rec.sqlDir.trim())));
+            }
+          }
+        }
+      }
+      if (cliSqlDir) {
+        setDefaultSqlDir(registry, validateWorkspaceRoot(cliSqlDir));
+      }
+    } catch (err) {
+      console.error(`tablewalk: ${(err as Error).message}`);
+      await registry.closeAll().catch(() => {});
+      process.exit(1);
+    }
+  }
+
   /* Nothing named a database. Every mode but the server needs one: `--export` prints a schema, `--lint` reads one,
      `--diff` compares two, and every MCP tool is a question about one, and an agent on stdio has no way to supply
      it — so those stop here, with the usage and the places a config was looked for. The server starts, and its
@@ -534,6 +599,9 @@ export const main: Main = async () => {
       {
         query: extra.query,
         call: extra.call,
+        sqlFile: extra.sqlFile,
+        params: extra.params,
+        out: extra.out,
         args: extra.args,
         connection: extra.connection,
         env: extra.env,

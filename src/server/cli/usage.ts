@@ -78,7 +78,8 @@ Options:
       --schema <name> Postgres only; repeatable. Defaults to all user schemas.
       --read-pool <n> PostgreSQL connections that may read at once, per
                       database (default 4, at most 64). A connection's
-                      "pool": { "read": n, "idleSeconds": s, "minIdle": k } in
+                      "pool": { "read": n, "idleSeconds": s, "minIdle": k,
+                      "connectTimeoutMs": c, "queryTimeoutMs": q } in
                       tablewalk.json wins. Or set TABLEWALK_READ_POOL (and
                       TABLEWALK_POOL_IDLE for idle seconds).
       --lock-timeout <s>
@@ -133,6 +134,9 @@ Options:
       --audit-log <path|stderr>
                       Append zero-PII JSONL audit receipts for every tool call
                       (or set TABLEWALK_AUDIT_LOG)
+      --sql-dir <dir> Attach a local folder of .sql files as the default SQL
+                      workspace for connections (or "sqlDir" in tablewalk.json,
+                      or set TABLEWALK_SQL_DIR)
       --base-path <path>
                       The path a reverse proxy serves this server under, like
                       /tools: every address, asset, API call, cookie and
@@ -162,7 +166,15 @@ Options:
                       the result, close all connections, and exit.
       --call <tool>   Run one MCP tool by name, print the result, close all
                       connections, and exit.
-      --args <json>   With --call or --query: JSON object of tool arguments.
+      --args <json>   With --call, --query or --sql-file: JSON object of tool arguments.
+      --sql-file <path>
+                      Run or export a .sql file (a path on disk or a saved
+                      workspace query under --sql-dir / "sqlDir"), then exit.
+      --param <key=value>
+                      With --sql-file or --call: bind a named :param or
+                      {{param}} placeholder; repeatable.
+      --out <path>    With --sql-file, --query or --call export: write exported
+                      data directly to this file (.csv, .ndjson, .json, or .gz).
       --batch [path|-]
                       Run newline-delimited queries, breakdowns or JSON
                       {"tool","args"} calls over one session, print NDJSON,

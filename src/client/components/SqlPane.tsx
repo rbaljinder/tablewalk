@@ -1,21 +1,18 @@
 /**
- * The SQL editor: the last mile of the query language, handed to a
- * connection that cannot write. Two ways in — a statement from scratch, or
- * the one the language compiled to, taken over at the point the language
- * runs out. Why a SQL box at all, at length: `sql.js`.
- *
- * The textarea is uncontrolled on purpose: the completer writes into it
- * directly when a suggestion is accepted, and the value is read when Run
- * is pressed rather than mirrored keystroke by keystroke.
+ * The SQL workbench: DataGrip-style connection-scoped `.sql` workspaces,
+ * multi-tab consoles, real-time dialect-aware syntax highlighting, upgraded
+ * schema/FK/CTE autocomplete, statement-at-caret & multi-statement script
+ * execution, inline `:param` / `{{param}}` binding, execution history,
+ * result exports/aggregates, and cross-environment result diffing.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@mistriwork/ui/Button.js';
 import { Modal, type ModalHandle } from '@mistriwork/ui/Modal.js';
+import { Resizable } from '@mistriwork/ui/Resizable.js';
+import { Tabs } from '@mistriwork/ui/Tabs.js';
 import { api, go, render, state, toast, viewportBox, viewportScale } from '@mistriwork/kit/client/core.js';
 import { advanceRecordSource } from '@mistriwork/kit/client/recordSource.js';
-import { attachComplete } from '../complete.js';
-import { sqlSuggestions, tokenAt } from '../sqlcomplete.js';
 import { promptFor } from '@mistriwork/kit/client/prompt.js';
 import { removeStatement, saveStatement, savedStatements } from '../sqlsaved.js';
 import { refreshUndo } from '../undo.js';
@@ -29,6 +26,31 @@ import {
   type EnvironmentTier,
   type SiblingEnvironment,
 } from '../../shared/environments.js';
+import {
+  computeColumnAggregates,
+  diffResultSets,
+  extractSqlParameters,
+  formatResultExport,
+  splitSqlStatements,
+  statementAtOffset,
+  substituteSqlParameters,
+  type ResultExportFormat,
+} from '../../shared/sqlScript.js';
+import {
+  clearHistory,
+  clearImportedFiles,
+  deleteImportedFile,
+  historyFor,
+  importedFilesFor,
+  importSqlFiles,
+  paramValuesFor,
+  recordHistory,
+  saveParamValues,
+  upsertImportedFile,
+  type BrowserSqlFile,
+  type SqlHistoryEntry,
+} from '../sqlworkspace.js';
+import { SqlCodeEditor } from './SqlCodeEditor.js';
 import './SqlPane.css';
 
 interface SqlResult {
@@ -40,6 +62,29 @@ interface SqlResult {
   affected?: number;
   errors?: Array<{ message: string }>;
 }
+
+interface ScriptStatementOutcome {
+  index: number;
+  sql: string;
+  startLine: number;
+  endLine: number;
+  ok: boolean;
+  ms: number;
+  columns?: string[];
+  rows?: unknown[][];
+  truncated?: boolean;
+  bounded?: boolean;
+  affected?: number;
+  error?: string;
+}
+
+interface ScriptResultPayload {
+  statements: ScriptStatementOutcome[];
+  totalMs: number;
+  totalStatements: number;
+  stoppedAt?: number;
+}
+
 interface FanoutEnvEntry {
   connection: string;
   name: string;
@@ -56,12 +101,39 @@ interface FanoutEnvEntry {
     errors?: string[];
   };
 }
+
 interface Statement {
   name: string;
   sql: string;
   description?: string;
   source: 'saved' | 'config';
 }
+
+interface DiskSqlFile {
+  path: string;
+  folder: string;
+  name: string;
+  size: number;
+  mtimeMs: number;
+}
+
+interface DiskWorkspaceState {
+  attached: boolean;
+  rootName: string | null;
+  rootPath: string | null;
+  readOnly: boolean;
+  files: DiskSqlFile[];
+}
+
+interface EditorTab {
+  id: string;
+  title: string;
+  text: string;
+  savedText: string;
+  kind: 'console' | 'disk' | 'browser';
+  filePath?: string;
+}
+
 interface VerifyDdlTableDiff {
   table: string;
   onlyIn?: 'left' | 'right';
@@ -69,6 +141,7 @@ interface VerifyDdlTableDiff {
   columnsOnlyRight?: string[];
   changed?: Array<{ column: string; what: string; left: string; right: string }>;
 }
+
 interface VerifyDdlPayload {
   valid: boolean;
   dialect?: string;
@@ -85,12 +158,14 @@ interface VerifyDdlPayload {
   };
   newLintFindings?: Array<{ table: string; rule: string; severity: string; message: string }>;
 }
+
 type Outcome =
   | { kind: 'idle' }
   | { kind: 'running' }
   | { kind: 'error'; message: string }
   | { kind: 'written'; affected: number }
   | { kind: 'rows'; data: SqlResult }
+  | { kind: 'script'; data: ScriptResultPayload }
   | { kind: 'fanout'; entries: FanoutEnvEntry[] }
   | { kind: 'plan'; lines: string[]; ms: number }
   | { kind: 'ddl'; data: VerifyDdlPayload; ms: number };
@@ -103,21 +178,32 @@ interface SqlPaneProps {
 }
 
 let savedPanelHeightPx: number | null = null;
+let consoleCounter = 1;
 
-/* A textarea that grows with its content, to a point. */
-function autoGrow(input: HTMLTextAreaElement) {
-  input.style.height = 'auto';
-  input.style.height = `${Math.min(Math.max(input.scrollHeight, 84), 340)}px`;
+function formatCompactNumber(n: number): string {
+  if (!Number.isFinite(n)) return String(n);
+  if (Number.isInteger(n)) return n.toLocaleString('en-US');
+  return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+}
+
+function groupFilesByFolder<T extends { path: string; folder: string; name: string }>(files: T[]): Array<[string, T[]]> {
+  const byFolder = new Map<string, T[]>();
+  for (const file of files) {
+    const key = file.folder || '';
+    const list = byFolder.get(key);
+    if (list) list.push(file);
+    else byFolder.set(key, [file]);
+  }
+  return [...byFolder.entries()].sort(([a], [b]) => a.localeCompare(b));
 }
 
 export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPaneProps) {
   const queryClient = useQueryClient();
   const input = useRef<HTMLTextAreaElement>(null);
-  const [outcome, setOutcome] = useState<Outcome>({ kind: 'idle' });
-  const [fanoutIdx, setFanoutIdx] = useState(0);
-  const [savedVersion, bump] = useState(0);
-  const [pendingWrite, setPendingWrite] = useState<string | null>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+
   const schema = (state as { schema?: { label?: string; dialect?: string } }).schema;
+  const dialect = schema?.dialect === 'sqlite' ? 'sqlite' : 'postgres';
   const connections = state as {
     connections?: Array<{
       id: string;
@@ -127,6 +213,7 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
       rows?: boolean;
       hidesColumns?: boolean;
       redactsRows?: boolean;
+      hasSqlWorkspace?: boolean;
       database?: string;
       env?: string;
       tier?: EnvironmentTier;
@@ -141,15 +228,58 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
     : undefined;
   const writable = activeConn?.writable;
   const canExplain = !activeConn?.hidesColumns && !activeConn?.redactsRows;
+  const scopeKey = activeConn?.database || activeConn?.id || 'default';
+
+  const [tabs, setTabs] = useState<EditorTab[]>(() => [
+    { id: 'console-1', title: say('consoleTabName', { n: 1 }), text: draft, savedText: draft, kind: 'console' },
+  ]);
+  const [activeTabId, setActiveTabId] = useState<string>('console-1');
+  const [caret, setCaret] = useState<{ start: number; end: number }>({ start: draft.length, end: draft.length });
+  const [outcome, setOutcome] = useState<Outcome>({ kind: 'idle' });
+  const [fanoutIdx, setFanoutIdx] = useState(0);
+  const [fanoutDiffOpen, setFanoutDiffOpen] = useState(false);
+  const [savedVersion, bump] = useState(0);
+  const [pendingWrite, setPendingWrite] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => Boolean(activeConn?.hasSqlWorkspace));
+  const [sidebarTab, setSidebarTab] = useState<'files' | 'history'>('files');
+  const [diskWorkspace, setDiskWorkspace] = useState<DiskWorkspaceState | null>(null);
+  const [browserFiles, setBrowserFiles] = useState<BrowserSqlFile[]>(() => importedFilesFor(scopeKey));
+  const [historyEntries, setHistoryEntries] = useState<SqlHistoryEntry[]>(() => historyFor(scopeKey));
+  const [paramValues, setParamValues] = useState<Record<string, string>>(() => paramValuesFor(scopeKey));
+
+  const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
+  const editorText = activeTab?.text ?? draft;
+
+  // Keep browser-scoped workspace state synced when switching database groups.
+  useEffect(() => {
+    setBrowserFiles(importedFilesFor(scopeKey));
+    setHistoryEntries(historyFor(scopeKey));
+    setParamValues(paramValuesFor(scopeKey));
+  }, [scopeKey]);
+
+  const refreshDiskWorkspace = useCallback(async () => {
+    try {
+      const data = (await api('/api/sql/workspace')) as DiskWorkspaceState | undefined;
+      if (data && typeof data.attached === 'boolean') {
+        setDiskWorkspace(data);
+      }
+    } catch {
+      // Offline or mocked test environment without workspace route — keep browser workspace usable.
+    }
+  }, []);
 
   useEffect(() => {
-    const node = input.current!;
-    const detach = attachComplete(node, sqlSuggestions, { anchor: 'caret', split: tokenAt }) as (() => void) | undefined;
-    autoGrow(node);
-    node.focus();
-    node.setSelectionRange(node.value.length, node.value.length);
-    return () => detach?.();
-  }, []);
+    if (!sidebarOpen) return;
+    void refreshDiskWorkspace();
+  }, [sidebarOpen, activeConn?.id, refreshDiskWorkspace]);
+
+  // Enable directory selection attribute on hidden file input for Import folder…
+  useEffect(() => {
+    const el = folderInputRef.current;
+    if (!el) return;
+    el.setAttribute('webkitdirectory', '');
+    el.setAttribute('directory', '');
+  }, [sidebarOpen]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -168,12 +298,245 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
     return () => removeHostListener(document, 'keydown', onKey, true);
   }, [onClose]);
 
+  const updateActiveTabText = useCallback(
+    (nextText: string, syncTextarea = false) => {
+      setTabs((prev) => prev.map((t) => (t.id === activeTabId ? { ...t, text: nextText } : t)));
+      if (activeTabId === 'console-1') onDraft(nextText);
+      if (syncTextarea && input.current) {
+        input.current.value = nextText;
+      }
+    },
+    [activeTabId, onDraft],
+  );
+
   const setText = (text: string) => {
-    onDraft(text);
+    updateActiveTabText(text, true);
+    setCaret({ start: text.length, end: text.length });
+  };
+
+  const switchTab = (tabId: string) => {
+    const target = tabs.find((t) => t.id === tabId);
+    if (!target) return;
+    setActiveTabId(tabId);
     if (input.current) {
-      input.current.value = text;
-      autoGrow(input.current);
+      input.current.value = target.text;
+      input.current.focus();
+      input.current.setSelectionRange(target.text.length, target.text.length);
     }
+    setCaret({ start: target.text.length, end: target.text.length });
+  };
+
+  const addConsoleTab = () => {
+    consoleCounter += 1;
+    const id = `console-${consoleCounter}`;
+    const next: EditorTab = { id, title: say('consoleTabName', { n: consoleCounter }), text: '', savedText: '', kind: 'console' };
+    setTabs((prev) => [...prev, next]);
+    setActiveTabId(id);
+    if (input.current) {
+      input.current.value = '';
+      input.current.focus();
+    }
+    setCaret({ start: 0, end: 0 });
+  };
+
+  const closeTab = (tabId: string) => {
+    if (tabs.length <= 1) return;
+    const idx = tabs.findIndex((t) => t.id === tabId);
+    const remaining = tabs.filter((t) => t.id !== tabId);
+    setTabs(remaining);
+    if (tabId === activeTabId) {
+      const next = remaining[Math.max(0, idx - 1)] ?? remaining[0];
+      setActiveTabId(next.id);
+      if (input.current) input.current.value = next.text;
+      setCaret({ start: next.text.length, end: next.text.length });
+    }
+  };
+
+  const openFileTab = (kind: 'disk' | 'browser', path: string, content: string) => {
+    const tabId = `${kind}:${path}`;
+    const existing = tabs.find((t) => t.id === tabId);
+    if (existing) {
+      switchTab(tabId);
+      return;
+    }
+    const title = path.includes('/') ? path.slice(path.lastIndexOf('/') + 1) : path;
+    const next: EditorTab = { id: tabId, title, text: content, savedText: content, kind, filePath: path };
+    setTabs((prev) => [...prev, next]);
+    setActiveTabId(tabId);
+    if (input.current) {
+      input.current.value = content;
+      input.current.focus();
+      input.current.setSelectionRange(content.length, content.length);
+    }
+    setCaret({ start: content.length, end: content.length });
+  };
+
+  const openDiskFile = async (relPath: string) => {
+    try {
+      const data = (await api(`/api/sql/files?path=${encodeURIComponent(relPath)}`)) as { content?: string; error?: string };
+      if (typeof data?.content === 'string') {
+        openFileTab('disk', relPath, data.content);
+      }
+    } catch (err) {
+      toast((err as Error).message, 'bad');
+    }
+  };
+
+  const saveActiveFile = async () => {
+    const current = tabs.find((t) => t.id === activeTabId);
+    if (!current || !current.filePath) {
+      await save();
+      return;
+    }
+    const content = input.current?.value ?? current.text;
+    if (current.kind === 'browser') {
+      const updated = upsertImportedFile(scopeKey, current.filePath, content);
+      setBrowserFiles(updated);
+      setTabs((prev) => prev.map((t) => (t.id === current.id ? { ...t, text: content, savedText: content } : t)));
+      toast(say('fileSaved', { path: current.filePath }), 'ok');
+      return;
+    }
+    try {
+      const res = (await api('/api/sql/files', { path: current.filePath, content })) as { workspace?: DiskWorkspaceState };
+      if (res?.workspace) setDiskWorkspace(res.workspace);
+      setTabs((prev) => prev.map((t) => (t.id === current.id ? { ...t, text: content, savedText: content } : t)));
+      toast(say('fileSaved', { path: current.filePath }), 'ok');
+    } catch (err) {
+      toast((err as Error).message || say('fileSaveFailed', { path: current.filePath }), 'bad');
+    }
+  };
+
+  const attachFolder = async () => {
+    const dir = await promptFor({
+      title: say('attachFolderPrompt'),
+      label: say('attachFolderLabel'),
+      placeholder: say('attachFolderPlaceholder'),
+    });
+    if (!dir) return;
+    try {
+      const ws = (await api('/api/sql/workspace/attach', { dir })) as DiskWorkspaceState;
+      setDiskWorkspace(ws);
+      toast(say('folderAttached', { name: ws.rootName ?? dir }), 'ok');
+    } catch (err) {
+      toast((err as Error).message, 'bad');
+    }
+  };
+
+  const detachFolder = async () => {
+    try {
+      const ws = (await api('/api/sql/workspace/detach', {})) as DiskWorkspaceState;
+      setDiskWorkspace(ws);
+      toast(say('folderDetached'), 'ok');
+    } catch (err) {
+      toast((err as Error).message, 'bad');
+    }
+  };
+
+  const createNewSqlFile = async () => {
+    const rawPath = await promptFor({
+      title: say('newSqlFilePrompt'),
+      label: say('newSqlFileLabel'),
+      placeholder: say('newSqlFilePlaceholder'),
+    });
+    if (!rawPath) return;
+    const rel = rawPath.trim().toLowerCase().endsWith('.sql') ? rawPath.trim() : `${rawPath.trim()}.sql`;
+    const initialContent = '';
+    if (diskWorkspace?.attached && !diskWorkspace.readOnly) {
+      try {
+        const res = (await api('/api/sql/files', { path: rel, content: initialContent })) as {
+          file?: DiskSqlFile;
+          workspace?: DiskWorkspaceState;
+        };
+        if (res?.workspace) setDiskWorkspace(res.workspace);
+        openFileTab('disk', res?.file?.path ?? rel, initialContent);
+        toast(say('fileSaved', { path: res?.file?.path ?? rel }), 'ok');
+        return;
+      } catch (err) {
+        toast((err as Error).message, 'bad');
+        return;
+      }
+    }
+    const updated = upsertImportedFile(scopeKey, rel, initialContent);
+    setBrowserFiles(updated);
+    openFileTab('browser', rel, initialContent);
+    toast(say('fileSaved', { path: rel }), 'ok');
+  };
+
+  const handleFolderImport = async (e: ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList || !fileList.length) return;
+    const sqlFiles = [...fileList].filter((f) => f.name.toLowerCase().endsWith('.sql'));
+    e.target.value = '';
+    if (!sqlFiles.length) {
+      toast(say('noSqlFilesInFolder'), 'bad');
+      return;
+    }
+    const loaded = await Promise.all(
+      sqlFiles.map(async (file) => ({
+        path: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name,
+        content: await file.text(),
+      })),
+    );
+    const { files, added } = importSqlFiles(scopeKey, loaded);
+    setBrowserFiles(files);
+    toast(say('importedFilesToast', { count: added }), 'ok');
+  };
+
+  const removeDiskFile = async (relPath: string) => {
+    try {
+      const res = (await api('/api/sql/files/delete', { path: relPath })) as { workspace?: DiskWorkspaceState };
+      if (res?.workspace) setDiskWorkspace(res.workspace);
+      toast(say('fileDeleted', { path: relPath }), 'ok');
+      const tabId = `disk:${relPath}`;
+      if (tabs.some((t) => t.id === tabId)) closeTab(tabId);
+    } catch (err) {
+      toast((err as Error).message, 'bad');
+    }
+  };
+
+  const removeBrowserFile = (relPath: string) => {
+    const next = deleteImportedFile(scopeKey, relPath);
+    setBrowserFiles(next);
+    toast(say('fileDeleted', { path: relPath }), 'ok');
+    const tabId = `browser:${relPath}`;
+    if (tabs.some((t) => t.id === tabId)) closeTab(tabId);
+  };
+
+  // Multi-statement & caret awareness
+  const statements = useMemo(() => splitSqlStatements(editorText, dialect), [editorText, dialect]);
+  const activeStmt = useMemo(() => statementAtOffset(editorText, caret.start, dialect), [editorText, caret.start, dialect]);
+  const selectedText = caret.end > caret.start ? editorText.slice(caret.start, caret.end).trim() : '';
+
+  const resolveExecutionSql = (rawFullText: string): string => {
+    const sel =
+      input.current && input.current.selectionEnd > input.current.selectionStart
+        ? rawFullText.slice(input.current.selectionStart, input.current.selectionEnd).trim()
+        : '';
+    let target = sel;
+    if (!target) {
+      const stmts = splitSqlStatements(rawFullText, dialect);
+      if (stmts.length >= 2) {
+        const pos = input.current?.selectionStart ?? rawFullText.length;
+        const at = statementAtOffset(rawFullText, pos, dialect);
+        target = at ? at.text : rawFullText.trim();
+      } else {
+        target = rawFullText.trim();
+      }
+    }
+    return substituteSqlParameters(target, paramValues, dialect);
+  };
+
+  const activeParams = useMemo(() => {
+    const inspectText = selectedText || (statements.length >= 2 && activeStmt ? activeStmt.text : editorText);
+    return extractSqlParameters(inspectText, dialect);
+  }, [selectedText, statements.length, activeStmt, editorText, dialect]);
+
+  const updateParamValue = (name: string, val: string) => {
+    setParamValues((prev) => {
+      const next = { ...prev, [name]: val };
+      saveParamValues(scopeKey, next);
+      return next;
+    });
   };
 
   /**
@@ -189,15 +552,24 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
     try {
       data = await api('/api/sql', { text: statement, limit: 500, write });
     } catch (err) {
-      setOutcome({ kind: 'error', message: (err as Error).message });
+      const msg = (err as Error).message;
+      setHistoryEntries(recordHistory(scopeKey, { sql: statement, ms: 0, ok: false, error: msg, connectionName: activeConn?.name }));
+      setOutcome({ kind: 'error', message: msg });
       return;
     }
     if (data.errors?.length) {
-      setOutcome({ kind: 'error', message: data.errors[0].message });
+      const msg = data.errors[0].message;
+      setHistoryEntries(
+        recordHistory(scopeKey, { sql: statement, ms: data.ms ?? 0, ok: false, error: msg, connectionName: activeConn?.name }),
+      );
+      setOutcome({ kind: 'error', message: msg });
       return;
     }
     if (write) {
       const affected = data.affected ?? 0;
+      setHistoryEntries(
+        recordHistory(scopeKey, { sql: statement, ms: data.ms ?? 0, ok: true, affected, connectionName: activeConn?.name }),
+      );
       toast(`${say('rows', { count: affected })} changed.`, 'ok');
       setOutcome({ kind: 'written', affected });
       // The schema, cached lists/records, and the Undo barrier entry may all have moved.
@@ -207,12 +579,53 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
       render();
       return;
     }
+    setHistoryEntries(
+      recordHistory(scopeKey, {
+        sql: statement,
+        ms: data.ms ?? 0,
+        ok: true,
+        rowCount: data.rows?.length ?? 0,
+        connectionName: activeConn?.name,
+      }),
+    );
     setOutcome({ kind: 'rows', data });
   };
-  const run = () => void execute(input.current?.value ?? '');
+
+  const run = () => {
+    const raw = input.current?.value ?? editorText;
+    const sql = resolveExecutionSql(raw);
+    void execute(sql);
+  };
+
+  const runScript = async () => {
+    const raw = (input.current?.value ?? editorText).trim();
+    if (!raw) return;
+    const bound = substituteSqlParameters(raw, paramValues, dialect);
+    setOutcome({ kind: 'running' });
+    try {
+      const data = (await api('/api/sql/script', { text: bound, limit: 500, write: false })) as ScriptResultPayload & { error?: string };
+      if (data.error || !Array.isArray(data.statements)) {
+        setOutcome({ kind: 'error', message: data.error ?? say('compareEnvsFailed') });
+        return;
+      }
+      const hadError = data.stoppedAt !== undefined;
+      setHistoryEntries(
+        recordHistory(scopeKey, {
+          sql: raw,
+          ms: data.totalMs ?? 0,
+          ok: !hadError,
+          ...(hadError ? { error: data.statements[data.statements.length - 1]?.error } : {}),
+          connectionName: activeConn?.name,
+        }),
+      );
+      setOutcome({ kind: 'script', data });
+    } catch (err) {
+      setOutcome({ kind: 'error', message: (err as Error).message });
+    }
+  };
 
   const explainStatement = async () => {
-    const statement = (input.current?.value ?? '').trim();
+    const statement = resolveExecutionSql(input.current?.value ?? editorText);
     if (!statement) return;
     setOutcome({ kind: 'running' });
     try {
@@ -242,7 +655,7 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
   };
 
   const verifyDdlStatement = async () => {
-    const statement = (input.current?.value ?? '').trim();
+    const statement = substituteSqlParameters((input.current?.value ?? editorText).trim(), paramValues, dialect);
     if (!statement) return;
     setOutcome({ kind: 'running' });
     try {
@@ -272,7 +685,7 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
   };
 
   const save = async () => {
-    const statement = (input.current?.value ?? '').trim();
+    const statement = (input.current?.value ?? editorText).trim();
     if (!statement) return;
     const name = await promptFor({
       title: say('nameThisStatement'),
@@ -288,10 +701,11 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
   };
 
   const compareAcrossEnvs = async () => {
-    const statement = (input.current?.value ?? '').trim();
+    const statement = resolveExecutionSql(input.current?.value ?? editorText);
     if (!statement) return;
     setOutcome({ kind: 'running' });
     setFanoutIdx(0);
+    setFanoutDiffOpen(false);
     try {
       const reply = (await api('/api/agent/call', {
         name: 'sql',
@@ -349,7 +763,284 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
 
   const saved = savedStatements() as Statement[];
   const hasSiblingEnvs = Boolean(activeConn && activeGroup && activeGroup.environments.length > 1);
+  const isFileTab = Boolean(activeTab?.filePath);
+  const activeRange = statements.length >= 2 && activeStmt && !selectedText ? { start: activeStmt.start, end: activeStmt.end } : null;
   void savedVersion;
+
+  const editorAndResults = (
+    <Resizable
+      className="sql-split"
+      direction="vertical"
+      ariaLabel={say('sqlWorkspaceSplit')}
+      panels={[
+        {
+          label: say('sqlStatement'),
+          defaultSize: 38,
+          minSize: 15,
+          children: (
+            <div className="sql-editor">
+              {tabs.length > 1 || statements.length >= 2 || selectedText ? (
+                <div className="sql-tabs-bar" role="tablist" aria-label={say('consoleTabsLabel')}>
+                  {tabs.map((tab) => {
+                    const isCurrent = tab.id === activeTabId;
+                    const dirty = tab.kind !== 'console' && tab.text !== tab.savedText;
+                    return (
+                      <span key={tab.id} className={`sql-console-tab${isCurrent ? ' active' : ''}`}>
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={isCurrent}
+                          className="sql-console-tab-btn"
+                          title={tab.filePath ?? tab.title}
+                          onClick={() => switchTab(tab.id)}
+                        >
+                          {tab.title}
+                          {dirty ? <span className="sql-console-tab-dirty"> •</span> : null}
+                        </button>
+                        {tabs.length > 1 ? (
+                          <button
+                            type="button"
+                            className="sql-console-tab-close"
+                            aria-label={say('closeTab', { title: tab.title })}
+                            onClick={() => closeTab(tab.id)}
+                          >
+                            ×
+                          </button>
+                        ) : null}
+                      </span>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    className="sql-tab-add"
+                    title={say('newConsoleTab')}
+                    aria-label={say('newConsoleTab')}
+                    onClick={addConsoleTab}
+                  >
+                    +
+                  </button>
+                  {selectedText ? (
+                    <span className="sql-caret-badge">{say('runSelectionHint', { count: selectedText.length })}</span>
+                  ) : statements.length >= 2 && activeStmt ? (
+                    <span className="sql-caret-badge">
+                      {say('statementAtCaret', { index: activeStmt.index + 1, total: statements.length })}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+              <SqlCodeEditor
+                inputRef={input}
+                value={editorText}
+                defaultValue={draft}
+                dialect={dialect}
+                ariaLabel={say('sqlStatement')}
+                placeholder={say('selectFromCustomerWhere')}
+                activeRange={activeRange}
+                onValueChange={(next) => updateActiveTabText(next, false)}
+                onCaretChange={(start, end) => setCaret({ start, end })}
+                onRunShortcut={run}
+                onSaveShortcut={() => void saveActiveFile()}
+              />
+              {activeParams.length > 0 ? (
+                <div className="sql-params-bar" role="region" aria-label={say('parametersLabel')}>
+                  <span className="sql-params-title">{say('parametersLabel')}</span>
+                  {activeParams.map((param) => (
+                    <label key={param} className="sql-param-field">
+                      <span className="sql-param-name">{`:${param}`}</span>
+                      <input
+                        type="text"
+                        className="sql-param-input"
+                        aria-label={param}
+                        placeholder={say('parameterPlaceholder', { name: param })}
+                        value={paramValues[param] ?? ''}
+                        onChange={(e) => updateParamValue(param, e.currentTarget.value)}
+                      />
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ),
+        },
+        {
+          label: say('sqlResultsPane'),
+          defaultSize: 62,
+          minSize: 20,
+          children: (
+            <div className="sql-results">
+              <Results
+                outcome={outcome}
+                fanoutIdx={fanoutIdx}
+                fanoutDiffOpen={fanoutDiffOpen}
+                onToggleFanoutDiff={() => setFanoutDiffOpen((v) => !v)}
+                onSelectFanout={(idx) => {
+                  setFanoutIdx(idx);
+                  setFanoutDiffOpen(false);
+                }}
+                onClose={onClose}
+              />
+            </div>
+          ),
+        },
+      ]}
+    />
+  );
+
+  const sidebarPanel = (
+    <aside className="sql-sidebar" aria-label={say('sqlSidebarPane')}>
+      <input ref={folderInputRef} type="file" multiple accept=".sql" hidden onChange={(e) => void handleFolderImport(e)} />
+      <div className="sql-sidebar-tabs">
+        <Tabs
+          variant="pills"
+          ariaLabel={say('sidebarTabsLabel')}
+          value={sidebarTab}
+          onValueChange={(v) => setSidebarTab(v as 'files' | 'history')}
+          tabs={[
+            { value: 'files', label: say('sidebarTabFiles') },
+            { value: 'history', label: say('sidebarTabHistory') },
+          ]}
+        />
+      </div>
+      {sidebarTab === 'files' ? (
+        <>
+          <div className="sql-sidebar-actions">
+            <Button size="sm" title={say('newSqlFilePrompt')} onClick={() => void createNewSqlFile()}>
+              {say('newSqlFile')}
+            </Button>
+            <Button size="sm" title={say('importFolderTitle')} onClick={() => folderInputRef.current?.click()}>
+              {say('importFolder')}
+            </Button>
+            <Button size="sm" title={say('attachFolderTitle')} onClick={() => void attachFolder()}>
+              {say('attachFolder')}
+            </Button>
+          </div>
+          <div className="sql-sidebar-scroll">
+            {diskWorkspace?.attached ? (
+              <div className="sql-tree-section">
+                <div className="sql-tree-head">
+                  <span title={diskWorkspace.rootPath ?? undefined}>
+                    {say('workspaceDiskHeading', { name: diskWorkspace.rootName ?? '' })}
+                  </span>
+                  {!diskWorkspace.readOnly ? (
+                    <button type="button" className="sql-tool-btn" onClick={() => void detachFolder()}>
+                      {say('detachFolder')}
+                    </button>
+                  ) : null}
+                </div>
+                {groupFilesByFolder(diskWorkspace.files).map(([folder, items]) => (
+                  <div key={`disk-folder:${folder}`}>
+                    <div className="sql-tree-folder">{folder || say('rootFolder')}</div>
+                    {items.map((file) => {
+                      const isOpen = activeTabId === `disk:${file.path}`;
+                      return (
+                        <div key={file.path} className={`sql-tree-row${isOpen ? ' active' : ''}`}>
+                          <button type="button" className="sql-tree-file" title={file.path} onClick={() => void openDiskFile(file.path)}>
+                            {file.name}
+                          </button>
+                          {!diskWorkspace.readOnly ? (
+                            <button
+                              type="button"
+                              className="sql-tree-del"
+                              aria-label={say('deleteFile', { path: file.path })}
+                              onClick={() => void removeDiskFile(file.path)}
+                            >
+                              ×
+                            </button>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {browserFiles.length > 0 ? (
+              <div className="sql-tree-section">
+                <div className="sql-tree-head">
+                  <span>{say('workspaceBrowserHeading')}</span>
+                  <button
+                    type="button"
+                    className="sql-tool-btn"
+                    onClick={() => {
+                      clearImportedFiles(scopeKey);
+                      setBrowserFiles([]);
+                    }}
+                  >
+                    {say('clearImported')}
+                  </button>
+                </div>
+                {groupFilesByFolder(browserFiles).map(([folder, items]) => (
+                  <div key={`browser-folder:${folder}`}>
+                    <div className="sql-tree-folder">{folder || say('rootFolder')}</div>
+                    {items.map((file) => {
+                      const isOpen = activeTabId === `browser:${file.path}`;
+                      return (
+                        <div key={file.path} className={`sql-tree-row${isOpen ? ' active' : ''}`}>
+                          <button
+                            type="button"
+                            className="sql-tree-file"
+                            title={file.path}
+                            onClick={() => openFileTab('browser', file.path, file.content)}
+                          >
+                            {file.name}
+                          </button>
+                          <button
+                            type="button"
+                            className="sql-tree-del"
+                            aria-label={say('deleteFile', { path: file.path })}
+                            onClick={() => removeBrowserFile(file.path)}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {!diskWorkspace?.attached && browserFiles.length === 0 ? <p className="sql-sidebar-empty">{say('workspaceEmpty')}</p> : null}
+          </div>
+        </>
+      ) : (
+        <div className="sql-sidebar-scroll">
+          {historyEntries.length > 0 ? (
+            <>
+              <div className="sql-tree-head">
+                <span>{say('sidebarTabHistory')}</span>
+                <button
+                  type="button"
+                  className="sql-tool-btn"
+                  onClick={() => {
+                    clearHistory(scopeKey);
+                    setHistoryEntries([]);
+                  }}
+                >
+                  {say('clearHistory')}
+                </button>
+              </div>
+              {historyEntries.map((item) => (
+                <button key={item.id} type="button" className="sql-history-item" title={item.sql} onClick={() => setText(item.sql)}>
+                  <span className="sql-history-sql">{item.sql}</span>
+                  <span className="sql-history-meta">
+                    <span className={`sql-history-dot${item.ok ? '' : ' is-err'}`} aria-hidden="true" />
+                    <span>{say('msMs', { ms: item.ms })}</span>
+                    {item.rowCount !== undefined ? <span>{say('rows', { count: item.rowCount })}</span> : null}
+                    {item.connectionName ? <span>{item.connectionName}</span> : null}
+                  </span>
+                </button>
+              ))}
+            </>
+          ) : (
+            <p className="sql-sidebar-empty">{say('historyEmpty')}</p>
+          )}
+        </div>
+      )}
+    </aside>
+  );
+
   return (
     <>
       <div
@@ -395,13 +1086,16 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
           ) : null}
         </div>
         <div className="sql-head-actions">
+          <Button aria-pressed={sidebarOpen} title={say('filesToggleTitle')} onClick={() => setSidebarOpen((open) => !open)}>
+            {say('filesToggle')}
+          </Button>
           {/* Offered only where the server would allow it. A button that exists to be refused is a button that lies. */}
           {writable ? (
             <Button
               className="sql-write"
               title={say('runThisStatementOnTheWrite')}
               onClick={() => {
-                const text = (input.current?.value ?? '').trim();
+                const text = resolveExecutionSql(input.current?.value ?? editorText);
                 if (text) setPendingWrite(text);
               }}
             >
@@ -423,10 +1117,19 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
               </Button>
             </>
           ) : null}
-          <Button title={say('keepThisStatementUnder')} onClick={() => void save()}>
-            {say('save')}
-          </Button>
-          <Button intent="primary" onClick={run}>
+          {isFileTab ? (
+            <Button onClick={() => void saveActiveFile()}>{say('saveFile')}</Button>
+          ) : (
+            <Button title={say('keepThisStatementUnder')} onClick={() => void save()}>
+              {say('save')}
+            </Button>
+          )}
+          {statements.length >= 2 ? (
+            <Button title={say('runScriptTitle')} onClick={() => void runScript()}>
+              {say('runScript', { count: statements.length })}
+            </Button>
+          ) : null}
+          <Button variant="primary" onClick={run}>
             {say('run')}
           </Button>
           <Button onClick={onClose}>{say('common.done')}</Button>
@@ -464,32 +1167,19 @@ export function SqlPane({ draft, onDraft, onSwitchConnection, onClose }: SqlPane
       ) : (
         <div hidden />
       )}
-      <div className="sql-editor">
-        <textarea
-          ref={input}
-          className="sql-input"
-          spellCheck={false}
-          autoCapitalize="off"
-          autoComplete="off"
-          aria-label={say('sqlStatement')}
-          placeholder={say('selectFromCustomerWhere')}
-          defaultValue={draft}
-          onInput={(e) => {
-            onDraft(e.currentTarget.value);
-            autoGrow(e.currentTarget);
-          }}
-          onKeyDown={(e) => {
-            // ⌘↵ runs. Plain Enter is a newline: a box where Enter submits is a box you cannot write two lines in.
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              run();
-            }
-          }}
+      {sidebarOpen ? (
+        <Resizable
+          className="sql-main-split"
+          direction="horizontal"
+          ariaLabel={say('sqlMainSplit')}
+          panels={[
+            { label: say('sqlSidebarPane'), defaultSize: 24, minSize: 15, children: sidebarPanel },
+            { label: say('sqlWorkspaceSplit'), defaultSize: 76, minSize: 45, children: editorAndResults },
+          ]}
         />
-      </div>
-      <div className="sql-results">
-        <Results outcome={outcome} fanoutIdx={fanoutIdx} onSelectFanout={setFanoutIdx} onClose={onClose} />
-      </div>
+      ) : (
+        editorAndResults
+      )}
       {pendingWrite !== null && (
         <WriteConfirm
           statement={pendingWrite}
@@ -537,6 +1227,48 @@ function PlanResult({ lines, ms }: { lines: string[]; ms: number }) {
             ) : tone === 'ok' ? (
               <span className="sql-plan-tag tone-ok">{say('indexSeekBadge')}</span>
             ) : null}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function ScriptResultView({ data, onClose }: { data: ScriptResultPayload; onClose: () => void }) {
+  const succeeded = data.statements.filter((s) => s.ok).length;
+  return (
+    <>
+      <div className="sql-stats">
+        <span>{say('scriptSummary', { succeeded, total: data.totalStatements })}</span>
+        <span>{say('msMs', { ms: data.totalMs })}</span>
+        {data.stoppedAt !== undefined ? <span className="sql-truncated">{say('scriptStopped', { index: data.stoppedAt + 1 })}</span> : null}
+      </div>
+      <div className="sql-script-list">
+        {data.statements.map((stmt) => (
+          <div key={stmt.index} className={`sql-script-card${stmt.ok ? '' : ' is-err'}`}>
+            <div className="sql-script-card-head">
+              <strong>{say('scriptStmtHeading', { index: stmt.index + 1, start: stmt.startLine, end: stmt.endLine })}</strong>
+              <span className="sql-script-sql">{stmt.sql}</span>
+              <span className="sql-fanout-meta">{say('msMs', { ms: stmt.ms })}</span>
+            </div>
+            {!stmt.ok ? (
+              <p className="sql-error" role="alert">
+                {stmt.error}
+              </p>
+            ) : stmt.columns ? (
+              <RowsResult
+                data={{
+                  columns: stmt.columns,
+                  rows: stmt.rows ?? [],
+                  ms: stmt.ms,
+                  truncated: stmt.truncated,
+                  bounded: stmt.bounded,
+                }}
+                onClose={onClose}
+              />
+            ) : (
+              <p className="note">{say('scriptAffected', { count: stmt.affected ?? 0 })}</p>
+            )}
           </div>
         ))}
       </div>
@@ -624,14 +1356,91 @@ function normalizeFanoutSqlResult(entry: FanoutEnvEntry): SqlResult | null {
   };
 }
 
+function FanoutDiffView({
+  leftLabel,
+  rightLabel,
+  left,
+  right,
+}: {
+  leftLabel: string;
+  rightLabel: string;
+  left: SqlResult;
+  right: SqlResult;
+}) {
+  const diff = useMemo(
+    () => diffResultSets({ columns: left.columns, rows: left.rows }, { columns: right.columns, rows: right.rows }),
+    [left, right],
+  );
+  const changed = diff.rows.filter((r) => r.status === 'changed').length;
+  const added = diff.rows.filter((r) => r.status === 'added').length;
+  const removed = diff.rows.filter((r) => r.status === 'removed').length;
+
+  return (
+    <div className="sql-diff-wrap">
+      <div className="sql-stats">
+        <span>
+          {diff.keyColumn
+            ? say('diffHeader', { left: leftLabel, right: rightLabel, key: diff.keyColumn })
+            : say('diffNoKey', { left: leftLabel, right: rightLabel })}
+        </span>
+        <span>
+          {diff.rows.length === 0
+            ? say('diffIdentical', { count: diff.unchangedCount, left: leftLabel, right: rightLabel })
+            : say('diffSummary', { changed, added, removed, unchanged: diff.unchangedCount })}
+        </span>
+      </div>
+      {diff.rows.length > 0 ? (
+        <table className="sql-diff-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              {diff.columns.map((col) => (
+                <th key={col}>{col}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {diff.rows.map((row, idx) => (
+              <tr key={`${row.status}:${row.key}:${idx}`} className={`sql-diff-row-${row.status}`}>
+                <td>
+                  {row.status === 'added'
+                    ? say('diffStatusAdded')
+                    : row.status === 'removed'
+                      ? say('diffStatusRemoved')
+                      : say('diffStatusChanged')}
+                </td>
+                {diff.columns.map((col) => {
+                  const isChanged = row.status === 'changed' && row.diffColumns.includes(col);
+                  const lv = row.left?.[col];
+                  const rv = row.right?.[col];
+                  const fmt = (v: unknown) => (v === null || v === undefined ? 'null' : String(v));
+                  return (
+                    <td key={col} className={isChanged ? 'sql-diff-cell-changed' : undefined}>
+                      {isChanged ? `${fmt(lv)} → ${fmt(rv)}` : row.status === 'removed' ? fmt(lv) : fmt(rv)}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+    </div>
+  );
+}
+
 function Results({
   outcome,
   fanoutIdx,
+  fanoutDiffOpen,
+  onToggleFanoutDiff,
   onSelectFanout,
   onClose,
 }: {
   outcome: Outcome;
   fanoutIdx: number;
+  fanoutDiffOpen: boolean;
+  onToggleFanoutDiff: () => void;
   onSelectFanout: (idx: number) => void;
   onClose: () => void;
 }) {
@@ -650,6 +1459,8 @@ function Results({
       return <p className="note">{`${say('rows', { count: outcome.affected })} changed.`}</p>;
     case 'rows':
       return <RowsResult data={outcome.data} onClose={onClose} />;
+    case 'script':
+      return <ScriptResultView data={outcome.data} onClose={onClose} />;
     case 'plan':
       return <PlanResult lines={outcome.lines} ms={outcome.ms} />;
     case 'ddl':
@@ -657,32 +1468,56 @@ function Results({
     case 'fanout': {
       const picked = outcome.entries[fanoutIdx] ?? outcome.entries[0];
       const normalized = picked ? normalizeFanoutSqlResult(picked) : null;
+      const activeKey = picked?.connection ?? outcome.entries[0]?.connection ?? '';
+      const okPairs = outcome.entries
+        .map((entry) => ({ entry, data: normalizeFanoutSqlResult(entry) }))
+        .filter((item): item is { entry: FanoutEnvEntry; data: SqlResult } => Boolean(item.data && !item.data.errors?.length));
+      const canDiff = okPairs.length >= 2;
+
       return (
         <>
-          <div className="sql-fanout-tabs" role="tablist">
-            {outcome.entries.map((entry, idx) => {
-              const rowCount = entry.ok ? (entry.result?.rows?.length ?? 0) : null;
-              return (
-                <button
-                  key={entry.connection}
-                  type="button"
-                  role="tab"
-                  aria-selected={idx === fanoutIdx}
-                  className={`sql-fanout-tab${idx === fanoutIdx ? ' active' : ''}`}
-                  onClick={() => onSelectFanout(idx)}
-                >
-                  <span className={`env-pill compact tone-${entry.tier}`}>
-                    <span className="env-pill-dot" aria-hidden="true" />
-                    <span>{entry.env ?? entry.name}</span>
-                  </span>
-                  <span className="sql-fanout-meta">
-                    {entry.ok ? `${say('rows', { count: rowCount ?? 0 })} · ${say('msMs', { ms: entry.ms })}` : say('fanoutErrorBadge')}
-                  </span>
-                </button>
-              );
-            })}
+          <div className="sql-fanout-bar">
+            <Tabs
+              className="sql-fanout-tabs"
+              variant="pills"
+              ariaLabel={say('fanoutTabsLabel')}
+              value={activeKey}
+              onValueChange={(connKey) => {
+                const idx = outcome.entries.findIndex((entry) => entry.connection === connKey);
+                if (idx >= 0) onSelectFanout(idx);
+              }}
+              tabs={outcome.entries.map((entry) => {
+                const rowCount = entry.ok ? (entry.result?.rows?.length ?? 0) : null;
+                return {
+                  value: entry.connection,
+                  label: (
+                    <span className="sql-fanout-tab-label">
+                      <span className={`env-pill compact tone-${entry.tier}`}>
+                        <span className="env-pill-dot" aria-hidden="true" />
+                        <span>{entry.env ?? entry.name}</span>
+                      </span>
+                      <span className="sql-fanout-meta">
+                        {entry.ok ? `${say('rows', { count: rowCount ?? 0 })} · ${say('msMs', { ms: entry.ms })}` : say('fanoutErrorBadge')}
+                      </span>
+                    </span>
+                  ),
+                };
+              })}
+            />
+            {canDiff ? (
+              <Button size="sm" onClick={onToggleFanoutDiff}>
+                {fanoutDiffOpen ? say('diffEnvsActive') : say('diffEnvs')}
+              </Button>
+            ) : null}
           </div>
-          {!picked ? null : !picked.ok ? (
+          {fanoutDiffOpen && canDiff ? (
+            <FanoutDiffView
+              leftLabel={okPairs[0].entry.env ?? okPairs[0].entry.name}
+              rightLabel={okPairs[1].entry.env ?? okPairs[1].entry.name}
+              left={okPairs[0].data}
+              right={okPairs[1].data}
+            />
+          ) : !picked ? null : !picked.ok ? (
             <p className="sql-error" role="alert">
               {picked.error ?? say('compareEnvsFailed')}
             </p>
@@ -721,12 +1556,35 @@ function RowsResult({ data, onClose }: { data: SqlResult; onClose: () => void })
   const target = walkableTable(data.columns);
   /* The wire format is positional so duplicate names survive the trip; rebuilt as objects here. */
   const rows = data.rows.map((row) => Object.fromEntries(data.columns.map((name, i) => [name, row[i]])));
+  const aggregates = useMemo(() => computeColumnAggregates(data.columns, data.rows).slice(0, 4), [data.columns, data.rows]);
   const open = (row: Record<string, unknown>) => {
     const key: Record<string, unknown> = {};
     for (const column of target!.columns.filter((c) => c.primaryKey)) key[column.name] = row[column.name];
     onClose();
     go({ kind: 'row', table: target!.id, key, label: String(Object.values(key).join('/')) }, 'reset');
   };
+
+  const copyAs = async (format: ResultExportFormat, label: string) => {
+    const formatted = formatResultExport(data.columns, data.rows, format, target?.name ?? 'results');
+    try {
+      await navigator.clipboard.writeText(formatted);
+      toast(say('copiedFormat', { format: label }), 'ok');
+    } catch {
+      toast(say('copyFailed'), 'bad');
+    }
+  };
+
+  const downloadCsv = () => {
+    const csv = formatResultExport(data.columns, data.rows, 'csv', target?.name ?? 'results');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${target?.name ?? 'sql-result'}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <>
       <div className="sql-stats">
@@ -738,6 +1596,28 @@ function RowsResult({ data, onClose }: { data: SqlResult; onClose: () => void })
             {data.bounded
               ? say('firstAddALimit', { rowsCount: data.rows.length })
               : say('firstOfWhatTheDatabase', { rowsCount: data.rows.length })}
+          </span>
+        ) : null}
+        {data.rows.length > 0 ? (
+          <span className="sql-result-tools">
+            <button type="button" className="sql-tool-btn" onClick={() => void copyAs('csv', say('copyCsv'))}>
+              {say('copyCsv')}
+            </button>
+            <button type="button" className="sql-tool-btn" onClick={() => void copyAs('json', say('copyJson'))}>
+              {say('copyJson')}
+            </button>
+            <button type="button" className="sql-tool-btn" onClick={() => void copyAs('markdown', say('copyMarkdown'))}>
+              {say('copyMarkdown')}
+            </button>
+            <button type="button" className="sql-tool-btn" onClick={() => void copyAs('insert', say('copyInsert'))}>
+              {say('copyInsert')}
+            </button>
+            <button type="button" className="sql-tool-btn" onClick={() => void copyAs('in', say('copyIn'))}>
+              {say('copyIn')}
+            </button>
+            <button type="button" className="sql-tool-btn" onClick={downloadCsv}>
+              {say('downloadCsv')}
+            </button>
           </span>
         ) : null}
       </div>
@@ -764,6 +1644,21 @@ function RowsResult({ data, onClose }: { data: SqlResult; onClose: () => void })
                 interactive={false}
               />
             </div>
+            {aggregates.length > 0 ? (
+              <div className="sql-agg-footer">
+                {aggregates.map((agg) => (
+                  <span key={agg.column}>
+                    {say('aggregateLabel', {
+                      col: agg.column,
+                      sum: formatCompactNumber(agg.sum),
+                      avg: formatCompactNumber(agg.avg),
+                      min: formatCompactNumber(agg.min),
+                      max: formatCompactNumber(agg.max),
+                    })}
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </>
         )}
       </div>
@@ -797,7 +1692,7 @@ function WriteConfirm({
       <div className="confirm-actions">
         <Button onClick={() => dialog.current?.close()}>{say('common.cancel')}</Button>
         <Button
-          intent="danger"
+          variant="danger"
           onClick={() => {
             dialog.current?.close();
             onRun();

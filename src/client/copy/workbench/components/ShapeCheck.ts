@@ -61,4 +61,7 @@ export const say = defineMessages({
   copyMigrationSql: 'Copy migration SQL',
   copiedMigrationSql: 'Copied migration SQL',
   verifyInSql: 'Verify in SQL',
+  tabsAriaLabel: 'Diagnostic views',
+  perfChartHeading: 'Findings distribution',
+  anomaliesChartHeading: 'Outlier rows by finding',
 });

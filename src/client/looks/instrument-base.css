@@ -1,12 +1,12 @@
-/* Instrument's structure, shared by the browser's own look and Instrument's palettes (native.css imports it).
+/* Instrument's structure, shared by Instrument's palettes (instrument.css imports it on demand).
 
    What is not colour: the figures' face (IBM Plex Mono, self-hosted by the kit's faces.css), the per-mode shadows, the
-   hairline measuring grid, the record readout, the schema's graticule. Scoped to the native look (no host look worn)
-   and to each Instrument palette, so a palette's sheet carries colour alone. The look's idea is told in native.css. */
+   hairline measuring grid, the record readout, the schema's graticule. Scoped to each Instrument palette so it only
+   loads and applies when an Instrument look is worn. */
 
 @layer theme {
-  /* What every palette shares: the figures' face and, per mode, the shadows (a palette is colour only). */
-  :root:is(:not([data-host-look], [data-visual-theme]), [data-host-look^='instrument-']) {
+  /* What every Instrument palette shares: the figures' face and, per mode, the shadows (a palette is colour only). */
+  :root[data-host-look^='instrument-'] {
     --figures: 'IBM Plex Mono', var(--code);
     --shadow-pop: 0 1px 2px rgb(16 20 28 / 0.06), 0 8px 24px rgb(16 20 28 / 0.1);
     --shadow-panel: 0 1px 2px rgb(16 20 28 / 0.06), 0 12px 32px rgb(16 20 28 / 0.12);
@@ -14,21 +14,21 @@
     --scrim: rgb(16 20 28 / 0.32);
   }
   @media (prefers-color-scheme: dark) {
-    :root:is(:not([data-host-look], [data-visual-theme]), [data-host-look^='instrument-']):not([data-theme='light']) {
+    :root[data-host-look^='instrument-']:not([data-theme='light']) {
       --shadow-pop: 0 0 0 1px rgb(0 0 0 / 0.3), 0 10px 28px rgb(0 0 0 / 0.5);
       --shadow-panel: 0 0 0 1px rgb(0 0 0 / 0.3), 0 14px 36px rgb(0 0 0 / 0.55);
       --shadow-modal: 0 0 0 1px rgb(0 0 0 / 0.35), 0 28px 72px rgb(0 0 0 / 0.65);
       --scrim: rgb(0 0 0 / 0.55);
     }
   }
-  :root:is(:not([data-host-look], [data-visual-theme]), [data-host-look^='instrument-'])[data-theme='dark'] {
+  :root[data-host-look^='instrument-'][data-theme='dark'] {
     --shadow-pop: 0 0 0 1px rgb(0 0 0 / 0.3), 0 10px 28px rgb(0 0 0 / 0.5);
     --shadow-panel: 0 0 0 1px rgb(0 0 0 / 0.3), 0 14px 36px rgb(0 0 0 / 0.55);
     --shadow-modal: 0 0 0 1px rgb(0 0 0 / 0.35), 0 28px 72px rgb(0 0 0 / 0.65);
     --scrim: rgb(0 0 0 / 0.55);
   }
 
-  :root:is(:not([data-host-look], [data-visual-theme]), [data-host-look^='instrument-']) {
+  :root[data-host-look^='instrument-'] {
     /* ---------- the frame: graphite chrome round a white working surface ---------- */
 
     & .sidebar { background: var(--ground); }

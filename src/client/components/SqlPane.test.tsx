@@ -24,9 +24,12 @@ const customer: TableMeta = {
   ] as TableMeta['columns'],
 };
 const calls: Array<Record<string, unknown>> = [];
+const pathCalls: Array<[string, Record<string, unknown> | undefined]> = [];
 const gone: unknown[] = [];
 const toasts: string[] = [];
+const memStore = new Map<string, unknown>();
 let reply: Record<string, unknown> = {};
+let apiRouter: ((path: string, body?: Record<string, unknown>) => Record<string, unknown> | undefined) | null = null;
 vi.mock('@mistriwork/kit/client/core.js', () => ({
   state: {
     activeConnection: 'demo',
@@ -34,9 +37,10 @@ vi.mock('@mistriwork/kit/client/core.js', () => ({
     schema: { label: 'shop', dialect: 'sqlite', tables: [customer], foreignKeys: [] },
     connections: [{ id: 'demo', writable: true }],
   },
-  api: async (_path: string, body: Record<string, unknown>) => {
-    calls.push(body);
-    return reply;
+  api: async (path: string, body?: Record<string, unknown>) => {
+    pathCalls.push([path, body]);
+    if (body !== undefined) calls.push(body);
+    return apiRouter?.(path, body) ?? reply;
   },
   go: (e: unknown, mode: string) => gone.push([e, mode]),
   render: () => {},
@@ -65,8 +69,11 @@ vi.mock('@mistriwork/kit/client/core.js', () => ({
   quote: (v: unknown) => String(v),
   labelColumn: () => null,
   primaryKey: (t: TableMeta) => t.columns.filter((c) => c.primaryKey).map((c) => c.name),
-  loadJson: () => ({}),
-  saveJson: () => true,
+  loadJson: (k: string) => memStore.get(k) ?? {},
+  saveJson: (k: string, v: unknown) => {
+    memStore.set(k, v);
+    return true;
+  },
   viewportBox: (n: Element) => n.getBoundingClientRect(),
 }));
 vi.mock('../sqlcomplete.js', () => ({ sqlSuggestions: () => [], tokenAt: () => ({ word: '', start: 0 }) }));
@@ -107,9 +114,12 @@ function draw(draft = '') {
 afterEach(() => {
   cleanup();
   calls.length = 0;
+  pathCalls.length = 0;
   gone.length = 0;
   toasts.length = 0;
   kept.length = 0;
+  memStore.clear();
+  apiRouter = null;
   refreshedUndo.mockReset();
   advancedSource.mockReset();
   reply = {};
@@ -203,6 +213,7 @@ test('renders sibling environment pills in SQL header and highlights production 
       </QueryClientProvider>,
     );
     expect(screen.getByRole('separator', { name: 'Drag to resize SQL panel' })).toBeInTheDocument();
+    expect(screen.getByRole('separator', { name: 'Resize SQL statement and SQL results' })).toBeInTheDocument();
     const localPill = screen.getByRole('button', { name: 'local' });
     await user.click(localPill);
     expect(onSwitchConnection).toHaveBeenCalledWith('billing-local', 'select count(*) from customer');
@@ -226,6 +237,8 @@ test('renders sibling environment pills in SQL header and highlights production 
     await user.click(screen.getByRole('button', { name: 'Compare envs' }));
     expect(calls).toContainEqual({ name: 'sql', arguments: { statement: 'select count(*) from customer', envs: 'all' } });
     await screen.findByText('1 row · 2 ms');
+    await user.click(screen.getByRole('tab', { name: /prod/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Refused: masked');
 
     reply = {
       structuredContent: {
@@ -284,4 +297,165 @@ test('Verify DDL dry-runs candidate migration SQL and renders structural diff an
   await screen.findByText('Valid dry run · rolled back');
   expect(screen.getByText('+ customer: added account_manager_id')).toBeInTheDocument();
   expect(screen.getByText(/\[high\] customer \(unindexed-fk\)/)).toBeInTheDocument();
+});
+
+test('renders real-time SQL syntax highlighting tokens synchronized with editor text', () => {
+  draw("-- top\nSELECT COUNT(id), 'Ada', :min_credit, 500 FROM customer");
+  const layer = document.querySelector('.sql-highlight-layer');
+  expect(layer).not.toBeNull();
+  expect(layer!.querySelector('.sql-tok-comment')).toHaveTextContent('-- top');
+  expect(layer!.querySelector('.sql-tok-keyword')).toHaveTextContent('SELECT');
+  expect(layer!.querySelector('.sql-tok-function')).toHaveTextContent('COUNT');
+  expect(layer!.querySelector('.sql-tok-string')).toHaveTextContent("'Ada'");
+  expect(layer!.querySelector('.sql-tok-param')).toHaveTextContent(':min_credit');
+  expect(layer!.querySelector('.sql-tok-number')).toHaveTextContent('500');
+});
+
+test('runs statement at caret on Run and runs all statements on Run script', async () => {
+  const user = userEvent.setup();
+  const scriptSql = 'SELECT 1 AS a;\nSELECT 2 AS b;';
+  reply = { columns: ['b'], rows: [[2]], ms: 2 };
+  draw(scriptSql);
+
+  expect(screen.getByText('Statement 2 of 2')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Run script (2)' })).toBeInTheDocument();
+
+  // Caret is at the end (statement 2), so Run executes only statement 2.
+  await user.click(screen.getByRole('button', { name: 'Run ⌘↵' }));
+  await screen.findByText('1 row');
+  expect(calls[0]).toEqual({ text: 'SELECT 2 AS b', limit: 500, write: false });
+
+  // Run script sends full text to /api/sql/script and renders per-statement cards.
+  apiRouter = (path) =>
+    path === '/api/sql/script'
+      ? {
+          totalMs: 4,
+          totalStatements: 2,
+          statements: [
+            { index: 0, sql: 'SELECT 1 AS a', startLine: 1, endLine: 1, ok: true, ms: 2, columns: ['a'], rows: [[1]] },
+            { index: 1, sql: 'SELECT 2 AS b', startLine: 2, endLine: 2, ok: true, ms: 2, columns: ['b'], rows: [[2]] },
+          ],
+        }
+      : reply;
+  await user.click(screen.getByRole('button', { name: 'Run script (2)' }));
+  await screen.findByText('2 of 2 statements ran');
+  expect(screen.getByText('Statement 1 · L1–1')).toBeInTheDocument();
+  expect(screen.getByText('Statement 2 · L2–2')).toBeInTheDocument();
+});
+
+test('extracts inline named parameters and binds them before execution', async () => {
+  const user = userEvent.setup();
+  reply = {
+    columns: ['id', 'credit_limit'],
+    rows: [
+      [1, 100],
+      [2, 300],
+    ],
+    ms: 3,
+  };
+  draw('SELECT id, credit_limit FROM customer WHERE credit_limit >= :min_limit');
+
+  const paramInput = screen.getByRole('textbox', { name: 'min_limit' });
+  await user.type(paramInput, '250');
+  await user.click(screen.getByRole('button', { name: 'Run ⌘↵' }));
+
+  await screen.findByText('2 rows');
+  expect(calls[0]).toEqual({
+    text: 'SELECT id, credit_limit FROM customer WHERE credit_limit >= 250',
+    limit: 500,
+    write: false,
+  });
+  // Numeric aggregate footer appears for credit_limit.
+  expect(screen.getByText(/credit_limit: sum 400 · avg 200 · min 100 · max 300/)).toBeInTheDocument();
+});
+
+test('opens Files workspace sidebar, loads disk .sql files into tabs, and records execution history', async () => {
+  const user = userEvent.setup();
+  apiRouter = (path) => {
+    if (path === '/api/sql/workspace') {
+      return {
+        attached: true,
+        rootName: 'queries',
+        rootPath: '/tmp/queries',
+        readOnly: false,
+        files: [{ path: 'reports/top.sql', folder: 'reports', name: 'top.sql', size: 32, mtimeMs: 1 }],
+      };
+    }
+    if (path.startsWith('/api/sql/files?')) {
+      return { path: 'reports/top.sql', content: 'SELECT id, name FROM customer;' };
+    }
+    return { columns: ['id', 'name'], rows: [[1, 'Ada']], ms: 2 };
+  };
+
+  draw('SELECT 1');
+  await user.click(screen.getByRole('button', { name: 'Files' }));
+  await screen.findByText('Folder: queries');
+  await user.click(screen.getByRole('button', { name: 'top.sql' }));
+
+  const editor = screen.getByRole('combobox', { name: 'SQL statement' }) as HTMLTextAreaElement;
+  expect(editor.value).toBe('SELECT id, name FROM customer;');
+  expect(screen.getByRole('button', { name: 'Save file ⌘S' })).toBeInTheDocument();
+
+  // Execute and verify History tab logs the run.
+  await user.click(screen.getByRole('button', { name: 'Run ⌘↵' }));
+  await screen.findByText('1 row');
+  await user.click(screen.getByRole('tab', { name: 'History' }));
+  expect(await screen.findByText('SELECT id, name FROM customer;')).toBeInTheDocument();
+});
+
+test('supports Diff envs view when Compare envs returns rows from multiple environments', async () => {
+  const user = userEvent.setup();
+  const { state } = await import('@mistriwork/kit/client/core.js');
+  (state as Record<string, unknown>).activeConnection = 'billing-local';
+  (state as Record<string, unknown>).connections = [
+    { id: 'billing-local', name: 'billing-local', writable: true },
+    { id: 'billing-prod', name: 'billing-prod', writable: false },
+  ];
+  try {
+    reply = {
+      structuredContent: {
+        environments: [
+          {
+            connection: 'billing-local',
+            name: 'billing-local',
+            env: 'local',
+            tier: 'local',
+            ok: true,
+            ms: 2,
+            result: {
+              columns: ['id', 'status'],
+              rows: [
+                [1, 'open'],
+                [2, 'paid'],
+              ],
+            },
+          },
+          {
+            connection: 'billing-prod',
+            name: 'billing-prod',
+            env: 'prod',
+            tier: 'prod',
+            ok: true,
+            ms: 4,
+            result: {
+              columns: ['id', 'status'],
+              rows: [
+                [1, 'open'],
+                [2, 'refunded'],
+              ],
+            },
+          },
+        ],
+      },
+    };
+    draw('SELECT id, status FROM invoice');
+    await user.click(screen.getByRole('button', { name: 'Compare envs' }));
+    const diffBtn = await screen.findByRole('button', { name: 'Diff envs' });
+    await user.click(diffBtn);
+    expect(screen.getByText('Comparing local → prod by id')).toBeInTheDocument();
+    expect(screen.getByText('paid → refunded')).toBeInTheDocument();
+  } finally {
+    (state as Record<string, unknown>).activeConnection = 'demo';
+    (state as Record<string, unknown>).connections = [{ id: 'demo', writable: true }];
+  }
 });

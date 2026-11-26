@@ -208,6 +208,7 @@ test('inspects live index & scan health (perf) and explores foreign-key join pat
 
   await user.click(screen.getByRole('tab', { name: 'Index & scan health' }));
   await screen.findByText(/Index idx_invoice_cust \(customer_id\) is a leading prefix/);
+  expect(screen.getByRole('figure', { name: 'Findings distribution' })).toBeInTheDocument();
   expect(screen.getByText('DROP INDEX CONCURRENTLY idx_invoice_cust;')).toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Copy SQL' }));
   expect(await navigator.clipboard.readText()).toBe('DROP INDEX CONCURRENTLY idx_invoice_cust;');

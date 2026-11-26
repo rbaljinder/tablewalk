@@ -165,3 +165,31 @@ test('auto-infers database/environment placeholders from Connection name and sub
     env: 'staging',
   });
 });
+
+test('configures optional PostgreSQL pool timeouts on test and submit, and hides them for SQLite', async () => {
+  const user = userEvent.setup();
+  const run = vi.fn(async () => null);
+  render(<ConnectionDialog title="Add a connection" verb="Add and open" run={run} onClose={() => {}} />);
+  await user.type(screen.getByLabelText('Connection URL or file path'), 'postgres://app@db.example.org/shop');
+  await user.click(screen.getByText('Pool & timeout settings (Postgres)'));
+  await user.type(screen.getByLabelText('Connect timeout (ms)'), '15000');
+  await user.type(screen.getByLabelText('Silent-query timeout (ms)'), '90000');
+  await user.click(screen.getByRole('button', { name: 'Test' }));
+  await screen.findByText('Connected. postgres, 12 tables. Password from keychain.');
+  expect(calls[0]).toEqual([
+    '/api/connections/test',
+    {
+      url: 'postgres://app@db.example.org/shop',
+      name: 'shop',
+      schemas: [],
+      pool: { connectTimeoutMs: 15000, queryTimeoutMs: 90000 },
+    },
+  ]);
+  await user.click(screen.getByRole('button', { name: 'Add and open' }));
+  expect(run).toHaveBeenCalledWith({
+    url: 'postgres://app@db.example.org/shop',
+    name: 'shop',
+    schemas: [],
+    pool: { connectTimeoutMs: 15000, queryTimeoutMs: 90000 },
+  });
+});

@@ -47,4 +47,8 @@ export const say = defineMessages({
   maxRowsTitle: 'Session row budget: at most {max} rows per session.',
   timeoutBadge: '≤ {ms} ms',
   timeoutTitle: 'Per-call statement deadline: {ms} ms.',
+  connectTimeoutBadge: 'connect {ms} ms',
+  connectTimeoutTitle: 'PostgreSQL TCP connect timeout: {ms} ms.',
+  queryTimeoutBadge: 'idle-socket {ms} ms',
+  queryTimeoutTitle: 'PostgreSQL silent-server socket timeout: {ms} ms.',
 });

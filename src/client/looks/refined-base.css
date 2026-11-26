@@ -18,7 +18,7 @@
 @import '@mistriwork/kit/client/fonts/faces.css';
 
 @layer theme {
-  :root:is(:not([data-host-look], [data-visual-theme]), [data-host-look^='instrument-'], [data-host-look='folio']) {
+  :root:is(:not([data-host-look], [data-visual-theme]), [data-host-look^='instrument-']) {
     --face-ui: Inter, 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
     --sans: var(--face-ui);
     /* The kit's seam for a host look's data face (tokens.css): every chrome string the native look set in the code
@@ -29,7 +29,7 @@
     --grid-head-char: 6.8;
   }
 
-  :root:is(:not([data-host-look], [data-visual-theme]), [data-host-look^='instrument-'], [data-host-look='folio']) {
+  :root:is(:not([data-host-look], [data-visual-theme]), [data-host-look^='instrument-']) {
     & body {
       --radius-item: 5px;
       --radius-pop: 8px;

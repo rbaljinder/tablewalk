@@ -121,6 +121,8 @@ export interface ConnectionConfigExtras {
   focus?: unknown;
   focusHops?: unknown;
   focus_hops?: unknown;
+  sqlDir?: unknown;
+  sql_dir?: unknown;
 }
 
 export interface TopLevelConfigExtras {
@@ -136,6 +138,8 @@ export interface TopLevelConfigExtras {
   focus?: unknown;
   focusHops?: unknown;
   focus_hops?: unknown;
+  sqlDir?: unknown;
+  sql_dir?: unknown;
 }
 
 export interface RuntimeConnectionPolicy {
@@ -215,7 +219,9 @@ export function loadConfigEnvMeta(registry: Registry, rawConfigJsonText: string)
     parsed.timeout_ms !== undefined ||
     parsed.focus !== undefined ||
     parsed.focusHops !== undefined ||
-    parsed.focus_hops !== undefined
+    parsed.focus_hops !== undefined ||
+    parsed.sqlDir !== undefined ||
+    parsed.sql_dir !== undefined
   ) {
     setTopLevelConfigExtras(registry, {
       ...(parsed.blocklist !== undefined ? { blocklist: parsed.blocklist } : {}),
@@ -230,6 +236,8 @@ export function loadConfigEnvMeta(registry: Registry, rawConfigJsonText: string)
       ...(parsed.focus !== undefined ? { focus: parsed.focus } : {}),
       ...(parsed.focusHops !== undefined ? { focusHops: parsed.focusHops } : {}),
       ...(parsed.focus_hops !== undefined ? { focus_hops: parsed.focus_hops } : {}),
+      ...(parsed.sqlDir !== undefined ? { sqlDir: parsed.sqlDir } : {}),
+      ...(parsed.sql_dir !== undefined ? { sql_dir: parsed.sql_dir } : {}),
     });
   }
   if (!Array.isArray(parsed.connections)) return;
@@ -256,7 +264,9 @@ export function loadConfigEnvMeta(registry: Registry, rawConfigJsonText: string)
       rec.timeout_ms !== undefined ||
       rec.focus !== undefined ||
       rec.focusHops !== undefined ||
-      rec.focus_hops !== undefined;
+      rec.focus_hops !== undefined ||
+      rec.sqlDir !== undefined ||
+      rec.sql_dir !== undefined;
     if (!database && !env && !hasExtras) continue;
     const match =
       configs.find((c) => c.source === 'config' && c.name === name && !usedIds.has(c.id)) ??
@@ -285,6 +295,8 @@ export function loadConfigEnvMeta(registry: Registry, rawConfigJsonText: string)
           ...(rec.focus !== undefined ? { focus: rec.focus } : {}),
           ...(rec.focusHops !== undefined ? { focusHops: rec.focusHops } : {}),
           ...(rec.focus_hops !== undefined ? { focus_hops: rec.focus_hops } : {}),
+          ...(rec.sqlDir !== undefined ? { sqlDir: rec.sqlDir } : {}),
+          ...(rec.sql_dir !== undefined ? { sql_dir: rec.sql_dir } : {}),
         });
       }
     }

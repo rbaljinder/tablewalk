@@ -43,6 +43,7 @@ Single keys work when the caret is not in a text field, and never through a dial
 | `Enter` | Open the record for that row |
 | `Space` | Glance at that row's record; `j` and `k` step, `Esc` closes it |
 | `⌘C` | Copy the cell under the cursor |
+| `Shift+Click` / Right-click | Open the Cell Inspector and 1-click quick cell filters |
 | `Home` / `End` | First and last column |
 | `Esc` | Back to the query bar |
 
@@ -58,5 +59,7 @@ Single keys work when the caret is not in a text field, and never through a dial
 
 | Key | Does |
 | --- | --- |
-| `⌘↵` | Run the statement |
+| `⌘↵` | Run the selection, or the statement under the caret |
+| `Ctrl+Space` | Open schema, foreign-key `JOIN`, CTE and `:param` autocomplete |
+| `⌘S` | Save the active `.sql` workspace file |
 | `Esc` | Close the editor |

@@ -42,9 +42,13 @@ export const CLIENT = join(ROOT, 'dist/client');
    a tenth of a KB past the rc.15 ceiling, and the ceiling keeps its few KB of headroom.
    They rose again on kit rc.77 (style raw 550_000 to 558_000, brotli 70_000 to 72_000): between rc.65 and rc.77 the
    kit's sheet grew by about 6.5 KB raw (1.8 KB brotli) for rc.66's controls and popup corners and rc.75–rc.76's
-   designed-page parts and touch targets, measuring 538.8 KB raw and 68.7 KB brotli; this package added no CSS. */
+   designed-page parts and touch targets, measuring 538.8 KB raw and 68.7 KB brotli; this package added no CSS.
+   Script raw rose for 1.0.0-rc.25, on kit rc.91 (script raw 1_390_000 to 1_420_000): between rc.77 and rc.91 the kit
+   and UI packages added Tabs, Resizable, Button, Gallery/Lumen looks, and tablewalk added Phase 2 table-grid ergonomics
+   (Cell Inspector, quick cell filters, Column Chooser, Copy Rows As, sticky Grid Aggregates), measuring 1357.6 KB raw
+   and 369.5 KB brotli (style dropped to 532.8 KB raw / 69.2 KB brotli with Folio as the native look). */
 export const BUDGET = {
-  workbench: { script: { raw: 1_390_000, br: 380_000 }, style: { raw: 558_000, br: 72_000 } },
+  workbench: { script: { raw: 1_420_000, br: 380_000 }, style: { raw: 558_000, br: 72_000 } },
 };
 
 /* The chrome's words in a language besides English (src/client/copy/<lang>.ts), one chunk each, which only a reader of

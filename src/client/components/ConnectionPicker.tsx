@@ -70,9 +70,9 @@ export function ConnectionPicker({
           label: conn.name,
           detail: conn.error ? say('unreachableDetail', { detail: conn.detail ?? '' }) : conn.detail,
           badge: conn.env ? `${conn.env}${conn.dialect ? ` · ${conn.dialect}` : ''}` : conn.dialect,
-          tone: conn.error ? 'bad' : undefined,
+          tone: conn.error ? 'critical' : undefined,
         }))}
-        onChange={(id) => {
+        onValueChange={(id) => {
           const picked = connections.find((c) => c.id === id);
           if (activeConn && picked && (picked.database ?? picked.name).toLowerCase() === activeDb) switchSibling(id);
           else onSelect(id);

@@ -14,8 +14,10 @@ Click a table in the sidebar, or type its name in the query bar. The grid shows 
 ![The invoice table queried as "invoice total >= 500 sort total desc", with the query's parts as chips and inline quick filters above the grid](/shots/query.webp?v=3)
 
 - **Quick filters** sit in one compact inline strip above the grid (`Filters` in the tab bar folds or unfolds them to give more vertical room to rows). The parts of the current query show as chips, and **+ Save this filter** keeps it as a view.
-- **A column header** opens a menu: pin the column, sort (tinted in cobalt when active), filter by equals, greater than, less than, between, is empty or is not empty, open **Profile column…** (a floating popover with null share, distinct count, min/max range, and clickable top values that add an equality filter), open **Change impact…** (null count, index status, incoming foreign keys with `ON DELETE` rules, and migration consequences before altering or dropping), or — on a single-column foreign key — pick **Show from `<table>`** (`+ <fk>.<col>`) to pull a referenced column straight into the grid. Columns masked by `"redact": true` or `redactColumns` carry a `masked` pill in the header.
+- **A column header** opens a menu: pin the column, sort (tinted in the look's accent ink when active), filter by equals, greater than, less than, between, is empty or is not empty, open **Profile column…** (a floating popover with null share, distinct count, min/max range, and clickable top values that add an equality filter), open **Change impact…** (null count, index status, incoming foreign keys with `ON DELETE` rules, and migration consequences before altering or dropping), or — on a single-column foreign key — pick **Show from `<table>`** (`+ <fk>.<col>`) to pull a referenced column straight into the grid. Columns masked by `"redact": true` or `redactColumns` carry a `masked` pill in the header.
 - **▸** at the start of a row expands it in place. Click the row to open its record.
+- **Right-click (or `Shift+Click`) any cell** opens the **Cell Inspector** popover: pretty-printed JSON, UTC and local timestamp conversions, UUID inspection, multiline value copy, and 1-click `=`, `!=` and `is empty` quick cell filters.
+- **Columns**, **Copy…** and **Grid aggregates** sit with the result grid: **Columns** searches and jumps straight to any column in wide tables, **Copy…** copies the visible rows as CSV, TSV, JSON, Markdown, `INSERT` statements or a SQL `IN (…)` list, and a sticky footer beneath the grid summarizes numeric columns (`sum`, `avg`, `min`, `max`).
 - **Export** downloads CSV or JSON for this page or for every matching row, or lets you choose the columns first. **Agent: Copy this position** copies the place you are in for a coding agent.
 - The pager sets how many rows a page holds.
 
@@ -68,15 +70,26 @@ Every place has an address in the path, so you can bookmark it or send it to som
 
 A composite key names each part: `/demo/invoice_line/~invoice_id=1001,line_no=2` (the browser shows it percent-encoded). The same list is in the app under `?` → **Links you can write**.
 
+## SQL workbench and `.sql` workspaces
+
+Open the SQL panel (`⌘⇧↵` or the **SQL** button) for raw read-only SQL, write-gated DDL/DML, `EXPLAIN`, and `Verify DDL`:
+
+- **Syntax highlighting and schema-aware autocomplete** — dialect-aware SQL highlighting for PostgreSQL and SQLite, plus `Ctrl+Space` / live completions for tables, columns, aliases, CTEs, foreign-key `JOIN … ON` clauses, named `:params`, and dialect functions (quiet inside strings and comments).
+- **Connection-scoped `.sql` workspaces** — open the **Files** drawer to attach a local `.sql` folder on disk (loopback, or via `--sql-dir` / `"sqlDir"` in `tablewalk.json`) or **Import folder…** straight from the browser, organize files in subfolders, edit multiple console and file tabs with `⌘S` save, and browse per-database execution **History**.
+- **Statement-at-caret, multi-statement scripts and inline parameters** — `⌘↵` executes your selection or the statement under the caret; multi-statement files also offer **Run script**, running statements in sequence and stopping on the first error. Any `:param` or `{{param}}` placeholder opens an inline parameter bar remembered per database.
+- **Result exports, aggregates and environment row diff** — copy raw SQL results as CSV, JSON, Markdown, `INSERT`, or `IN (…)`, download `.csv`, inspect automatic numeric `sum / avg / min / max` aggregates below the grid, and toggle **Diff envs** inside **Compare envs** to see added, removed, and changed rows side by side.
+
 ## Looks and preferences
 
 **Preferences** (`⌘K` or the `···` menu) sets color mode (**Match the system**, **Light** or **Dark**), density, list page sizes, and **Visual theme** (each persisted per browser, with zero extra CSS fetched until a look is worn). You can also open any look directly from a link:
 
-- **Instrument** (`?look=default`, or `?look=instrument&palette=stone`, `slate`, `ink`, `fog`) — the default hairline measuring grid in Inter and IBM Plex Mono.
+- **Folio** (`?look=default` or `?look=folio`) — the default warm archival paper look: printed book-style horizontal tables, quiet near-black actions, deep forest-green foreign-key links, and warm charcoal dark mode.
+- **Instrument** (`?look=instrument`, or `?look=instrument&palette=stone`, `graphite`, `fog`, `slate`, `ink`) — a hairline measuring grid in Inter and IBM Plex Mono, with five selectable palettes including Stone (warm alabaster & emerald teal) and Graphite (cool gray & cobalt).
 - **Braun** (`?look=braun`) — anodized aluminum housing, recessed dark digital LCD query and SQL readouts, tactile 3D push-buttons, and an International Orange `RUN` key.
 - **Broadsheet** (`?look=broadsheet`) — warm newsprint (or mahogany inkwell in dark mode), editorial serif masthead and headings, double masthead rules, dotted record leaders, and borderless horizontal tables.
 - **Obsidian** (`?look=obsidian`) — frameless matte shell with a floating rounded workspace island, elevated pill tabs, micro-bevel keycaps, and capsule foreign-key badges.
-- **Folio** (`?look=folio`), **Blueprint** (`?look=blueprint`) and **Console** (`?look=console`) — typeset book tables, architectural whiteprint/cyanotype drawings, and green-bar printout / phosphor CRT output, alongside eight shared Mistri themes with twelve selectable palettes each.
+- **Blueprint** (`?look=blueprint`) and **Console** (`?look=console`) — architectural whiteprint/cyanotype drawings and green-bar printout / phosphor CRT output.
+- **Gallery** (`?look=gallery`), **Lumen** (`?look=lumen`), and seven more shared Mistri themes (nine in total, with twelve selectable palettes each) — including **Gallery**'s warm linen paper, book-serif display type, lifted white tiles and pill controls, and **Lumen**'s cool-slate card restyle with WCAG 5:1 links.
 
 <div class="tw-look-grid">
   <figure>

@@ -1,0 +1,21 @@
+@layer look {
+  .conn-pool-details {
+    margin-block-start: var(--space-1);
+    padding: var(--space-2h) var(--space-3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--ground);
+  }
+
+  .conn-pool-details > summary {
+    cursor: pointer;
+    font: 500 var(--text-sm) var(--face-ui, var(--sans));
+    color: var(--ink-muted);
+    user-select: none;
+  }
+
+  .conn-pool-details[open] > summary {
+    margin-block-end: var(--space-2h);
+    color: var(--ink);
+  }
+}

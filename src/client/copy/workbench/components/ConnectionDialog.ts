@@ -48,4 +48,9 @@ export const say = defineMessages({
   environmentPresets: 'Quick environments',
   optionalEnvironment: 'e.g. local, staging, prod',
   saving: 'Saving…',
+  poolTimeouts: 'Pool & timeout settings (Postgres)',
+  connectTimeoutMs: 'Connect timeout (ms)',
+  connectTimeoutHint: 'Default 10,000 ms (1,000–120,000).',
+  queryTimeoutMs: 'Silent-query timeout (ms)',
+  queryTimeoutHint: 'Default 60,000 ms (1,000–3,600,000); closes dead sockets.',
 });

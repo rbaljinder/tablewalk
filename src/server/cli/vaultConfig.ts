@@ -2165,12 +2165,53 @@ export async function applyStartupTargetSelection(
  * against `registry`, format to stdout (`json` | `ndjson` | `tsv` | `md`), and
  * close all connections.
  */
+function coerceCliParamValue(raw: string): string | number | boolean | null {
+  const trimmed = raw.trim();
+  if (/^null$/i.test(trimmed)) return null;
+  if (/^true$/i.test(trimmed)) return true;
+  if (/^false$/i.test(trimmed)) return false;
+  if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(trimmed)) {
+    const n = Number(trimmed);
+    if (Number.isFinite(n) && Math.abs(n) <= Number.MAX_SAFE_INTEGER) return n;
+  }
+  return raw;
+}
+
+function parseCliParams(entries: readonly string[] | undefined): Record<string, string | number | boolean | null> {
+  const out: Record<string, string | number | boolean | null> = {};
+  if (!entries?.length) return out;
+  for (const entry of entries) {
+    const eq = entry.indexOf('=');
+    if (eq <= 0) {
+      throw new Error(`--param expects key=value (got "${entry}").`);
+    }
+    const key = entry.slice(0, eq).trim().replace(/^:/, '');
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      throw new Error(`--param has invalid parameter name "${key}".`);
+    }
+    out[key] = coerceCliParamValue(entry.slice(eq + 1));
+  }
+  return out;
+}
+
+function inferExportOptions(outPath: string): { format: 'csv' | 'ndjson' | 'json'; compress?: 'gzip' } {
+  const lower = outPath.toLowerCase();
+  const compress = lower.endsWith('.gz') ? ('gzip' as const) : undefined;
+  const stem = compress ? lower.slice(0, -3) : lower;
+  if (stem.endsWith('.ndjson') || stem.endsWith('.jsonl')) return { format: 'ndjson', ...(compress ? { compress } : {}) };
+  if (stem.endsWith('.json')) return { format: 'json', ...(compress ? { compress } : {}) };
+  return { format: 'csv', ...(compress ? { compress } : {}) };
+}
+
 export async function runCliOneShot(
   registry: Registry,
   shelf: { views?: ViewDef[]; queries: SavedQuery[]; pages: PageDef[] },
   options: {
     query?: string;
     call?: string;
+    sqlFile?: string;
+    params?: string[];
+    out?: string;
     args?: string;
     connection?: string;
     env?: string;
@@ -2210,21 +2251,73 @@ export async function runCliOneShot(
       toolArgs = { ...(parsed as Record<string, unknown>) };
     }
 
-    if (options.query !== undefined) {
+    if (options.params?.length) {
+      let cliParams: Record<string, string | number | boolean | null>;
+      try {
+        cliParams = parseCliParams(options.params);
+      } catch (err) {
+        console.error(`tablewalk: ${(err as Error).message}`);
+        process.exitCode = 2;
+        return;
+      }
+      const prevParams =
+        toolArgs.params && typeof toolArgs.params === 'object' && !Array.isArray(toolArgs.params)
+          ? (toolArgs.params as Record<string, unknown>)
+          : {};
+      toolArgs.params = { ...prevParams, ...cliParams };
+    }
+
+    const outPath = options.out?.trim();
+    const outHints = outPath ? inferExportOptions(outPath) : undefined;
+
+    if (options.sqlFile !== undefined) {
+      const spec = options.sqlFile.trim();
+      if (!spec) {
+        console.error('tablewalk: --sql-file requires a file path or saved workspace query name.');
+        process.exitCode = 2;
+        return;
+      }
+      const { existsSync, readFileSync, statSync } = await import('node:fs');
+      const { resolve } = await import('node:path');
+      const diskPath = resolve(spec);
+      const isDiskFile = existsSync(diskPath) && statSync(diskPath).isFile();
+      if (outPath) {
+        toolName = 'export';
+        if (isDiskFile) toolArgs.sql = readFileSync(diskPath, 'utf8');
+        else toolArgs.saved = spec;
+        if (toolArgs.format === undefined) toolArgs.format = outHints!.format;
+        if (toolArgs.compress === undefined && outHints!.compress) toolArgs.compress = outHints!.compress;
+      } else {
+        toolName = 'sql';
+        if (isDiskFile) toolArgs.statement = readFileSync(diskPath, 'utf8');
+        else toolArgs.saved = spec;
+      }
+    } else if (options.query !== undefined) {
       const q = options.query.trim();
       if (!q) {
         console.error('tablewalk: --query requires a non-empty query string.');
         process.exitCode = 2;
         return;
       }
-      toolName = looksLikeBreakdown(q) ? 'breakdown' : 'query';
-      toolArgs.q = q;
+      if (outPath) {
+        toolName = 'export';
+        toolArgs.query = q;
+        if (toolArgs.format === undefined) toolArgs.format = outHints!.format;
+        if (toolArgs.compress === undefined && outHints!.compress) toolArgs.compress = outHints!.compress;
+      } else {
+        toolName = looksLikeBreakdown(q) ? 'breakdown' : 'query';
+        toolArgs.q = q;
+      }
     } else {
       toolName = (options.call ?? '').trim();
       if (!toolName) {
         console.error('tablewalk: --call requires a tool name (for example schema_summary, tables, query, record).');
         process.exitCode = 2;
         return;
+      }
+      if (outPath && toolName === 'export') {
+        if (toolArgs.format === undefined) toolArgs.format = outHints!.format;
+        if (toolArgs.compress === undefined && outHints!.compress) toolArgs.compress = outHints!.compress;
       }
     }
 
@@ -2241,7 +2334,20 @@ export async function runCliOneShot(
       process.exitCode = 1;
       return;
     }
-    const payload = answer.structuredContent ?? { text: answer.content[0]?.text ?? '' };
+    const payload = { ...(answer.structuredContent ?? { text: answer.content[0]?.text ?? '' }) };
+    if (outPath && toolName === 'export' && typeof payload.path === 'string') {
+      const { copyFileSync, mkdirSync, unlinkSync } = await import('node:fs');
+      const { dirname, resolve } = await import('node:path');
+      const dest = resolve(outPath);
+      mkdirSync(dirname(dest), { recursive: true });
+      copyFileSync(payload.path, dest);
+      try {
+        unlinkSync(payload.path);
+      } catch {
+        /* Best-effort cleanup of temp export file. */
+      }
+      payload.path = dest;
+    }
     process.stdout.write(formatCliOutput(toolName, payload, outFormat));
   } finally {
     await registry.closeAll().catch(() => {});

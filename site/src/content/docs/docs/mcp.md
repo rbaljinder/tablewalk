@@ -68,8 +68,8 @@ Twenty-eight tools: twenty-two read-only, and six writes that are listed only wh
 | `query` | Rows from the [query language](/docs/query/) or a named `view` in `tablewalk.json`, a total, and the SQL it compiled to. | `{"q": "invoice total > 500 sort total desc", "limit": 10}` |
 | `breakdown` | Counts and sums grouped by something. | `{"q": "invoice count by status"}` |
 | `record` | One row, its human name, and everything that points at it. | `{"table": "customer", "key": {"id": 1}}` |
-| `sql` | A read-only `SELECT` or a named `saved` query from `tablewalk.json`. | `{"statement": "select status, count(*) from invoice group by 1", "timeout_ms": 2000}` |
-| `export` | A `query`, `view`, `sql` or `saved` result written to a file (csv, ndjson or json; optionally gzipped and `redact: true`). | `{"query": "invoice status = open", "format": "ndjson", "redact": true}` |
+| `sql` | A read-only `SELECT` or a named `saved` query (from `tablewalk.json` or a `.sql` file under `--sql-dir` / `"sqlDir"`), with optional `params` for `:param` / `{{param}}` placeholders. | `{"saved": "reports/monthly_orders.sql", "params": {"status": "paid", "min_total": 100}}` |
+| `export` | A `query`, `view`, `sql` or `saved` query (including workspace `.sql` files with `params`) written to a file (csv, ndjson or json; optionally gzipped and `redact: true`). | `{"saved": "reports/monthly_orders.sql", "params": {"status": "paid"}, "format": "csv"}` |
 | `explain` | The planner's account of a statement, without running it. | `{"statement": "select * from invoice where customer_id = 1"}` |
 | `profile` | What a table's columns hold: null share, distinct count, range, common values. | `{"table": "invoice"}` |
 | `diff` | How two connections' shapes differ: tables, columns, types, keys, delete rules. | `{"from": "staging", "to": "production"}` |
@@ -101,13 +101,21 @@ Listed only when a connection is `"writable": true`, and refused on any other co
 `export` is for more rows than fit in a reply. It streams the result to a file and answers with the file's absolute path, row and byte counts, the columns, five sample rows, and a line on how to load it, so the rows never pass through the agent's context. The agent then reads the file with its own tools: DuckDB, Python, `head`.
 
 - Files land in `tablewalk-exports` under the system temp directory, named `<connection>-<name or table>-<yyyyMMdd-HHmmss>.<ext>` (UTC). An existing file is never overwritten, and a caller cannot choose the directory.
-- Give exactly one of `query` (the [query language](/docs/query/)), `view` (a named view from `tablewalk.json`), `sql` (a read-only `SELECT`), or `saved` (a named query from `tablewalk.json`). `format` is `csv` (default), `ndjson` or `json`; `limit` caps the rows; `name` sets the file stem; `compress: "gzip"` writes `.csv.gz` or `.ndjson.gz`; `redact: true` deterministically masks emails, phones, names, addresses and secrets in both the file and the sample.
-- A `query` export pages through the whole result by key in batches of 5,000 rows on SQLite and 25,000 rows on PostgreSQL (prefetching the next batch while writing), with no ceiling beyond `limit`. A query that cannot page by key (a view over references, a union) reads by position and stops at 100,000 rows, and says so. A `sql` export is one read capped at 100,000 rows; the answer says when it stopped short.
+- Give exactly one of `query` (the [query language](/docs/query/)), `view` (a named view from `tablewalk.json`), `sql` (a read-only `SELECT`), or `saved` (a named query from `tablewalk.json` or a relative `.sql` path inside the connection's `--sql-dir` / `"sqlDir"` workspace). Pass `params` (a JSON object of strings, numbers, booleans or `null`) to bind `:param` or `{{param}}` placeholders; missing placeholders are refused with `invalid_argument` naming the missing keys. `format` is `csv` (default), `ndjson` or `json`; `limit` caps the rows; `name` sets the file stem; `compress: "gzip"` writes `.csv.gz` or `.ndjson.gz`; `redact: true` deterministically masks emails, phones, names, addresses and secrets in both the file and the sample.
+- A `query` export pages through the whole result by key in batches of 5,000 rows on SQLite and 25,000 rows on PostgreSQL (prefetching the next batch while writing), with no ceiling beyond `limit`. A query that cannot page by key (a view over references, a union) reads by position and stops at 100,000 rows, and says so. A `sql` or `saved` export is one read capped at 100,000 rows; the answer says when it stopped short.
 - Ids past 2^53 stay strings, dates are ISO, and an empty CSV field is `null`. At most two exports run at once.
 
 ```json
-{ "query": "invoice total > 500 sort total desc", "format": "csv", "name": "big-invoices" }
+{
+  "saved": "reports/monthly_orders.sql",
+  "params": { "status": "paid", "min_total": 100 },
+  "format": "csv",
+  "compress": "gzip",
+  "name": "paid-orders"
+}
 ```
+
+Outside of MCP, the same parameterized `.sql` export works directly from the [CLI](/docs/cli/#running-and-exporting-sql-files) with `--sql-file`, `--param`, and `--out`.
 
 ## Fewer tools for one job
 
@@ -129,7 +137,7 @@ Four prompts: `orient` (schema brief + `perf` and `anomalies` pointers), `pre-mi
 - `tablewalk://{connection}/schema`, the schema brief
 - `tablewalk://{connection}/table/{table}`, one table
 - `tablewalk://{connection}/views`, the named multi-table views in your config file
-- `tablewalk://{connection}/queries`, the named SQL in your config file
+- `tablewalk://{connection}/queries`, named SQL from your config file and `.sql` files in the connection's workspace (`sqlDir` / `--sql-dir`), including each file's required `:param` names
 - `tablewalk://{connection}/pages`, page definitions from the config file and pages saved from the browser
 - `tablewalk://{connection}/page/{page}`, one record page in full (root table, sections, fields, related lists and filters)
 

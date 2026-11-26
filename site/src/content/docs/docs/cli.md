@@ -47,6 +47,7 @@ A path typed on the command line is relative to the current directory; a path wr
 | `--focus <tables>` | Scope the catalog and queries to these tables and their foreign-key neighborhood (or set `TABLEWALK_FOCUS`). |
 | `--focus-hops <n>` | With `--focus`: foreign-key hops to include, `0` to `5` (default `1`, or set `TABLEWALK_FOCUS_HOPS`). |
 | `--audit-log <path\|stderr>` | Append zero-PII JSONL audit receipts for every tool call (or set `TABLEWALK_AUDIT_LOG`). |
+| `--sql-dir <dir>` | Attach a local folder of `.sql` files as the default SQL workspace for connections (or `"sqlDir"` in `tablewalk.json`, or set `TABLEWALK_SQL_DIR`). |
 | `--demo` | Build a throwaway sample database and open it. Nothing of yours is touched. |
 | `--openapi <spec.json\|url>` | Serve the REST API a spec describes, read-only, drafted in memory. |
 | `--api-url <url>` | With `--openapi`: the API's base URL, when the spec does not give a usable one. |
@@ -94,10 +95,35 @@ See [Deploying](/docs/deploying/#behind-a-proxy) for when you need these.
 | `--output-schema` | Advertise each tool's output shape. Off by default. |
 | `--query <q>` | Run one query or breakdown in the query language, print the result, close all connections, and exit. |
 | `--call <tool>` | Run one MCP tool by name, print the result, close all connections, and exit. |
-| `--args <json>` | With `--call` or `--query`: JSON object of tool arguments. |
+| `--args <json>` | With `--call`, `--query` or `--sql-file`: JSON object of tool arguments. |
+| `--sql-file <path>` | Run or export a `.sql` file (a path on disk or a saved workspace query under `--sql-dir` / `"sqlDir"`), close all connections, and exit. |
+| `--param <key=value>` | With `--sql-file` or `--call`: bind a named `:param` or `{{param}}` placeholder; repeatable. |
+| `--out <path>` | With `--sql-file`, `--query` or `--call export`: write exported data directly to this file (`.csv`, `.ndjson`, `.json`, or `.gz`). |
 | `--batch [path\|-]` | Run newline-delimited queries, breakdowns or JSON `{"tool","args"}` calls over one session, print NDJSON, close all connections, and exit. |
 | `--all-envs` | With `--query`, `--call` or `--batch`: run a read-only call across every environment of the target database in parallel. |
 | `--format <fmt>` | With `--query`, `--call`, `--batch`, `--check` or `--verify-ddl`: output format (`json`, `ndjson`, `tsv` or `md`). |
+
+### Running and exporting `.sql` files
+
+Use `--sql-file`, repeatable `--param key=value`, and `--out` to run or export parameterized `.sql` files directly from scripts, CI or the shell without starting a browser or MCP client:
+
+```sh
+# Standalone .sql file on disk → CSV (typed coercion for numbers, booleans and null)
+npx tablewalk ./app.db --sql-file ./reports/monthly_orders.sql \
+  --param status=paid --param min_total=100 \
+  --out ./exports/orders.csv
+
+# Workspace .sql file under --sql-dir (or "sqlDir") → gzipped NDJSON with PII masking
+npx tablewalk ./app.db --sql-dir ./queries --sql-file reports/customers.sql \
+  --param active=true --redact \
+  --out ./exports/customers.ndjson.gz
+
+# Stream directly to stdout when --out is omitted
+npx tablewalk ./app.db --sql-file ./reports/monthly_orders.sql \
+  --param status=paid --format tsv
+```
+
+`--out` infers the export format (`.csv`, `.ndjson` / `.jsonl`, `.json`) and gzip compression (`.gz`) from the destination filename and creates missing parent directories automatically.
 
 ## Checking connections and schemas
 
@@ -193,7 +219,7 @@ Exit codes: 1 could not run, 2 refused (read-only, or an HTTP API).
 | `TABLEWALK_CONFIG_JSON` | Inline JSON config in memory (for vault wrappers), when `--config` is not passed. |
 | `TABLEWALK_BLOCKLIST`, `TABLEWALK_BLOCKED_TABLES`, `TABLEWALK_BLOCKED_FIELDS` | Blocklist JSON or comma-separated table and `table.field` wildcards, without a config file. |
 | `TABLEWALK_REDACT`, `TABLEWALK_REDACT_COLUMNS`, `TABLEWALK_MAX_ROWS`, `TABLEWALK_LEASE` | Deterministic PII redaction, extra redacted columns, session row-egress ceiling, and connection lease duration. |
-| `TABLEWALK_TIMEOUT_MS`, `TABLEWALK_FOCUS`, `TABLEWALK_FOCUS_HOPS`, `TABLEWALK_CREDENTIAL_COMMAND`, `TABLEWALK_AUDIT_LOG` | Per-call statement deadline, foreign-key neighborhood table focus, dynamic credential refresh command, and zero-PII JSONL audit log path or `stderr`. |
+| `TABLEWALK_TIMEOUT_MS`, `TABLEWALK_FOCUS`, `TABLEWALK_FOCUS_HOPS`, `TABLEWALK_CREDENTIAL_COMMAND`, `TABLEWALK_AUDIT_LOG`, `TABLEWALK_SQL_DIR` | Per-call statement deadline, foreign-key neighborhood table focus, dynamic credential refresh command, zero-PII JSONL audit log path or `stderr`, and default `.sql` workspace folder. |
 | `TABLEWALK_MCP_URL` | With `--mcp`: bridge stdio MCP calls to a running loopback server (`http://localhost:4111/mcp`). |
 | `PORT` | The port, when no `--port` is given, as Cloud Run and most platforms set it. |
 | `TABLEWALK_CONFIG`, `TABLEWALK_HOST`, `TABLEWALK_PORT` | In the [container image](/docs/deploying/) only: the config file, interface and port. |

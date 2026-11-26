@@ -1,122 +1,269 @@
-/* The database browser's own look: Instrument's structure in the Graphite and cobalt palette.
+/* The database browser's own look: Folio — "The data typeset: a printed table on quiet paper, one face, one green ink."
 
-   "A precision instrument: a hairline measuring grid, every figure on a monospace column", in cool graphite greys
-   with one cobalt for what you can follow (a reference, the current table, focus) and for Run. (Fog and moss, the
-   default once, is now a palette: `?look=instrument&palette=fog`.) Words are
-   set in Inter and everything counted, compared or keyed in IBM Plex Mono, so figures line up to the digit and a key
-   reads character by character; both faces are the kit's, self-hosted (faces.css) and fetched only when the page draws
-   them. Absence is NULL in small capitals, which a stored string "null" can never be mistaken for. Dark is the same
-   instrument by night.
+   A result is set the way a well-made book sets a table: no vertical rules and no boxes, a rule in the ink above the
+   heads and one closing the last row (the design system's own "a table is its rows under a rule in the ink", carried
+   to both ends), hairlines between rows so a wide row still reads across. One face does all the work, Inter, with
+   tabular figures so numbers align without a monospace; the code face is kept for what is code (the query, SQL, a
+   table's DDL). Hierarchy is ink and weight, not colour or containers: names at 600 in the ink, labels in a quieter
+   ink, types and counts quieter still. A record reads as a typeset sheet of particulars, each label set flush right
+   against its value. The paper is a barely warm white and the one colour is tablewalk's green, deepened to an ink and
+   spent only on what you can follow: a reference, focus, a selected tab's rule, and SQL keywords. The filled action,
+   Run, is printed in the ink itself. Dark is the same page under a lamp: warm charcoal, never blue.
 
    Why it is a sheet here and not the kit's: the kit owns the tokens every product shares, and has no default host look;
    "default" always means those. This is the browser's own look over them, written as rules for the root with no host
-   look worn and no kit look picked (`:root:not([data-host-look], [data-visual-theme])`: a kit look such as Graphite
-   draws its menu in its own nav colours, and this look's light sidebar under them hid the menu's light ink), so it
-   is in the page's first stylesheet and paints with the first load,
-   with no extra request. A host look (hostLooks.js) sets `data-host-look` and so leaves this look's colour and the
-   kit's tokens as they are: Blueprint, Console and Folio sit on the kit's own tokens, untouched by it. The structure
-   below is shared on purpose with Folio (refined-base.css) and Instrument's palettes (instrument-base.css), whose rules
-   are keyed to include the native look, so a palette's sheet is colour alone.
-
-   Bends, each on purpose:
-   - The column heads stand on a tinted band: with hairlines between columns, a band is what tells the head from the
-     first row at a glance without a heavier rule.
-   - The schema diagram sits on a dot graticule: the one place the instrument shows its scale; it carries no meaning a
-     reader needs.
-   - A second face, IBM Plex Mono, for figures. */
+   look worn and no kit look picked (`:root:not([data-host-look], [data-visual-theme])`), so it is in the page's first
+   stylesheet and paints with the first load, with no extra request. Instrument (Graphite, Stone, Fog, Slate, Ink),
+   Obsidian, Braun, Broadsheet, Blueprint and Console remain selectable host looks (hostLooks.js), fetched only when worn. */
 @import './refined-base.css';
-@import './instrument-base.css';
 
 @layer theme {
   /* Colour, light and dark each, every pair checked: text, NULL and type ink, key and reference ink on every ground
      they sit on at 4.5:1; a field's edge and the focus ring at 3:1. `html:root` outranks the kit's own `:root` tokens,
      whichever sheet came first. */
-  /* Graphite and cobalt: cool graphite greys, one cobalt for what you can follow. */
   html:root:not([data-host-look], [data-visual-theme]) {
-    --ground: #f6f7f9;
-    --surface: #ffffff;
-    --raised: #eef0f3;
-    --line: #e4e7eb;
-    --line-strong: #cfd4db;
-    --line-control: #818996;
-    --ink: #15171c;
-    --ink-muted: #565d6a;
-    --ink-subtle: #5e6574;
-    --accent: #3d5bd9;
-    --accent-ink: #3450c9;
-    --on-accent: #ffffff;
-    --accent-soft: #3d5bd914;
-    --link: #3450c9;
-    --focus: #5b77f0;
-    --status-good: #18774a;
-    --status-warning: #a3560b;
-    --status-critical: #c0362c;
-    --status-info: #6a4fc4;
-    --row-hover: #f4f6f9;
-    --pop-line: #d9dde3;
-    --head-band: #f6f7f9;
-    --graticule: #15171c1f;
+    --ground: #f8f7f4;
+    --surface: #fdfcfa;
+    --raised: #f1efea;
+    --line: #e9e6df;
+    --line-strong: #d3cfc5;
+    --line-control: #8e887d;
+    --ink: #1c1a17;
+    --ink-muted: #5d5951;
+    --ink-subtle: #6e695f;
+    /* The fill is the ink: Run, Apply, Done print in it. The green is the accent's ink, the link and the ring. */
+    --accent: #1c1a17;
+    --accent-ink: #1a5d4b;
+    --on-accent: #fdfcfa;
+    --accent-soft: #1e6a5512;
+    --link: #1a5d4b;
+    --focus: #2b8a6e;
+    --status-good: #2a7a4a;
+    --status-warning: #98570c;
+    --status-critical: #ad3a2d;
+    --status-info: #5b4ea6;
+    --figures: var(--face-ui);
+    --row-hover: #f5f3ef;
+    --pop-line: #dedad2;
+    --rule: var(--ink);
+    --shadow-pop: 0 1px 2px rgb(40 30 20 / 0.05), 0 10px 28px rgb(40 30 20 / 0.09);
+    --shadow-panel: 0 1px 2px rgb(40 30 20 / 0.05), 0 14px 36px rgb(40 30 20 / 0.11);
+    --shadow-modal: 0 2px 6px rgb(40 30 20 / 0.07), 0 24px 64px rgb(40 30 20 / 0.16);
+    --scrim: rgb(28 26 23 / 0.28);
   }
   @media (prefers-color-scheme: dark) {
     html:root:not([data-host-look], [data-visual-theme]):not([data-theme='light']) {
-      --ground: #0f1114;
-      --surface: #14161a;
-      --raised: #1c1f24;
-      --line: #23272d;
-      --line-strong: #343941;
-      --line-control: #626a76;
-      --ink: #e7e9ec;
-      --ink-muted: #a2a9b4;
-      --ink-subtle: #8e96a2;
-      --accent: #7b92ff;
-      --accent-ink: #9aabff;
-      --on-accent: #0f1114;
-      --accent-soft: #7b92ff1f;
-      --link: #9aabff;
-      --focus: #7b92ff;
-      --status-good: #5cc58f;
-      --status-warning: #e5a45a;
-      --status-critical: #f0857a;
-      --status-info: #b9a4ff;
-      --row-hover: #191c21;
-      --pop-line: #2e3239;
-      --head-band: #171a1e;
-      --graticule: #ffffff1a;
+      --ground: #141311;
+      --surface: #191816;
+      --raised: #23211e;
+      --line: #2b2926;
+      --line-strong: #403d38;
+      --line-control: #716b62;
+      --ink: #eceae5;
+      --ink-muted: #aca79d;
+      --ink-subtle: #9c978d;
+      --accent: #eceae5;
+      --accent-ink: #80d0b4;
+      --on-accent: #141311;
+      --accent-soft: #6cc3a51c;
+      --link: #80d0b4;
+      --focus: #6cc3a5;
+      --status-good: #6cc58e;
+      --status-warning: #e0a861;
+      --status-critical: #ee8a7c;
+      --status-info: #b8a8f0;
+      --row-hover: #1f1d1b;
+      --pop-line: #36332f;
+      --rule: #8f8a80;
+      --shadow-pop: 0 0 0 1px rgb(0 0 0 / 0.3), 0 10px 28px rgb(0 0 0 / 0.5);
+      --shadow-panel: 0 0 0 1px rgb(0 0 0 / 0.3), 0 14px 36px rgb(0 0 0 / 0.55);
+      --shadow-modal: 0 0 0 1px rgb(0 0 0 / 0.35), 0 28px 72px rgb(0 0 0 / 0.6);
+      --scrim: rgb(0 0 0 / 0.55);
     }
   }
   html:root:not([data-host-look], [data-visual-theme])[data-theme='dark'] {
-    --ground: #0f1114;
-    --surface: #14161a;
-    --raised: #1c1f24;
-    --line: #23272d;
-    --line-strong: #343941;
-    --line-control: #626a76;
-    --ink: #e7e9ec;
-    --ink-muted: #a2a9b4;
-    --ink-subtle: #8e96a2;
-    --accent: #7b92ff;
-    --accent-ink: #9aabff;
-    --on-accent: #0f1114;
-    --accent-soft: #7b92ff1f;
-    --link: #9aabff;
-    --focus: #7b92ff;
-    --status-good: #5cc58f;
-    --status-warning: #e5a45a;
-    --status-critical: #f0857a;
-    --status-info: #b9a4ff;
-    --row-hover: #191c21;
-    --pop-line: #2e3239;
-    --head-band: #171a1e;
-    --graticule: #ffffff1a;
+    --ground: #141311;
+    --surface: #191816;
+    --raised: #23211e;
+    --line: #2b2926;
+    --line-strong: #403d38;
+    --line-control: #716b62;
+    --ink: #eceae5;
+    --ink-muted: #aca79d;
+    --ink-subtle: #9c978d;
+    --accent: #eceae5;
+    --accent-ink: #80d0b4;
+    --on-accent: #141311;
+    --accent-soft: #6cc3a51c;
+    --link: #80d0b4;
+    --focus: #6cc3a5;
+    --status-good: #6cc58e;
+    --status-warning: #e0a861;
+    --status-critical: #ee8a7c;
+    --status-info: #b8a8f0;
+    --row-hover: #1f1d1b;
+    --pop-line: #36332f;
+    --rule: #8f8a80;
+    --shadow-pop: 0 0 0 1px rgb(0 0 0 / 0.3), 0 10px 28px rgb(0 0 0 / 0.5);
+    --shadow-panel: 0 0 0 1px rgb(0 0 0 / 0.3), 0 14px 36px rgb(0 0 0 / 0.55);
+    --shadow-modal: 0 0 0 1px rgb(0 0 0 / 0.35), 0 28px 72px rgb(0 0 0 / 0.6);
+    --scrim: rgb(0 0 0 / 0.55);
+  }
+
+  html:root:not([data-host-look], [data-visual-theme]) {
+    /* ---------- one sheet of paper ---------- */
+
+    & .topbar,
+    & .sidebar,
+    & .crumbs-host {
+      background: var(--ground);
+    }
+    & .content {
+      background: var(--surface);
+    }
+    & #query {
+      background: var(--surface);
+    }
+    & #table-list button[aria-current='true'] {
+      background: var(--raised);
+      color: var(--ink);
+      font-weight: 600;
+    }
+    & #table-list button[aria-current='true'] .rows {
+      color: var(--ink-muted);
+    }
+    & .tab[aria-selected='true'] {
+      border-bottom-color: var(--accent-ink);
+      font-weight: 600;
+    }
+    & .result-head .result-title {
+      font-size: var(--text-xl);
+      letter-spacing: -0.016em;
+    }
+
+    /* ---------- the table, typeset ---------- */
+
+    & .table-wrap > table {
+      border-top: 1.5px solid var(--rule);
+    }
+    & th {
+      background: var(--surface);
+      border-bottom: 1px solid var(--rule);
+      color: var(--ink);
+      font-weight: 600;
+    }
+    & th.sorted {
+      border-bottom-color: var(--rule);
+    }
+    & td {
+      border-bottom: 1px solid var(--line);
+    }
+    & tbody tr:last-child > td {
+      border-bottom: 1.5px solid var(--rule);
+    }
+    & .detail-row > td {
+      border-bottom: 1px solid var(--line);
+    }
+    & td.reflink {
+      color: var(--link);
+    }
+    & td.null,
+    & .field dd.null {
+      font-style: italic;
+    }
+    & th .pk {
+      color: var(--ink-subtle);
+    }
+    & th :is(.fk, .th-arrow) {
+      color: var(--ink-subtle);
+    }
+
+    /* ---------- a record: a sheet of particulars ---------- */
+
+    & .field dt {
+      text-align: right;
+      color: var(--ink-muted);
+    }
+    & .field dd {
+      color: var(--ink);
+    }
+    & .panel > .record-heading {
+      font-size: calc(17px * var(--type-k)); /* off-scale: the sheet's title, a step between --text-lg and --text-xl */
+      letter-spacing: -0.014em;
+    }
+    & .ref-jump {
+      border-color: transparent;
+      background: none;
+      padding-inline: 0;
+    }
+    & .ref-jump-value {
+      color: var(--link);
+      text-decoration: underline;
+      text-decoration-color: color-mix(in srgb, var(--link) 35%, transparent);
+      text-underline-offset: 3px;
+    }
+    & .related-item[aria-selected='true'] {
+      background: var(--raised);
+    }
+    & .related-item[aria-selected='true'] .related-count {
+      color: var(--ink);
+    }
+    & .related-item[aria-selected='true'] .related-table {
+      font-weight: 600;
+    }
+    & .record-children .table-wrap > table {
+      border-top-width: 1px;
+    }
+
+    /* ---------- the landing and the schema: plain paper ---------- */
+
+    & .landing-chip {
+      border-color: transparent;
+      background: none;
+      padding-inline: 0;
+      margin-inline-end: var(--space-4);
+    }
+    & .diagram-viewport {
+      background-color: var(--surface);
+    }
+    & .node > rect {
+      stroke: var(--line-strong);
+    }
+    & .node-head text {
+      fill: var(--ink);
+    }
+    & .node-focus > rect {
+      stroke: var(--ink);
+    }
+    & .edge {
+      stroke: var(--line-strong);
+    }
+
+    @media (hover: hover) {
+      & td.reflink:hover {
+        text-decoration: underline;
+        text-underline-offset: 3px;
+        text-decoration-thickness: 1px;
+      }
+      & tbody tr.clickable:hover {
+        background: var(--row-hover);
+      }
+      & .ref-jump:hover {
+        background: none;
+        border-color: transparent;
+      }
+      & .ref-jump:hover .ref-jump-value {
+        text-decoration-color: var(--link);
+      }
+      & .landing-chip:hover {
+        background: none;
+        border-color: transparent;
+      }
+      & .landing-chip:hover .landing-chip-name {
+        color: var(--link);
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+    }
   }
 }
-
-/* The tour's veil, outside the layer on purpose: the kit sets it unlayered on `:root`, which outranks any layered rule.
-   The kit's veil is the ground at 62% over everything outside the spotlight, which washed the table list and the
-   wordmark to under 2:1 while the tour asked the reader to look at them. A dark scrim dims instead of fading, so what
-   is under it still reads at 4.5:1 or more. */
-html:root:is(:not([data-host-look], [data-visual-theme]), [data-host-look^='instrument-']) { --tour-veil: rgb(16 20 28 / 0.16); }
-@media (prefers-color-scheme: dark) {
-  html:root:is(:not([data-host-look], [data-visual-theme]), [data-host-look^='instrument-']):not([data-theme='light']) { --tour-veil: rgb(0 0 0 / 0.15); }
-}
-html:root:is(:not([data-host-look], [data-visual-theme]), [data-host-look^='instrument-'])[data-theme='dark'] { --tour-veil: rgb(0 0 0 / 0.15); }

@@ -6,6 +6,7 @@
  * tablewalk's own room.
  */
 import { useEffect, useRef, useState } from 'react';
+import { Button } from '@mistriwork/ui/Button.js';
 import { api, state, toast, trapFocus } from '@mistriwork/kit/client/core.js';
 import type { PublicConnection } from '@mistriwork/engine/shared/connection.js';
 import { formatNumber } from '@mistriwork/kit/client/locale.js';
@@ -24,6 +25,13 @@ export type Connection = Pick<PublicConnection, 'id' | 'name'> &
     focused?: boolean;
     maxRows?: number;
     timeoutMs?: number;
+    pool?: {
+      read?: number;
+      idleSeconds?: number;
+      minIdle?: number;
+      connectTimeoutMs?: number;
+      queryTimeoutMs?: number;
+    };
     database?: string;
     env?: string;
     tier?: EnvironmentTier;
@@ -177,15 +185,13 @@ export function ConnectionManager({
           <p className="conn-lede">{say('changesApplyToThisSession')}</p>
         </div>
         <div className="conn-head-actions">
-          <button type="button" className="ghost" onClick={() => onAdd(refresh)}>
+          <Button variant="ghost" onClick={() => onAdd(refresh)}>
             {say('add')}
-          </button>
-          <button type="button" className="ghost" onClick={() => onSaveFile(all.length)}>
+          </Button>
+          <Button variant="ghost" onClick={() => onSaveFile(all.length)}>
             {say('saveToFile')}
-          </button>
-          <button type="button" onClick={onClose}>
-            {say('common.done')}
-          </button>
+          </Button>
+          <Button onClick={onClose}>{say('common.done')}</Button>
         </div>
       </div>
       <div className="conn-toolbar">
@@ -391,6 +397,16 @@ function Row({
         {typeof conn.timeoutMs === 'number' ? (
           <span className="conn-badge" title={say('timeoutTitle', { ms: formatNumber(conn.timeoutMs) })}>
             {say('timeoutBadge', { ms: formatNumber(conn.timeoutMs) })}
+          </span>
+        ) : null}
+        {typeof conn.pool?.connectTimeoutMs === 'number' ? (
+          <span className="conn-badge" title={say('connectTimeoutTitle', { ms: formatNumber(conn.pool.connectTimeoutMs) })}>
+            {say('connectTimeoutBadge', { ms: formatNumber(conn.pool.connectTimeoutMs) })}
+          </span>
+        ) : null}
+        {typeof conn.pool?.queryTimeoutMs === 'number' ? (
+          <span className="conn-badge" title={say('queryTimeoutTitle', { ms: formatNumber(conn.pool.queryTimeoutMs) })}>
+            {say('queryTimeoutBadge', { ms: formatNumber(conn.pool.queryTimeoutMs) })}
           </span>
         ) : null}
       </span>

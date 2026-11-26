@@ -20,6 +20,9 @@ import { writeRefusal } from '@mistriwork/engine/server/http/writeRefusal.js';
 import { send, sendResource } from '@mistriwork/engine/server/http/reply.js';
 import type { PostContext } from '@mistriwork/engine/server/http/context.js';
 import type { RecordHooks } from '@mistriwork/engine/server/http/recordWrites.js';
+import { splitSqlStatements } from '../../shared/sqlScript.js';
+
+const MAX_SCRIPT_STATEMENTS = 50;
 
 /** The record writes in the database browser: the connection's `writable` flag and the grant, said in its own words. */
 export const BROWSER_WRITES: RecordHooks = {
@@ -103,6 +106,133 @@ export async function dataWriteRoutes(post: PostContext): Promise<boolean> {
       send(res, 200, { errors: [{ message: (err as Error).message }] });
       return true;
     }
+  }
+
+  /**
+   * Run a multi-statement SQL script sequentially, stopping on the first error.
+   * Each statement still passes through `adapter.runSql` with the same read-only /
+   * writable / reserved-table / limit / cancellation rules as `/api/sql`.
+   */
+  if (path === '/api/sql/script') {
+    if (!adapter.runSql) {
+      send(res, 501, { error: `${schema.dialect} connections cannot run SQL in this build.` });
+      return true;
+    }
+    const text = String(body.text ?? '').trim();
+    if (!text) {
+      send(res, 400, { error: 'Nothing to run.' });
+      return true;
+    }
+    const dialect = schema.dialect === 'sqlite' ? 'sqlite' : 'postgres';
+    const parts = splitSqlStatements(text, dialect);
+    if (!parts.length) {
+      send(res, 400, { error: 'Nothing to run.' });
+      return true;
+    }
+    if (parts.length > MAX_SCRIPT_STATEMENTS) {
+      send(res, 400, { error: `A SQL script may contain at most ${MAX_SCRIPT_STATEMENTS} statements at once (${parts.length} found).` });
+      return true;
+    }
+    const write = body.write === true;
+    const refused = write ? writeRefusal(registry, undefined, connection, undefined) : null;
+    if (refused) {
+      send(res, 403, { error: refused, code: 'forbidden' });
+      return true;
+    }
+
+    const stop = new AbortController();
+    const left = () => {
+      if (!res.writableEnded) stop.abort();
+    };
+    res.once('close', left);
+
+    const limit = clampLimit(body.limit);
+    const statements: Array<{
+      index: number;
+      sql: string;
+      startLine: number;
+      endLine: number;
+      ok: boolean;
+      ms: number;
+      columns?: string[];
+      rows?: unknown[][];
+      truncated?: boolean;
+      bounded?: boolean;
+      affected?: number;
+      error?: string;
+    }> = [];
+    let stoppedAt: number | undefined;
+    let totalMs = 0;
+
+    try {
+      for (const stmt of parts) {
+        if (stop.signal.aborted) break;
+        const started = Date.now();
+        try {
+          const result = await withCancellation(stop.signal, () =>
+            adapter.runSql!({
+              text: stmt.text,
+              limit,
+              write,
+              refuseReserved: true,
+            }),
+          );
+          const ms = typeof result.ms === 'number' ? result.ms : Date.now() - started;
+          totalMs += ms;
+          statements.push({
+            index: stmt.index,
+            sql: stmt.text,
+            startLine: stmt.startLine,
+            endLine: stmt.endLine,
+            ok: true,
+            ms,
+            ...(result.columns ? { columns: result.columns } : {}),
+            ...(result.rows ? { rows: result.rows } : {}),
+            ...(result.truncated !== undefined ? { truncated: result.truncated } : {}),
+            ...(result.bounded !== undefined ? { bounded: result.bounded } : {}),
+            ...(result.affected !== undefined ? { affected: result.affected } : {}),
+          });
+        } catch (err) {
+          const ms = Date.now() - started;
+          totalMs += ms;
+          stoppedAt = stmt.index;
+          statements.push({
+            index: stmt.index,
+            sql: stmt.text,
+            startLine: stmt.startLine,
+            endLine: stmt.endLine,
+            ok: false,
+            ms,
+            error: (err as Error).message,
+          });
+          break;
+        }
+      }
+    } finally {
+      res.off('close', left);
+    }
+
+    const succeeded = statements.filter((s) => s.ok).length;
+    if (write && succeeded > 0) {
+      const lead = parts[0].text.replace(/\s+/g, ' ');
+      const headline = `${succeeded}/${parts.length} statements: ${lead}`;
+      recordJournalWrite(connection!, {
+        kind: 'sql',
+        ...(who ? { by: who } : {}),
+        summary: summarise('sql', [], headline.length > 80 ? `${headline.slice(0, 77)}…` : headline),
+        revertible: false,
+        reason: 'Raw SQL scripts have no general inverse. Undo what they changed with another statement.',
+        steps: [],
+      });
+    }
+
+    send(res, 200, {
+      statements,
+      totalMs,
+      totalStatements: parts.length,
+      ...(stoppedAt !== undefined ? { stoppedAt } : {}),
+    });
+    return true;
   }
 
   /**
