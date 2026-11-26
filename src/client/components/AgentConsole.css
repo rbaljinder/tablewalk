@@ -1,4 +1,10 @@
 @layer look {
+  .agent-body:has(> .agent-split) {
+    display: flex;
+    flex-direction: column;
+    min-block-size: 0;
+  }
+
   .agent-split {
     display: flex;
     flex: 1 1 auto;
