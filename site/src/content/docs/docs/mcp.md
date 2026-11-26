@@ -48,7 +48,7 @@ npx tablewalk --config <(vault get db/billing) --call breakdown --args '{"q":"in
 
 Piped JSON configs can include `"secrets"` (or `.env` text under `"dotenv"`), `"credentialCommand"` to mint short-lived tokens on open and after idle eviction, `"environments"` tier defaults (`"local"`, `"staging"`, `"prod"`), `"active": "billing@staging"`, `"only": true` to expose only the selected target, `"lazy": true` (default for piped `--mcp` configs so `initialize` and `tools/list` answer before dialing the database), `"lease": { "idleSeconds": 30, "maxSeconds": 300 }`, `"timeoutMs"`, `"focus"` / `"focusHops"`, `"redact": true` / `"redactColumns"`, `"maxRows"`, and `"blocklist": { "tables": ["audit_*"], "fields": { "*": ["*_token"], "customer": ["tax_id"] } }`.
 
-![The Agent console running the record tool on customer 1, with searchable categorized tools, Follow agent toggle, the answer and its cost](/shots/agent.webp?v=4)
+![The Agent console running the record tool on customer 1, with searchable categorized tools, Follow agent toggle, the answer and its cost](/shots/agent.webp?v=6)
 
 ## The tools
 

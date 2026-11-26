@@ -18,7 +18,7 @@ tablewalk never writes to a database unless that connection's config says `"writ
 
 In write mode a record's fields become editors. Changes stay pending ("1 unsaved change") until you **Discard** them or choose **Review & apply**. The review names the record, the old and new values, and the exact SQL with its parameters:
 
-![The "Apply this change?" dialog: an UPDATE on customer 2 that sets a new email, guarded by the old one](/shots/write.webp?v=3)
+![The "Apply this change?" dialog: an UPDATE on customer 2 that sets a new email, guarded by the old one](/shots/write.webp?v=6)
 
 The `WHERE` names the whole primary key and the value you started from, so a row someone else changed in the meantime is not overwritten. An update that would touch anything other than exactly one row is refused. A write waits up to five seconds (`--lock-timeout`) for a row another transaction holds, and is then refused so you can retry.
 

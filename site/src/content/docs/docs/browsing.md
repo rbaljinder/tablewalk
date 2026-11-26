@@ -5,13 +5,13 @@ description: Tables, records and the walk between them. Every foreign key is a l
 
 In tablewalk a foreign key is a place you can go: from an invoice to its customer, and from the customer back to all of its invoices.
 
-![A customer record: its fields, its invoices listed under them, and a Related rail counting every table that points at it](/shots/record.webp?v=5)
+![A customer record: its fields, its invoices listed under them, and a Related rail counting every table that points at it](/shots/record.webp?v=6)
 
 ## A table
 
 Click a table in the sidebar, or type its name in the query bar. The grid shows its rows, newest first where an indexed column allows it, and the sidebar scope bar above the table list filters between **All**, **Tables** and **Views** (plus **Focused** when `--focus` is active).
 
-![The invoice table queried as "invoice total >= 500 sort total desc", with the query's parts as chips and inline quick filters above the grid](/shots/query.webp?v=3)
+![The invoice table queried as "invoice total >= 500 sort total desc", with the query's parts as chips, inline quick filters, and sticky numeric aggregates below the grid](/shots/query.webp?v=6)
 
 - **Quick filters** sit in one compact inline strip above the grid (`Filters` in the tab bar folds or unfolds them to give more vertical room to rows). The parts of the current query show as chips, and **+ Save this filter** keeps it as a view.
 - **A column header** opens a menu: pin the column, sort (tinted in the look's accent ink when active), filter by equals, greater than, less than, between, is empty or is not empty, open **Profile column…** (a floating popover with null share, distinct count, min/max range, and clickable top values that add an equality filter), open **Change impact…** (null count, index status, incoming foreign keys with `ON DELETE` rules, and migration consequences before altering or dropping), or — on a single-column foreign key — pick **Show from `<table>`** (`+ <fk>.<col>`) to pull a referenced column straight into the grid. Columns masked by `"redact": true` or `redactColumns` carry a `masked` pill in the header.
@@ -21,7 +21,9 @@ Click a table in the sidebar, or type its name in the query bar. The grid shows 
 - **Export** downloads CSV or JSON for this page or for every matching row, or lets you choose the columns first. **Agent: Copy this position** copies the place you are in for a coding agent.
 - The pager sets how many rows a page holds.
 
-![Profiling the status column on invoice: null percentage, distinct values, and clickable top value chips](/shots/profile.webp?v=4)
+![Inspecting a cell in the invoice grid with the Cell Inspector popover, 1-click quick cell filters, and sticky numeric aggregates below](/shots/cell-inspector.webp?v=6)
+
+![Profiling the status column on invoice: null percentage, distinct values, and clickable top value chips](/shots/profile.webp?v=6)
 
 A table has tabs. **Rows** is the grid. **Definition** shows the table's stored DDL as the database holds it. **Diagram** draws the table with the tables it points at and the ones that point at it.
 
@@ -45,7 +47,7 @@ Each step is kept on a trail, shown above the record, and **Back** returns along
 
 **Check the shape** (`⌘K`, the `···` menu, or **Check shape & perf** / **Join paths** on the home page) opens a diagnostics dialog over the active connection:
 
-![Checking the shape of the sample database: schema findings with inline CREATE INDEX statements and Open in SQL](/shots/shapecheck.webp?v=3)
+![Checking the shape of the sample database: schema findings with inline CREATE INDEX statements and Open in SQL](/shots/shapecheck.webp?v=6)
 
 - **Schema & perf** runs the static catalog `lint`: keyless tables, unindexed foreign keys, references without an `ON DELETE` rule, and timestamps without a zone — with ready-to-run `CREATE INDEX` statements you can copy or **Open in SQL**.
 - **Index & scan health** inspects live database statistics (`pg_stat_user_tables`, `pg_stat_user_indexes`, `pg_stat_activity`, `pg_locks` and `pg_blocking_pids` on PostgreSQL; `PRAGMA index_list`, `EXPLAIN QUERY PLAN` and `sqlite_stat1` on SQLite) to flag sequential-scan hotspots, unused or duplicate indexes, table bloat, stale planner stats, blocked lock waiters and long-running or idle-in-transaction sessions.
@@ -73,6 +75,8 @@ A composite key names each part: `/demo/invoice_line/~invoice_id=1001,line_no=2`
 ## SQL workbench and `.sql` workspaces
 
 Open the SQL panel (`⌘⇧↵` or the **SQL** button) for raw read-only SQL, write-gated DDL/DML, `EXPLAIN`, and `Verify DDL`:
+
+![The SQL workbench with an attached .sql folder workspace, 5-color syntax highlighting, inline named parameter inputs, and walkable query results](/shots/sql.webp?v=6)
 
 - **Syntax highlighting and schema-aware autocomplete** — dialect-aware SQL highlighting for PostgreSQL and SQLite, plus `Ctrl+Space` / live completions for tables, columns, aliases, CTEs, foreign-key `JOIN … ON` clauses, named `:params`, and dialect functions (quiet inside strings and comments).
 - **Connection-scoped `.sql` workspaces** — open the **Files** drawer to attach a local `.sql` folder on disk (loopback, or via `--sql-dir` / `"sqlDir"` in `tablewalk.json`) or **Import folder…** straight from the browser, organize files in subfolders, edit multiple console and file tabs with `⌘S` save, and browse per-database execution **History**.

@@ -1,6 +1,6 @@
-/* Starlight owns layout and interaction. tablewalk dresses it in the browser's own look: cool graphite greys,
-   one cobalt for links, focus and the primary action, and data set in mono. Bold comes from type and contrast, not
-   from color. Unlayered, so these win over Starlight's @layer rules. */
+/* Starlight owns layout and interaction. tablewalk dresses it in the browser's own look (Folio): warm archival
+   paper and warm charcoal dark mode, quiet ink actions, and deep forest green for links and focus. Bold comes
+   from type and contrast, not from color. Unlayered, so these win over Starlight's @layer rules. */
 
 /* Inter's variable Latin subset (SIL Open Font License beside it in public/fonts), and a fallback cut to its
    measure so the swap moves almost nothing. */
@@ -32,39 +32,39 @@
   line-gap-override: 0%;
 }
 
-/* By night (Starlight's default scheme): the browser's dark ground and its light cobalt. */
+/* By night (Starlight's default scheme): Folio's warm charcoal ground and soft sage-mint link accent. */
 :root {
   --sl-font: Inter, 'Inter Fallback', system-ui, sans-serif;
   --sl-font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
 
-  --sl-color-white: #e7e9ec;
-  --sl-color-gray-1: #d2d6dc;
-  --sl-color-gray-2: #a2a9b4;
-  --sl-color-gray-3: #8e96a2;
-  --sl-color-gray-4: #626a76;
-  --sl-color-gray-5: #343941;
-  --sl-color-gray-6: #1c1f24;
-  --sl-color-gray-7: #14161a;
-  --sl-color-black: #0f1114;
+  --sl-color-white: #eceae5;
+  --sl-color-gray-1: #d8d4cc;
+  --sl-color-gray-2: #aca79d;
+  --sl-color-gray-3: #9c978d;
+  --sl-color-gray-4: #716b62;
+  --sl-color-gray-5: #403d38;
+  --sl-color-gray-6: #23211e;
+  --sl-color-gray-7: #191816;
+  --sl-color-black: #141311;
 
-  --sl-color-accent-low: #1b2240;
-  --sl-color-accent: #7b92ff;
-  --sl-color-accent-high: #c3cdff;
+  --sl-color-accent-low: #172822;
+  --sl-color-accent: #80d0b4;
+  --sl-color-accent-high: #bce7d6;
 
   --sl-color-bg-nav: var(--sl-color-black);
   --sl-color-bg-sidebar: var(--sl-color-black);
   --sl-color-bg-inline-code: var(--sl-color-gray-6);
-  --sl-color-hairline: #23272d;
-  --sl-color-hairline-light: #2a2e34;
-  --sl-color-hairline-shade: #0a0b0d;
+  --sl-color-hairline: #2b2926;
+  --sl-color-hairline-light: #36332f;
+  --sl-color-hairline-shade: #0e0d0c;
 
-  --tw-surface: #14161a;
-  --tw-line: #23272d;
-  --tw-ink-strong: #7b92ff;
-  --tw-on-strong: #0f1114;
-  --tw-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 24px 48px -24px rgb(0 0 0 / 0.7);
-  --tw-code-bg: #14161a;
-  --tw-code-bar: #1c1f24;
+  --tw-surface: #191816;
+  --tw-line: #2b2926;
+  --tw-ink-strong: #eceae5;
+  --tw-on-strong: #141311;
+  --tw-shadow: 0 1px 2px rgb(0 0 0 / 0.45), 0 24px 48px -24px rgb(0 0 0 / 0.72);
+  --tw-code-bg: #191816;
+  --tw-code-bar: #23211e;
 
   --sl-text-h1: 2rem;
   --sl-text-h2: 1.5rem;
@@ -74,36 +74,36 @@
   --sl-line-height-headings: 1.2;
   --sl-sidebar-pad-x: 1.25rem;
 }
-/* By day: the browser's cool graphite greys and its one cobalt. */
+/* By day: Folio's warm archival paper, ink-black actions, and deep forest-green links. */
 :root[data-theme='light'] {
-  --sl-color-white: #15171c;
-  --sl-color-gray-1: #262a31;
-  --sl-color-gray-2: #3c424c;
-  --sl-color-gray-3: #565d6a;
-  --sl-color-gray-4: #818996;
-  --sl-color-gray-5: #cfd4db;
-  --sl-color-gray-6: #eef0f3;
-  --sl-color-gray-7: #f6f7f9;
-  --sl-color-black: #fbfcfd;
+  --sl-color-white: #1c1a17;
+  --sl-color-gray-1: #2f2c27;
+  --sl-color-gray-2: #4a463f;
+  --sl-color-gray-3: #5d5951;
+  --sl-color-gray-4: #8e887d;
+  --sl-color-gray-5: #d3cfc5;
+  --sl-color-gray-6: #f1efea;
+  --sl-color-gray-7: #f8f7f4;
+  --sl-color-black: #fdfcfa;
 
-  --sl-color-accent-low: #e8ecfb;
-  --sl-color-accent: #3450c9;
-  --sl-color-accent-high: #22379a;
+  --sl-color-accent-low: #e6f0ec;
+  --sl-color-accent: #1a5d4b;
+  --sl-color-accent-high: #124336;
 
   --sl-color-bg-nav: var(--sl-color-black);
   --sl-color-bg-sidebar: var(--sl-color-black);
   --sl-color-bg-inline-code: var(--sl-color-gray-6);
-  --sl-color-hairline: #e4e7eb;
-  --sl-color-hairline-light: #e9ecef;
-  --sl-color-hairline-shade: #dde1e6;
+  --sl-color-hairline: #e9e6df;
+  --sl-color-hairline-light: #efece6;
+  --sl-color-hairline-shade: #dedad2;
 
-  --tw-surface: #ffffff;
-  --tw-line: #e4e7eb;
-  --tw-ink-strong: #3d5bd9;
-  --tw-on-strong: #ffffff;
-  --tw-shadow: 0 1px 2px rgb(21 23 28 / 0.05), 0 24px 48px -24px rgb(21 23 28 / 0.22);
-  --tw-code-bg: #f6f7f9;
-  --tw-code-bar: #eef0f3;
+  --tw-surface: #fdfcfa;
+  --tw-line: #e9e6df;
+  --tw-ink-strong: #1c1a17;
+  --tw-on-strong: #fdfcfa;
+  --tw-shadow: 0 1px 2px rgb(40 30 20 / 0.06), 0 24px 48px -24px rgb(40 30 20 / 0.22);
+  --tw-code-bg: #f8f7f4;
+  --tw-code-bar: #f1efea;
 }
 @media (min-width: 50em) {
   :root {
@@ -187,7 +187,7 @@ site-search button[data-open-modal] { border-radius: 8px; border-color: var(--sl
   background-color: var(--sl-color-accent-low);
 }
 
-/* ---------- Buttons: square-ish, cobalt for the one that matters ---------- */
+/* ---------- Buttons: square-ish, printed in ink for the one that matters ---------- */
 .sl-link-button { border-radius: 8px; font-weight: 600; }
 .sl-link-button.primary { background: var(--tw-ink-strong); border-color: var(--tw-ink-strong); color: var(--tw-on-strong); }
 .sl-link-button.primary:hover { color: var(--tw-on-strong); opacity: 0.9; }
